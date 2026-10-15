@@ -1,3 +1,4 @@
+﻿Attribute VB_Name = "Mod_Structure"
 Option Explicit
 
 '=====================================================================
@@ -25,7 +26,65 @@ Private NodeCount As Long
 
 Public Sub BuildFlatStructure()
     Dim ws As Worksheet
-    Set ws = ThisWorkbook.Worksheets(SRC_SHEET)
+    Dim wbSrc As Workbook          ' книга-источник схемы (из фиксированной папки)
+    Dim srcWasOpen As Boolean      ' источник уже был открыт до запуска
+    Dim path As String             ' папка 01_Схема
+    Dim fileName As String         ' единственный xlsx-файл схемы
+    Dim f As String                ' текущий файл при поиске через Dir
+    Dim resultsPath As String      ' папка 02_Подготовка схемы (результаты)
+    On Error GoTo Fail
+
+    '---------- ИЗМЕНЕНИЕ 1: источник — фиксированная папка 01_Схема ----------
+    path = Mod_Util.GetProjectRoot & "\01_Исходные данные\01_Схема"
+
+    ' проверка существования папки
+    If Dir(path, vbDirectory) = "" Then
+        Err.Clear
+        GoTo NoFolder
+    End If
+
+    ' сбор списка *.xlsx (без учёта временных файлов вида ~$...)
+    fileName = ""
+    f = Dir(path & "\*.xlsx")
+    Do While f <> ""
+        If Left(f, 2) <> "~$" Then
+            If fileName = "" Then
+                fileName = f
+            Else
+                Err.Clear
+                GoTo ManyFiles
+            End If
+        End If
+        f = Dir()
+    Loop
+
+    If fileName = "" Then
+        Err.Clear
+        GoTo NoFiles
+    End If
+
+    ' открытие файла схемы (если уже открыт — используем его)
+    srcWasOpen = False
+    On Error Resume Next
+    Set wbSrc = Workbooks(fileName)
+    On Error GoTo Fail
+    If Not wbSrc Is Nothing Then
+        srcWasOpen = True
+    Else
+        Set wbSrc = Workbooks.Open(path & "\" & fileName, ReadOnly:=True)
+    End If
+
+    ' лист-источник структуры — так же, как раньше работал с SRC_SHEET
+    On Error Resume Next
+    Set ws = wbSrc.Worksheets(SRC_SHEET)
+    On Error GoTo Fail
+    If ws Is Nothing Then
+        Err.Clear
+        GoTo OpenErr
+    End If
+
+    ' ИЗМЕНЕНИЕ 2: путь сохранения результатов
+    resultsPath = Mod_Util.GetProjectRoot & "\02_Подготовка схемы"
 
     '---------- 1. Легенда: цвет -> тип ----------
     Dim legCells(1 To 6) As String
@@ -111,7 +170,58 @@ Public Sub BuildFlatStructure()
     WriteFlatTable
     WriteTraceability
     WriteLog
+
+    ' ИЗМЕНЕНИЕ 2: результаты формируются как листы текущей книги (структура
+    ' листов и колонки не менялись); сохраняем копию книги в resultsPath.
+    If Dir(resultsPath, vbDirectory) = "" Then MkDir resultsPath
+    Dim saveName As String
+    saveName = resultsPath & "\" & Format$(Now, "yyyy-mm-dd hhnnss") & ".xlsm"
+    On Error Resume Next
+    ThisWorkbook.SaveCopyAs saveName
+    Dim saveErr As Long
+    saveErr = Err.Number
+    On Error GoTo 0
+    If saveErr <> 0 Then
+        Mod_Util.WriteError "S005", "Ошибка сохранения результатов: " & Error$(saveErr)
+        MsgBox "Ошибка сохранения результатов.", vbExclamation
+    End If
+
+    '---------- 5. Финал ----------
+    Mod_Util.WriteLog "BuildFlatStructure: узлов " & NodeCount
+    Mod_Util.WriteLog "Папка результатов: " & resultsPath   ' путь будущего сохранения
     MsgBox "Готово. Узлов: " & NodeCount, vbInformation
+
+    ' закрыть источник, если открывали его сами
+    If Not srcWasOpen And Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
+    Exit Sub
+
+'---------- Обработка ошибок (изменения 1 и 2) ----------
+NoFolder:                                   ' папка 01_Схема не найдена
+    Mod_Util.WriteError "S003", "Папка 01_Схема не найдена: " & path
+    MsgBox "Папка 01_Схема не найдена: " & path, vbExclamation
+    Exit Sub
+
+NoFiles:                                    ' в папке нет xlsx-файла
+    Mod_Util.WriteError "S001", "В папке 01_Схема нет xlsx-файла"
+    MsgBox "В папке 01_Схема нет xlsx-файла", vbExclamation
+    Exit Sub
+
+ManyFiles:                                  ' в папке больше одного xlsx
+    Mod_Util.WriteError "S002", "В папке 01_Схема больше одного xlsx"
+    MsgBox "В папке 01_Схема больше одного xlsx. Оставьте один.", vbExclamation
+    Exit Sub
+
+OpenErr:                                    ' ошибка открытия файла схемы
+    Mod_Util.WriteError "S004", "Ошибка открытия файла схемы: " & Err.Description
+    MsgBox "Ошибка открытия файла схемы.", vbExclamation
+    Exit Sub
+
+Fail:                                       ' прочие ошибки (например, создание папки результатов)
+    Dim errDesc As String
+    errDesc = Err.Description
+    Err.Clear
+    Mod_Util.WriteError "S004", "Ошибка открытия файла схемы: " & errDesc
+    MsgBox "Ошибка открытия файла схемы.", vbExclamation
 End Sub
 
 '---------------- Вспомогательные функции ----------------
@@ -209,6 +319,8 @@ End Sub
 
 '---------------- Лист 3: журнал аномалий ----------------
 Private Sub WriteLog()
+    ' ИЗМЕНЕНИЕ 3: логирование — через Mod_Util (текст сообщения с итогами).
+    Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
     Dim ws As Worksheet
     GetSheet "Журнал", ws
     ws.Range("A1:D1").Value = Array("Код проблемы", "Элемент", "Родитель", "Описание")
