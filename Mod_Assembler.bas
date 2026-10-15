@@ -24,63 +24,66 @@ Private uncoveredTypesCount As Long     ' НОВОЕ: типов без атри
 Private orphanCoverageCount As Long     ' НОВОЕ: покрытие без типа в Реестре
 
 ' ============================================================
-' ГЛАВНАЯ ПРОЦЕДУРА
+' СОСТОЯНИЕ СЕССИИ (разделено по этапам, OPT-10)
+' ============================================================
+Private wbOut As Workbook           ' итоговая книга
+Private wsTypes As Worksheet        ' лист "Типы"
+Private wsAttrs As Worksheet        ' лист "Атрибуты"
+Private wsErrors As Worksheet       ' лист "Ошибки"
+Private wsWarnings As Worksheet     ' лист "Предупреждения"
+Private wsReg As Worksheet          ' лист "Реестры"
+Private wsReport As Worksheet       ' лист "Сводка"
+Private rTypes As Long              ' следующая свободная строка на листе "Типы"
+Private rAttrs As Long              ' следующая свободная строка на листе "Атрибуты"
+Private rLog As Long                ' следующая свободная строка на листе "Лог дубликатов"
+Private outputFile As String        ' путь итогового файла
+
+' ============================================================
+' ГЛАВНАЯ ПРОЦЕДУРА — тонкая обёртка над шестью этапами (OPT-10)
 ' softMode:=True  — промежуточный прогон (forward-ссылки и пустое "Состоит из" = предупреждения)
 ' softMode:=False — финальный прогон по склеенной таблице (полный контроль)
 ' ============================================================
 Sub ValidateAndAssemble(Optional softMode As Boolean = False)
-    Dim fd As FileDialog
-    Dim folderPath As String
-    Dim fName As String
-    Dim wbSrc As Workbook
-    Dim wbOut As Workbook
-    Dim wsTypes As Worksheet
-    Dim wsAttrs As Worksheet
-    Dim wsErrors As Worksheet
-    Dim wsWarnings As Worksheet
-    Dim wsReg As Worksheet          ' НОВОЕ
-    Dim wsReport As Worksheet
-    Dim rTypes As Long
-    Dim rAttrs As Long
-    Dim rLog As Long
-    Dim rSrc As Long
-    Dim lastRow As Long
-    Dim wsSrc As Worksheet
-    Dim j As Long
-    Dim sysName As String
-    Dim attrName As String
-    Dim outputFile As String
-    
+    On Error GoTo ErrHandler
+
+    Call InitSession(softMode)
+    Call LoadAllTypes
+    Call LoadAllAttributes
+    Call ValidateHierarchy
+    Call BuildReports
+    Call SaveResult
+
+    Exit Sub
+ErrHandler:
+    ' Исключение этапа сборки: фиксируем и показываем пользователю
+    Mod_Util.WriteError "F005", "ValidateAndAssemble: ошибка выполнения этапа: " & Err.Description
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    MsgBox "Ошибка при сборке: " & Err.Description, vbCritical, "Валидация прервана"
+    Err.Clear
+End Sub
+
+' ============================================================
+' ЭТАП 1: ИНИЦИАЛИЗАЦИЯ СЕССИИ (OPT-10)
+' Очистка состояния, словари, фиксированная входная папка, создание листов
+' ============================================================
+Private Sub InitSession(ByVal softMode As Boolean)
+    On Error GoTo ErrHandler
+
     isSoftMode = softMode
     uncoveredTypesCount = 0
     orphanCoverageCount = 0
-    
-    Set colErrors = New Collection
-    Set colWarnings = New Collection
-    Set colInfos = New Collection
-    Set knownTypes = CreateObject("Scripting.Dictionary")
-    Set attrDict = CreateObject("Scripting.Dictionary")
-    Set attrSourceRow = CreateObject("Scripting.Dictionary")
-    Set groupDict = CreateObject("Scripting.Dictionary")
-    Set attrTypesDict = CreateObject("Scripting.Dictionary")
-    Set uniqDict = CreateObject("Scripting.Dictionary")
-    Set boolValuesDict = CreateObject("Scripting.Dictionary")
-    Set baseTypesDict = CreateObject("Scripting.Dictionary")
-    Set typesProblemsDict = CreateObject("Scripting.Dictionary")
-    Set attrsProblemsDict = CreateObject("Scripting.Dictionary")
-    
+
+    ' Явная очистка словарей и коллекций перед заполнением (OPT-09)
     Call InitDictionaries
-    
-    Set fd = Application.FileDialog(msoFileDialogFolderPicker)
-    fd.Title = "Выберите папку с xlsx-файлами этапов (zhc_okks_gost_etap_N_*.xlsx)"
-    If fd.Show <> -1 Then Exit Sub
-    folderPath = fd.SelectedItems(1)
-    If Right(folderPath, 1) <> "\" Then folderPath = folderPath & "\"
-    sourceFolderPath = folderPath
-    
+
+    ' Диалог выбора папки заменён фиксированной папкой проекта (OPT-10)
+    sourceFolderPath = Mod_Util.GetProjectRoot & "\03_Результаты генерации\01_По шагам"
+    If Right(sourceFolderPath, 1) <> "\" Then sourceFolderPath = sourceFolderPath & "\"
+
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
-    
+
     Set wbOut = Workbooks.Add
     Set wsTypes = wbOut.Sheets(1)
     wsTypes.Name = "Типы"
@@ -96,122 +99,185 @@ Sub ValidateAndAssemble(Optional softMode As Boolean = False)
     wsReg.Name = "Реестры"                            ' НОВОЕ
     Set wsReport = wbOut.Sheets.Add(After:=wsReg)
     wsReport.Name = "Сводка"
-    
+
     Call WriteHeaders(wsTypes, wsAttrs, wsErrors, wsWarnings, wsLog)
-    
+
     rTypes = 2
     rAttrs = 2
     rLog = 2
-    
+
+    Exit Sub
+ErrHandler:
+    ' Ошибка инициализации сессии не должна прерывать книгу без разбора
+    AddError "F005", "InitSession: не удалось инициализировать сессию сборки. Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' ============================================================
+' ЭТАП 2: ЗАГРУЗКА ВСЕХ ФАЙЛОВ *_types.xlsx (OPT-10)
+' ============================================================
+Private Sub LoadAllTypes()
+    Dim fName As String
+    Dim wbSrc As Workbook
+    Dim wsSrc As Worksheet
+    Dim rSrc As Long
+    Dim lastRow As Long
+    Dim j As Long
+    Dim sysName As String
+
+    On Error GoTo ErrHandler
+
     ' ============================================================
     ' ФАЗА 1: ЗАГРУЗКА ВСЕХ ТИПОВ
     ' ============================================================
     colInfos.Add "=== ФАЗА 1: Загрузка типов ==="
-    fName = Dir(folderPath & "*_types.xlsx")
+    fName = Dir(sourceFolderPath & "*_types.xlsx")
     Do While fName <> ""
         colInfos.Add "Файл типов: " & fName
-        
+
         On Error Resume Next
-        Set wbSrc = Workbooks.Open(folderPath & fName, ReadOnly:=True, UpdateLinks:=0)
+        Set wbSrc = Workbooks.Open(sourceFolderPath & fName, ReadOnly:=True, UpdateLinks:=0)
         If Err.Number <> 0 Then
-            AddError "F001", "Не удалось открыть файл: " & fName & ". Ошибка: " & Err.Description
+            AddError "T005", "Не удалось открыть файл: " & fName & ". Ошибка: " & Err.Description
             On Error GoTo 0
             fName = Dir()
             GoTo NextTypeFile
         End If
         On Error GoTo 0
-        
+
         On Error Resume Next
         Set wsSrc = wbSrc.Sheets(1)
         On Error GoTo 0
-        
+
         If Not wsSrc Is Nothing Then
             lastRow = wsSrc.Cells(wsSrc.Rows.Count, 1).End(xlUp).row
             For rSrc = 2 To lastRow
                 sysName = Trim(CStr(wsSrc.Cells(rSrc, 1).value))
                 If sysName = "" Then GoTo NextTypeRow
-                
+
                 For j = 1 To 12
                     wsTypes.Cells(rTypes, j).value = wsSrc.Cells(rSrc, j).value
                 Next j
-                
+
                 Call ValidateTypeBasic(wsSrc, rSrc, fName, sysName)
-                
+
                 rTypes = rTypes + 1
 NextTypeRow:
             Next rSrc
             Set wsSrc = Nothing
         Else
-            AddWarning "F002", "В файле " & fName & " нет доступных листов"
+            AddWarning "T005", "В файле " & fName & " нет доступных листов"
         End If
-        
+
         wbSrc.Close SaveChanges:=False
 NextTypeFile:
         fName = Dir()
     Loop
-    
+
     colInfos.Add "Всего типов загружено: " & (rTypes - 2)
-    
+    Exit Sub
+ErrHandler:
+    AddError "T005", "LoadAllTypes: ошибка загрузки файлов типов. Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' ============================================================
+' ЭТАП 3: ЗАГРУЗКА ВСЕХ ФАЙЛОВ *_attributes.xlsx (OPT-10)
+' ============================================================
+Private Sub LoadAllAttributes()
+    Dim fName As String
+    Dim wbSrc As Workbook
+    Dim wsSrc As Worksheet
+    Dim rSrc As Long
+    Dim lastRow As Long
+    Dim sysName As String
+    Dim attrName As String
+
+    On Error GoTo ErrHandler
+
     ' ============================================================
     ' ФАЗА 2: ЗАГРУЗКА ВСЕХ АТРИБУТОВ
     ' ============================================================
     colInfos.Add "=== ФАЗА 2: Загрузка атрибутов ==="
-    fName = Dir(folderPath & "*_attributes.xlsx")
+    fName = Dir(sourceFolderPath & "*_attributes.xlsx")
     Do While fName <> ""
         colInfos.Add "Файл атрибутов: " & fName
-        
+
         On Error Resume Next
-        Set wbSrc = Workbooks.Open(folderPath & fName, ReadOnly:=True, UpdateLinks:=0)
+        Set wbSrc = Workbooks.Open(sourceFolderPath & fName, ReadOnly:=True, UpdateLinks:=0)
         If Err.Number <> 0 Then
-            AddError "F001", "Не удалось открыть файл: " & fName & ". Ошибка: " & Err.Description
+            AddError "A017", "Не удалось открыть файл: " & fName & ". Ошибка: " & Err.Description
             On Error GoTo 0
             fName = Dir()
             GoTo NextAttrFile
         End If
         On Error GoTo 0
-        
+
         On Error Resume Next
         Set wsSrc = wbSrc.Sheets(1)
         On Error GoTo 0
-        
+
         If Not wsSrc Is Nothing Then
             lastRow = wsSrc.Cells(wsSrc.Rows.Count, 1).End(xlUp).row
             For rSrc = 2 To lastRow
                 sysName = Trim(CStr(wsSrc.Cells(rSrc, 1).value))
                 attrName = Trim(CStr(wsSrc.Cells(rSrc, 2).value))
                 If sysName = "" And attrName = "" Then GoTo NextAttrRow
-                
+
                 Call CopyAttributeRow(wsSrc, rSrc, fName, sysName, attrName, wsAttrs, rAttrs, rLog)
-                
+
 NextAttrRow:
             Next rSrc
             Set wsSrc = Nothing
         Else
-            AddWarning "F003", "В файле " & fName & " нет доступных листов"
+            AddWarning "A017", "В файле " & fName & " нет доступных листов"
         End If
-        
+
         wbSrc.Close SaveChanges:=False
 NextAttrFile:
         fName = Dir()
     Loop
-    
+
     colInfos.Add "Всего атрибутов загружено (после дедупликации): " & (rAttrs - 2)
-    
+    Exit Sub
+ErrHandler:
+    AddError "A017", "LoadAllAttributes: ошибка загрузки файлов атрибутов. Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' ============================================================
+' ЭТАП 4: ИЕРАРХИЯ И ПРОВЕРКА ССЫЛОК (OPT-10)
+' ============================================================
+Private Sub ValidateHierarchy()
+    On Error GoTo ErrHandler
+
     ' ============================================================
     ' ФАЗА 3: АВТОИСПРАВЛЕНИЕ ИЕРАРХИИ И ПРОВЕРКА ССЫЛОК
     ' ============================================================
     colInfos.Add "=== ФАЗА 3: Автоисправление иерархии ==="
     Call AutoFixHierarchy(wsTypes, rTypes)
-    
+
     If Not isSoftMode Then
         Call SyncChildrenFromParents(wsTypes, rTypes)
     End If
-    
+
     colInfos.Add "=== ФАЗА 4: Проверка ссылок ==="
     Call ValidateAllTypeReferences(wsTypes, rTypes)
     Call ValidateAllAttributeReferences(wsAttrs, rAttrs)
     Call FinalValidation(wsTypes, wsAttrs, rTypes)
-    
+    Exit Sub
+ErrHandler:
+    AddError "T018", "ValidateHierarchy: ошибка этапа проверки иерархии и ссылок. Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' ============================================================
+' ЭТАП 5: ОТЧЁТЫ (OPT-10, OPT-08)
+' Реестры (BuildRegistrySheet) из сборки убраны — их формирует Mod_Registry (W6)
+' ============================================================
+Private Sub BuildReports()
+    On Error GoTo ErrHandler
+
     ' ============================================================
     ' ФАЗА 5: ФОРМИРОВАНИЕ ОТЧЁТА
     ' ============================================================
@@ -219,9 +285,9 @@ NextAttrFile:
     Call BuildErrorsReport(wsErrors)
     Call BuildWarningsReport(wsWarnings)
     Call HighlightProblemsInFinalFile(wsTypes, wsAttrs, rTypes, rAttrs)
-    Call BuildRegistrySheet(wsReg, wsTypes, wsAttrs, rTypes, rAttrs)   ' НОВОЕ
+    ' OPT-08: вызов BuildRegistrySheet из сборки убран — реестры формирует Mod_Registry (W6)
     Call FillSummarySheet(wsReport, rTypes, rAttrs)
-    
+
     wsTypes.UsedRange.Columns.AutoFit
     wsAttrs.UsedRange.Columns.AutoFit
     wsErrors.UsedRange.Columns.AutoFit
@@ -229,17 +295,28 @@ NextAttrFile:
     wsLog.UsedRange.Columns.AutoFit
     wsReg.UsedRange.Columns.AutoFit     ' НОВОЕ
     wsReport.UsedRange.Columns.AutoFit
-    
+
     wsTypes.Rows(1).Font.Bold = True
     wsAttrs.Rows(1).Font.Bold = True
     wsReport.Rows(1).Font.Bold = True
     wsLog.Rows(1).Font.Bold = True
-    
-    outputFile = sourceFolderPath & "zhc_okks_gost_FINAL.xlsx"
+    Exit Sub
+ErrHandler:
+    AddError "R002", "BuildReports: ошибка формирования отчётов. Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' ============================================================
+' ЭТАП 6: СОХРАНЕНИЕ ИТОГОВОГО ФАЙЛА И ИТОГОВОЕ СООБЩЕНИЕ (OPT-10)
+' ============================================================
+Private Sub SaveResult()
+    On Error GoTo ErrHandler
+
+    outputFile = Mod_Util.GetProjectRoot & "\03_Результаты генерации\02_Сводные\zhc_okks_gost_FINAL.xlsx"
     On Error Resume Next
     Kill outputFile
     On Error GoTo 0
-    
+
     On Error Resume Next
     wbOut.SaveAs fileName:=outputFile, FileFormat:=xlOpenXMLWorkbook
     If Err.Number <> 0 Then
@@ -249,10 +326,10 @@ NextAttrFile:
         colInfos.Add "Файл сохранён: " & outputFile
     End If
     On Error GoTo 0
-    
+
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
-    
+
     Dim msg As String
     msg = "=== РЕЗУЛЬТАТЫ ВАЛИДАЦИИ ===" & vbCrLf
     msg = msg & "Режим: " & IIf(isSoftMode, "ПРОМЕЖУТОЧНЫЙ (soft)", "ФИНАЛЬНЫЙ") & vbCrLf & vbCrLf
@@ -270,7 +347,7 @@ NextAttrFile:
     msg = msg & "  - 'Сводка' — общая статистика" & vbCrLf & vbCrLf
     msg = msg & "Итоговый файл сохранён: " & outputFile & vbCrLf
     msg = msg & "В листах 'Типы' и 'Атрибуты' проблемные строки раскрашены."
-    
+
     If colErrors.Count > 0 Then
         msg = msg & vbCrLf & vbCrLf & "[FAIL] Исправьте " & colErrors.Count & " ошибок перед импортом в БД."
         MsgBox msg, vbExclamation, "Валидация завершена"
@@ -278,12 +355,79 @@ NextAttrFile:
         msg = msg & vbCrLf & vbCrLf & "[PASS] Критических ошибок не обнаружено. Файл готов к импорту."
         MsgBox msg, vbInformation, "Валидация завершена"
     End If
+    Exit Sub
+ErrHandler:
+    AddError "F004", "SaveResult: ошибка сохранения итогового файла. Ошибка: " & Err.Description
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Err.Clear
 End Sub
 
 ' ============================================================
 ' ИНИЦИАЛИЗАЦИЯ СЛОВАРЕЙ
+' OPT-09: явная очистка всех словарей и коллекций перед
+' повторным заполнением — гарантирован корректный повторный запуск
+' без перезагрузки книги.
 ' ============================================================
 Private Sub InitDictionaries()
+    ' Очистка коллекций (пересоздание)
+    Set colErrors = New Collection
+    Set colWarnings = New Collection
+    Set colInfos = New Collection
+
+    ' Очистка словарей: RemoveAll, если словарь уже создан,
+    ' иначе — создание нового экземпляра
+    If Not knownTypes Is Nothing Then
+        knownTypes.RemoveAll
+    Else
+        Set knownTypes = CreateObject("Scripting.Dictionary")
+    End If
+    If Not attrDict Is Nothing Then
+        attrDict.RemoveAll
+    Else
+        Set attrDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not attrSourceRow Is Nothing Then
+        attrSourceRow.RemoveAll
+    Else
+        Set attrSourceRow = CreateObject("Scripting.Dictionary")
+    End If
+    If Not groupDict Is Nothing Then
+        groupDict.RemoveAll
+    Else
+        Set groupDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not attrTypesDict Is Nothing Then
+        attrTypesDict.RemoveAll
+    Else
+        Set attrTypesDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not uniqDict Is Nothing Then
+        uniqDict.RemoveAll
+    Else
+        Set uniqDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not boolValuesDict Is Nothing Then
+        boolValuesDict.RemoveAll
+    Else
+        Set boolValuesDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not baseTypesDict Is Nothing Then
+        baseTypesDict.RemoveAll
+    Else
+        Set baseTypesDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not typesProblemsDict Is Nothing Then
+        typesProblemsDict.RemoveAll
+    Else
+        Set typesProblemsDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not attrsProblemsDict Is Nothing Then
+        attrsProblemsDict.RemoveAll
+    Else
+        Set attrsProblemsDict = CreateObject("Scripting.Dictionary")
+    End If
+
     AddBaseType "Root_object_type"
     AddBaseType "Smart_folder_type"
     AddBaseType "Project_folder"
@@ -591,35 +735,38 @@ Private Sub ValidateTypeBasic(ws As Worksheet, row As Long, fileName As String, 
         If Not knownTypes.Exists(sysName) Then knownTypes.Add sysName, True
     End If
     
-    ' T007: Отображается на диске
-    If displayOnDisk = "да" Then
-        If sysName <> "bim_coordinationModel" And sysName <> "bim_modelPartFolder" Then
-            AddError "T007", "Тип '" & sysName & "': 'Отображается на диске'=да недопустимо. Разрешено только для bim_coordinationModel и bim_modelPartFolder.", _
-                     fileName, "Типы", row, sysName, "TYPE"
-        End If
-    End If
-    
-    ' T008: Умные папки
-    If smartFolders = "да" Then
-        Dim allowedSmartFolderTypes As Variant
-        allowedSmartFolderTypes = Array("project", "object", "contractor", _
-            "procurement_folder", "applications_folder", "qualification_folder", _
-            "reference_contractors", "referencebook_folder")
-        Dim isAllowed As Boolean
-        isAllowed = False
-        Dim sft As Variant
-        For Each sft In allowedSmartFolderTypes
-            If LCase(sysName) = LCase(CStr(sft)) Then
-                isAllowed = True
-                Exit For
+    ' T007: Отображается на диске (OPT-07: проверки нет в спецификации — управляется конфигурацией)
+    If Mod_Util.GetConfigValue("EnableDiskDisplayCheck") = "да" Then
+        If displayOnDisk = "да" Then
+            If sysName <> "bim_coordinationModel" And sysName <> "bim_modelPartFolder" Then
+                AddError "T007", "Тип '" & sysName & "': 'Отображается на диске'=да недопустимо. Разрешено только для bim_coordinationModel и bim_modelPartFolder.", _
+                         fileName, "Типы", row, sysName, "TYPE"
             End If
-        Next sft
-        If Not isAllowed Then
-            AddWarning "T008", "Тип '" & sysName & "': 'Может содержать умные папки'=да. Разрешено только для ключевых типов (project, object, contractor, procurement_folder, applications_folder, qualification_folder).", _
-                       fileName, "Типы", row, sysName, "TYPE"
         End If
     End If
-    
+
+    ' T008: Умные папки (OPT-07: проверки нет в спецификации — управляется конфигурацией)
+    If Mod_Util.GetConfigValue("EnableSmartFolderCheck") = "да" Then
+        If smartFolders = "да" Then
+            Dim allowedSmartFolderTypes As Variant
+            allowedSmartFolderTypes = Array("project", "object", "contractor", _
+                "procurement_folder", "applications_folder", "qualification_folder", _
+                "reference_contractors", "referencebook_folder")
+            Dim isAllowed As Boolean
+            isAllowed = False
+            Dim sft As Variant
+            For Each sft In allowedSmartFolderTypes
+                If LCase(sysName) = LCase(CStr(sft)) Then
+                    isAllowed = True
+                    Exit For
+                End If
+            Next sft
+            If Not isAllowed Then
+                AddWarning "T008", "Тип '" & sysName & "': 'Может содержать умные папки'=да. Разрешено только для ключевых типов (project, object, contractor, procurement_folder, applications_folder, qualification_folder).", _
+                           fileName, "Типы", row, sysName, "TYPE"
+            End If
+        End If
+    End If
     ' T009: Документ без doc_remarksFolder
     If isDocument = "да" Then
         If InStr(children, "doc_remarksFolder") = 0 Then
@@ -701,6 +848,13 @@ End Sub
 ' АВТОИСПРАВЛЕНИЕ ИЕРАРХИИ (родитель -> ребёнок)
 ' ============================================================
 Private Sub AutoFixHierarchy(wsTypes As Worksheet, rTypes As Long)
+    ' OPT-11: управляемость автоисправления (GetConfigValue("EnableAutoFix"))
+    If Mod_Util.GetConfigValue("EnableAutoFix") <> "да" Then
+        colInfos.Add "AutoFixHierarchy: автоисправление отключено конфигурацией EnableAutoFix"
+        Mod_Util.WriteWarning "T014", "AutoFixHierarchy: автоисправление иерархии пропущено (EnableAutoFix <> да), связи 'Входит в' не дополнялись."
+        Exit Sub
+    End If
+
     Dim r As Long
     Dim typeName As String
     Dim children As String
@@ -744,8 +898,14 @@ Private Sub AutoFixHierarchy(wsTypes As Worksheet, rTypes As Long)
             If InStr(LCase(parents), LCase(typeName)) = 0 Then
                 If parents = "" Then
                     wsTypes.Cells(childRow, 12).value = typeName
+                    ' OPT-11: протокол каждого исправления — что было, что стало
+                    Mod_Util.WriteLog "AutoFixHierarchy: тип " & refName & ", добавлен родитель " & typeName & _
+                                      " (было: ''; стало: '" & typeName & "')"
                 Else
                     wsTypes.Cells(childRow, 12).value = parents & "; " & typeName
+                    ' OPT-11: протокол каждого исправления — что было, что стало
+                    Mod_Util.WriteLog "AutoFixHierarchy: тип " & refName & ", добавлен родитель " & typeName & _
+                                      " (было: '" & parents & "'; стало: '" & parents & "; " & typeName & "')"
                 End If
                 fixedCount = fixedCount + 1
             End If
@@ -780,6 +940,13 @@ End Function
 ' ОБРАТНАЯ СИНХРОНИЗАЦИЯ (ребёнок -> родитель), финальный режим
 ' ============================================================
 Private Sub SyncChildrenFromParents(wsTypes As Worksheet, rTypes As Long)
+    ' OPT-11: управляемость автоисправления (GetConfigValue("EnableAutoFix"))
+    If Mod_Util.GetConfigValue("EnableAutoFix") <> "да" Then
+        colInfos.Add "SyncChildrenFromParents: автоисправление отключено конфигурацией EnableAutoFix"
+        Mod_Util.WriteWarning "T014", "SyncChildrenFromParents: обратная синхронизация 'Состоит из' пропущена (EnableAutoFix <> да)."
+        Exit Sub
+    End If
+
     Dim r As Long
     Dim pr As Long
     Dim childName As String
@@ -814,9 +981,15 @@ Private Sub SyncChildrenFromParents(wsTypes As Worksheet, rTypes As Long)
                 ch = Trim(CStr(wsTypes.Cells(pr, 11).value))
                 If ch = "" Then
                     wsTypes.Cells(pr, 11).value = childName
+                    ' OPT-11: протокол каждого исправления — что было, что стало
+                    Mod_Util.WriteLog "SyncChildrenFromParents: тип " & pn & ", добавлен ребёнок " & childName & _
+                                      " (было: ''; стало: '" & childName & "')"
                     syncCount = syncCount + 1
                 ElseIf Not HasName(ch, childName) Then
                     wsTypes.Cells(pr, 11).value = ch & "; " & childName
+                    ' OPT-11: протокол каждого исправления — что было, что стало
+                    Mod_Util.WriteLog "SyncChildrenFromParents: тип " & pn & ", добавлен ребёнок " & childName & _
+                                      " (было: '" & ch & "'; стало: '" & ch & "; " & childName & "')"
                     syncCount = syncCount + 1
                 End If
             End If
@@ -1447,6 +1620,9 @@ End Function
 
 ' ============================================================
 ' ИМЯ ТИПА — camelCase (T002)
+' OPT-12: сверено со спецификацией: имена типов — camelCase,
+' исключения — фазы phase0–phase3, суффикс _doc и коды форм ksN.
+' Правила в коде совпадают со спецификацией — логика оставлена.
 ' ============================================================
 Private Function IsCamelTypeName(ByVal s As String) As Boolean
     Dim re As Object, t As String
@@ -1463,16 +1639,21 @@ End Function
 
 ' ============================================================
 ' ИМЯ АТРИБУТА — camelCase (A003)
+' OPT-12: по спецификации имена атрибутов — camelCase БЕЗ ЦИФР,
+' поэтому цифры в шаблоне запрещены ([0-9] исключён).
+' Проверка наличия цифр выполняется отдельно ContainsDigit (A016).
 ' ============================================================
 Private Function IsCamelAttrName(ByVal s As String) As Boolean
     Dim re As Object
     Set re = CreateObject("VBScript.RegExp")
-    re.Pattern = "^[a-z][a-zA-Z0-9]*$"
+    re.Pattern = "^[a-z][a-zA-Z]*$"
     IsCamelAttrName = re.Test(s)
 End Function
 
 ' ============================================================
 ' ЦИФРЫ В ИМЕНИ АТРИБУТА (A016)
+' OPT-12: по спецификации в именах атрибутов цифры запрещены полностью —
+' правила в коде совпадают со спецификацией, логика оставлена.
 ' ============================================================
 Private Function ContainsDigit(ByVal s As String) As Boolean
     Dim re As Object
@@ -1483,6 +1664,9 @@ End Function
 
 ' ============================================================
 ' ЦИФРЫ В ИМЕНИ ТИПА (T017): только phase0–phase3 и ksN
+' OPT-12: по спецификации цифры в именах типов допустимы только у фаз
+' phase0–phase3 и кодов форм ksN — правила в коде совпадают
+' со спецификацией, логика оставлена.
 ' ============================================================
 Private Function ContainsForbiddenDigit(ByVal s As String) As Boolean
     Dim re As Object
