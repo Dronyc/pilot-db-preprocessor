@@ -288,6 +288,13 @@ Private Sub BuildReports()
     ' OPT-08: вызов BuildRegistrySheet из сборки убран — реестры формирует Mod_Registry (W6)
     Call FillSummarySheet(wsReport, rTypes, rAttrs)
 
+    ' W6: реестры типов и покрытия формирует Mod_Registry.
+    ' Вызовы идут ПОСЛЕ формирования листов "Типы" и "Атрибуты".
+    ' Данные берутся из книги сводной wbOut (она сейчас активна).
+    Mod_Registry.BuildRegistries
+    Mod_Registry.WriteRegistryFiles
+    Mod_Registry.UpdateRegistrySheets
+
     wsTypes.UsedRange.Columns.AutoFit
     wsAttrs.UsedRange.Columns.AutoFit
     wsErrors.UsedRange.Columns.AutoFit
