@@ -19,6 +19,11 @@ Const SYSTEM_PARENTS As String = "projectfolder;reference_contractors"
 ' Допустимые типы (для проверки на неизвестный тип)
 Const VALID_TYPES As String = "Папка;ECM-документ;Документ;Папка ЦИМ;Ярлык"
 
+' Фиксированные параметры источника входной схемы и выходных листов
+Const SRC_SHEET As String = SHEET_RESULT ' Лист-источник входной схемы (первый лист книги)
+Const FIRST_ROW As Long = 2              ' Первая строка данных (после заголовка)
+Const LAST_COL As Long = COL_CHILDREN    ' Последняя колонка данных ("Состоит из")
+
 ' Цвета подсветки
 Const COLOR_DANGLING As Long = 13158655     ' RGB(255, 200, 200) Красный — висячая ссылка
 Const COLOR_REPEAT As Long = 11862015       ' RGB(255, 255, 180) Жёлтый — легитимное повторение
@@ -29,30 +34,67 @@ Const COLOR_UNKNOWN_TYPE As Long = 16763100 ' RGB(220, 200, 255) Фиолето�
 
 
 ' ============================================================================
-' ГЛАВНАЯ ПРОЦЕДУРА
+' ГЛАВНАЯ ПРОЦЕДУРА (точка входа — вызывается из Mod_UI)
+' Источник входного файла — фиксированная папка <корень>\01_Исходные данные\01_Схема\
 ' ============================================================================
-Sub MergeStructureFiles()
-    Dim fileDialog As fileDialog
-    Dim selectedFiles As Variant
-    Dim i As Long, filesCount As Long
-    
-    ' 1. Выбор файлов пользователем
-    Set fileDialog = Application.fileDialog(msoFileDialogFilePicker)
-    With fileDialog
-        .Title = "Выберите файлы Excel для слияния (можно несколько)"
-        .Filters.Clear
-        .Filters.Add "Excel файлы", "*.xlsx; *.xls; *.xlsm"
-        .AllowMultiSelect = True
-        If .Show = False Then Exit Sub
-        selectedFiles = Array()
-        ReDim selectedFiles(.SelectedItems.Count - 1)
-        For i = 1 To .SelectedItems.Count
-            selectedFiles(i - 1) = .SelectedItems(i)
-        Next i
-    End With
-    filesCount = UBound(selectedFiles) + 1
-    If filesCount = 0 Then Exit Sub
-    
+Sub BuildFlatStructure()
+    Dim schemaFolder As String   ' Папка с исходной схемой (фиксированная)
+    Dim schemaFile As String     ' Найденный xlsx-файл схемы
+    Dim fsoChk As Object         ' Проверка существования папки
+    Dim filesCount As Long       ' Количество xlsx-файлов в папке схемы
+    Dim selectedFiles As Variant ' Список выбранных файлов (теперь — фиксированный, один файл)
+    Dim i As Long
+
+    On Error GoTo ErrOpen
+
+    ' 1. Фиксированная папка источника вместо интерактивного выбора файла
+    schemaFolder = Mod_Util.GetProjectRoot & "\01_Исходные данные\01_Схема"
+
+    ' Проверяем, что папка существует
+    Set fsoChk = CreateObject("Scripting.FileSystemObject")
+    If Not fsoChk.FolderExists(schemaFolder) Then
+        Set fsoChk = Nothing
+        Mod_Util.WriteError "S003", "Папка 01_Схема не найдена: " & schemaFolder
+        MsgBox "Папка 01_Схема не найдена: " & schemaFolder, vbExclamation
+        Exit Sub
+    End If
+    Set fsoChk = Nothing
+
+    ' Собираем список *.xlsx в папке схемы (ожидаем ровно один файл)
+    filesCount = 0
+    schemaFile = ""
+    schemaFile = Dir(schemaFolder & "\*.xlsx")
+    Do While schemaFile <> ""
+        filesCount = filesCount + 1
+        schemaFile = Dir()
+    Loop
+
+    If filesCount = 0 Then
+        Mod_Util.WriteError "S001", "В папке 01_Схема нет xlsx-файла"
+        MsgBox "В папке 01_Схема нет xlsx-файла", vbExclamation
+        Exit Sub
+    End If
+
+    If filesCount > 1 Then
+        Mod_Util.WriteError "S002", "В папке 01_Схема больше одного xlsx. Оставьте один файл."
+        MsgBox "В папке 01_Схема больше одного xlsx. Оставьте один файл.", vbExclamation
+        Exit Sub
+    End If
+
+    ' Ровно один файл — запоминаем его имя и формируем фиксированный список источника
+    schemaFile = Dir(schemaFolder & "\*.xlsx")
+    ReDim selectedFiles(0 To 0)
+    selectedFiles(0) = schemaFolder & "\" & schemaFile
+    filesCount = 1
+
+ErrOpen:
+    If Err.Number <> 0 Then
+        Err.Clear
+        Mod_Util.WriteError "S004", "Ошибка открытия файла схемы: " & Err.Description
+        MsgBox "Ошибка открытия файла схемы.", vbExclamation
+        Exit Sub
+    End If
+
     Application.ScreenUpdating = False
     Application.Calculation = xlCalculationManual
     Application.DisplayAlerts = False
@@ -112,14 +154,9 @@ Sub MergeStructureFiles()
         
         lastRow = wsSrc.Cells(wsSrc.Rows.Count, COL_NAME).End(xlUp).Row
         
-        ' Определяем стартовую строку (пропуск заголовка)
+        ' Определяем стартовую строку данных (пропуск заголовка) — фиксированная FIRST_ROW
         Dim startRow As Long
-        startRow = 2
-        If InStr(UCase(Trim(wsSrc.Cells(1, COL_NAME).Value)), "ОТОБРАЖАЕМОЕ") > 0 Then
-            startRow = 2
-        Else
-            startRow = 1
-        End If
+        startRow = FIRST_ROW
         
         logText = logText & "Файл: " & wbSrc.Name & vbCrLf
         logText = logText & "  Строк данных: " & (lastRow - startRow + 1) & vbCrLf
@@ -327,78 +364,137 @@ NextRow:
     Set ts = Nothing
     Set fso = Nothing
     
-    ' --- В Excel записываем только краткую сводку со ссылкой на файл ---
-    Dim wsLog As Worksheet
-    Set wsLog = wbResult.Worksheets(SHEET_LOG)
-    
-    With wsLog
-        .Range("A1").Value = "ПОЛНЫЙ ОТЧЁТ СОХРАНЁН В ФАЙЛ:"
-        .Range("A1").Font.Bold = True
-        .Range("A1").Font.Size = 12
-        
-        ' Кликабельная гиперссылка на файл отчёта
-        .Hyperlinks.Add Anchor:=.Range("A2"), _
-                        Address:=logFilePath, _
-                        TextToDisplay:=logFilePath
-        
-        .Range("A4").Value = "КРАТКАЯ СВОДКА:"
-        .Range("A4").Font.Bold = True
-        
-        .Range("A5").Value = "Дата и время сборки:"
-        .Range("B5").Value = Now
-        
-        .Range("A6").Value = "Обработано файлов:"
-        .Range("B6").Value = filesCount
-        
-        .Range("A7").Value = "Всего строк до проверки:"
-        .Range("B7").Value = totalRows
-        
-        .Range("A8").Value = "Критических дубликатов удалено:"
-        .Range("B8").Value = criticalDupes
-        
-        .Range("A9").Value = "Легитимных повторений сохранено:"
-        .Range("B9").Value = legitRepeats
-        
-        .Range("A10").Value = "Итого уникальных строк:"
-        .Range("B10").Value = uniqueRows
-        
-        .Range("A11").Value = "Висячих ссылок:"
-        .Range("B11").Value = danglingRefs
-        
-        .Range("A11").Font.Color = IIf(danglingRefs > 0, RGB(200, 0, 0), RGB(0, 128, 0))
-        .Range("B11").Font.Color = IIf(danglingRefs > 0, RGB(200, 0, 0), RGB(0, 128, 0))
-        
-        .Columns("A").ColumnWidth = 35
-        .Columns("B").ColumnWidth = 80
-    End With
-    
+    ' ========================================================================
+    ' ВЫГРУЗКА РЕЗУЛЬТАТОВ — запись плоской таблицы, трассировки и журнала
+    ' ========================================================================
+    WriteFlatTable wbResult
+    WriteTraceability wbResult, logFilePath, filesCount, totalRows, _
+                      criticalDupes, legitRepeats, uniqueRows, danglingRefs
+    WriteLog logText
+
     ' ========================================================================
     ' ФОРМАТИРОВАНИЕ (без сортировки!)
     ' ========================================================================
     FormatResultSheet wsResult, outputRow - 1
-    
+
     ' Автоширина колонок
     wsResult.Columns("A:D").AutoFit
     wsResult.Columns("C:D").ColumnWidth = 60  ' Широкие колонки для списков
-    
+
     Application.ScreenUpdating = True
     Application.Calculation = xlCalculationAutomatic
     Application.DisplayAlerts = True
     
-    ' Финальное сообщение
-    Dim msg As String
-    msg = "Сборка завершена!" & vbCrLf & _
-          "Уникальных строк: " & uniqueRows & vbCrLf & _
-          "Удалено дубликатов: " & criticalDupes & vbCrLf & _
-          "Легитимных повторений: " & legitRepeats & vbCrLf & _
-          "Висячих ссылок: " & danglingRefs
-    
+    ' Финальное сообщение об успехе (сначала — в журнал через Mod_Util)
+    Dim NodeCount As Long
+    NodeCount = uniqueRows
+    Mod_Util.WriteLog "BuildFlatStructure: узлов " & NodeCount
     If danglingRefs > 0 Then
-        msg = msg & vbCrLf & vbCrLf & "? ВНИМАНИЕ: найдены висячие ссылки (подсвечены красным)!"
-        MsgBox msg, vbExclamation, "Результат (с предупреждениями)"
+        MsgBox "Готово. Узлов: " & NodeCount & vbCrLf & _
+               "? ВНИМАНИЕ: найдены висячие ссылки (подсвечены красным)!", vbExclamation
     Else
-        MsgBox msg, vbInformation, "Результат"
+        MsgBox "Готово. Узлов: " & NodeCount, vbInformation
     End If
+    Exit Sub
+
+End Sub
+
+' ============================================================================
+' ВЫГРУЗКА ПЛОСКОЙ ТАБЛИЦЫ — сохранение книги результатов
+' в фиксированную папку <корень>\02_Подготовка схемы
+' ============================================================================
+Private Sub WriteFlatTable(ByVal wbResult As Workbook)
+    Dim resultsPath As String    ' Фиксированная папка результатов подготовки схемы
+    Dim fsoDir As Object         ' Создание папки результатов при необходимости
+
+    On Error GoTo ErrSave
+
+    ' Путь сохранения результатов — фиксированная папка
+    resultsPath = Mod_Util.GetProjectRoot & "\02_Подготовка схемы"
+
+    ' Создаём папку результатов, если её ещё нет (копируем по образцу ранее выполнявшегося сохранения)
+    Set fsoDir = CreateObject("Scripting.FileSystemObject")
+    If Not fsoDir.FolderExists(resultsPath) Then fsoDir.CreateFolder (resultsPath)
+    Set fsoDir = Nothing
+
+    ' Сохраняем книгу результатов (лист Плоская_таблица) в фиксированную папку
+    Application.DisplayAlerts = False
+    wbResult.SaveAs resultsPath & "\Плоская_таблица.xlsx", FileFormat:=xlOpenXMLWorkbook
+    Application.DisplayAlerts = True
+
+    Mod_Util.WriteLog "WriteFlatTable: результаты сохранены в " & resultsPath
+    Exit Sub
+
+ErrSave:
+    Err.Clear
+    Application.DisplayAlerts = True
+    Mod_Util.WriteError "S005", "Ошибка сохранения результатов: " & Err.Description
+    MsgBox "Ошибка сохранения результатов.", vbExclamation
+End Sub
+
+' ============================================================================
+' ТРАССИРОВКА ПРЕОБРАЗОВАНИЙ — краткая сводка на листе Журнал отчёта
+' (структура листа и состав колонок сохранены без изменений)
+' ============================================================================
+Private Sub WriteTraceability(ByVal wb As Workbook, _
+                              ByVal logFilePath As String, _
+                              ByVal filesCount As Long, _
+                              ByVal totalRows As Long, _
+                              ByVal criticalDupes As Long, _
+                              ByVal legitRepeats As Long, _
+                              ByVal uniqueRows As Long, _
+                              ByVal danglingRefs As Long)
+    Dim wsLog As Worksheet
+    Set wsLog = wb.Worksheets(SHEET_LOG)
+
+    With wsLog
+        .Range("A1").Value = "ПОЛНЫЙ ОТЧЁТ СОХРАНЁН В ФАЙЛ:"
+        .Range("A1").Font.Bold = True
+        .Range("A1").Font.Size = 12
+
+        ' Кликабельная гиперссылка на файл отчёта
+        .Hyperlinks.Add Anchor:=.Range("A2"), _
+                        Address:=logFilePath, _
+                        TextToDisplay:=logFilePath
+
+        .Range("A4").Value = "КРАТКАЯ СВОДКА:"
+        .Range("A4").Font.Bold = True
+
+        .Range("A5").Value = "Дата и время сборки:"
+        .Range("B5").Value = Now
+
+        .Range("A6").Value = "Обработано файлов:"
+        .Range("B6").Value = filesCount
+
+        .Range("A7").Value = "Всего строк до проверки:"
+        .Range("B7").Value = totalRows
+
+        .Range("A8").Value = "Критических дубликатов удалено:"
+        .Range("B8").Value = criticalDupes
+
+        .Range("A9").Value = "Легитимных повторений сохранено:"
+        .Range("B9").Value = legitRepeats
+
+        .Range("A10").Value = "Итого уникальных строк:"
+        .Range("B10").Value = uniqueRows
+
+        .Range("A11").Value = "Висячих ссылок:"
+        .Range("B11").Value = danglingRefs
+
+        .Range("A11").Font.Color = IIf(danglingRefs > 0, RGB(200, 0, 0), RGB(0, 128, 0))
+        .Range("B11").Font.Color = IIf(danglingRefs > 0, RGB(200, 0, 0), RGB(0, 128, 0))
+
+        .Columns("A").ColumnWidth = 35
+        .Columns("B").ColumnWidth = 80
+    End With
+End Sub
+
+' ============================================================================
+' ЖУРНАЛ ВЫПОЛНЕНИЯ — запись текста отчёта через единый журнал Mod_Util
+' (процедура оставлена как обёртка; фактическую запись выполняет Mod_Util)
+' ============================================================================
+Private Sub WriteLog(ByVal logText As String)
+    Mod_Util.WriteLog logText
 End Sub
 
 ' ============================================================================
