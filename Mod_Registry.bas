@@ -128,6 +128,8 @@ ErrHandler:
 End Sub
 
 ' Записывает файлы реестров на диск.
+' Распределение кодов ошибок: R005 — реестры не построены / непредвиденная
+' ошибка, R004 — ошибка создания папки, R003 — ошибка записи файла.
 Public Sub WriteRegistryFiles()
     Dim path As String
     Dim arrT() As String
@@ -135,38 +137,62 @@ Public Sub WriteRegistryFiles()
 
     On Error GoTo ErrHandler
 
+    ' 1. Проверка «реестры не построены» → код R005
     If RegTypes Is Nothing Or RegCoverage Is Nothing Then
-        Mod_Util.WriteError "R003", "WriteRegistryFiles: реестры не построены, вызовите BuildRegistries."
-        MsgBox "Ошибка R003: реестры не построены. Сначала вызовите BuildRegistries.", vbCritical, "Реестры"
+        Mod_Util.WriteError "R005", "WriteRegistryFiles: реестры не построены, вызовите BuildRegistries."
+        MsgBox "Ошибка R005: реестры не построены. Сначала вызовите BuildRegistries.", vbCritical, "Реестры"
         Err.Clear
         Exit Sub
     End If
 
-    ' Папка реестров: корень проекта + подпуть (по разделу 2 спецификации)
+    ' 2. Папка реестров: корень проекта + подпуть (по разделу 2 спецификации)
     path = Mod_Util.GetProjectRoot & "\03_Результаты генерации\03_Реестры"
 
-    ' Создание папки, если её нет (проверка прав через ошибку MkDir)
+    ' 3. Создание папки, если её нет → код R004 при ошибке
     If Dir(path, vbDirectory) = "" Then
+        On Error Resume Next
         MkDir path
+        If Err.Number <> 0 Then
+            Mod_Util.WriteError "R004", "WriteRegistryFiles: не удалось создать папку " & path & ". Ошибка: " & Err.Description
+            MsgBox "Ошибка R004: не удалось создать папку " & path, vbCritical, "Реестры"
+            Err.Clear
+            On Error GoTo ErrHandler
+            Exit Sub
+        End If
+        On Error GoTo ErrHandler
     End If
 
-    ' Файл Реестр_типов.txt: по одному имени на строку, по алфавиту
+    ' 4. Файл Реестр_типов.txt: по одному имени на строку, по алфавиту → R003 при ошибке
     arrT = SortedKeys(RegTypes)
+    On Error Resume Next
     WriteTextFile path & "\Реестр_типов.txt", arrT
+    If Err.Number <> 0 Then
+        Mod_Util.WriteError "R003", "WriteRegistryFiles: не удалось записать Реестр_типов.txt. Ошибка: " & Err.Description
+        MsgBox "Ошибка R003: не удалось записать Реестр_типов.txt", vbCritical, "Реестры"
+        Err.Clear
+    End If
+    On Error GoTo ErrHandler
 
-    ' Файл Реестр_покрытия.txt: по одному имени на строку, по алфавиту
+    ' 5. Файл Реестр_покрытия.txt: по одному имени на строку, по алфавиту → R003 при ошибке
     arrC = SortedKeys(RegCoverage)
+    On Error Resume Next
     WriteTextFile path & "\Реестр_покрытия.txt", arrC
+    If Err.Number <> 0 Then
+        Mod_Util.WriteError "R003", "WriteRegistryFiles: не удалось записать Реестр_покрытия.txt. Ошибка: " & Err.Description
+        MsgBox "Ошибка R003: не удалось записать Реестр_покрытия.txt", vbCritical, "Реестры"
+        Err.Clear
+    End If
+    On Error GoTo ErrHandler
 
+    ' 6. Финальный лог
     Mod_Util.WriteLog "WriteRegistryFiles: сохранено " & RegTypes.Count & " типов, " & _
                       RegCoverage.Count & " покрытий"
     Exit Sub
 
+    ' 7. Общий обработчик ошибок → код R005
 ErrHandler:
-    Mod_Util.WriteError "R004", "WriteRegistryFiles: не удалось создать папку или записать файлы реестров (" & _
-                                 path & "). Проверьте права доступа. Ошибка: " & Err.Description
-    MsgBox "Ошибка R004: не удалось записать файлы реестров. Проверьте права доступа к папке." & vbCrLf & _
-           path, vbCritical, "Реестры"
+    Mod_Util.WriteError "R005", "WriteRegistryFiles: непредвиденная ошибка. Ошибка: " & Err.Description
+    MsgBox "Ошибка R005: непредвиденная ошибка при записи реестров.", vbCritical, "Реестры"
     Err.Clear
 End Sub
 
