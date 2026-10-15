@@ -1,463 +1,257 @@
-Attribute VB_Name = "Mod_Structure"
 Option Explicit
 
-' ============================================================================
-' КОНСТАНТЫ
-' ============================================================================
-Const COL_NAME As Long = 1          ' Колонка "Отображаемое имя"
-Const COL_TYPE As Long = 2          ' Колонка "Тип"
-Const COL_PARENT As Long = 3        ' Колонка "Входит в"
-Const COL_CHILDREN As Long = 4      ' Колонка "Состоит из"
+'=====================================================================
+' Подготовка цветовой структуры ЖЦ ОКС к обработке ИИ
+' (или полная замена этапа извлечения: на выходе готовая плоская таблица)
+'=====================================================================
 
-Const SEPARATOR As String = "; "    ' Единый разделитель
-Const SHEET_RESULT As String = "Сводная таблица"
-Const SHEET_LOG As String = "Отчет о сборке"
+Private Const SRC_SHEET As String = "Структура ЖЦ ИМ ИСП"  ' имя листа со структурой
+Private Const FIRST_ROW As Long = 8                        ' строка, с которой начинается структура (Объект)
+Private Const LAST_COL  As Long = 30                       ' максимальный столбец сканирования
 
-' Системные родители, которые НЕ должны считаться висячими ссылками
-Const SYSTEM_PARENTS As String = "projectfolder;reference_contractors"
+Private Type NodeRec
+    Name       As String
+    NodeType   As String
+    Level      As Long
+    RowIdx     As Long
+    ColIdx     As Long
+    ParentIdx  As Long
+    ColorCode  As Long
+    Children   As String
+End Type
 
-' Допустимые типы (для проверки на неизвестный тип)
-Const VALID_TYPES As String = "Папка;ECM-документ;Документ;Папка ЦИМ;Ярлык"
+Private Nodes() As NodeRec
+Private NodeCount As Long
 
-' Цвета подсветки
-Const COLOR_DANGLING As Long = 13158655     ' RGB(255, 200, 200) Красный — висячая ссылка
-Const COLOR_REPEAT As Long = 11862015       ' RGB(255, 255, 180) Жёлтый — легитимное повторение
-Const COLOR_EMPTY As Long = 9886975         ' RGB(255, 220, 150) Оранжевый — пустое поле
-Const COLOR_UNKNOWN_TYPE As Long = 16763100 ' RGB(220, 200, 255) Фиолетовый — неизвестный тип
+Public Sub BuildFlatStructure()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Worksheets(SRC_SHEET)
 
-
-
-
-' ============================================================================
-' ГЛАВНАЯ ПРОЦЕДУРА
-' ============================================================================
-Sub MergeStructureFiles()
-    Dim fileDialog As fileDialog
-    Dim selectedFiles As Variant
-    Dim i As Long, filesCount As Long
-    
-    ' 1. Выбор файлов пользователем
-    Set fileDialog = Application.fileDialog(msoFileDialogFilePicker)
-    With fileDialog
-        .Title = "Выберите файлы Excel для слияния (можно несколько)"
-        .Filters.Clear
-        .Filters.Add "Excel файлы", "*.xlsx; *.xls; *.xlsm"
-        .AllowMultiSelect = True
-        If .Show = False Then Exit Sub
-        selectedFiles = Array()
-        ReDim selectedFiles(.SelectedItems.Count - 1)
-        For i = 1 To .SelectedItems.Count
-            selectedFiles(i - 1) = .SelectedItems(i)
-        Next i
-    End With
-    filesCount = UBound(selectedFiles) + 1
-    If filesCount = 0 Then Exit Sub
-    
-    Application.ScreenUpdating = False
-    Application.Calculation = xlCalculationManual
-    Application.DisplayAlerts = False
-    
-    ' 2. Создание книги-результата
-    Dim wbResult As Workbook
-    Set wbResult = Workbooks.Add(xlWBATWorksheet)
-    wbResult.Worksheets(1).Name = SHEET_RESULT
-    wbResult.Worksheets.Add(After:=wbResult.Worksheets(1)).Name = SHEET_LOG
-    
-    ' 3. Заголовки
-    Dim wsResult As Worksheet
-    Set wsResult = wbResult.Worksheets(SHEET_RESULT)
-    wsResult.Range("A1").Value = "Отображаемое имя"
-    wsResult.Range("B1").Value = "Тип"
-    wsResult.Range("C1").Value = "Входит в"
-    wsResult.Range("D1").Value = "Состоит из"
-    
-    ' 4. Словари для проверки дубликатов
-    Dim dictFull As Object      ' Ключ = полное совпадение всех 4 полей
-    Dim dictNameType As Object  ' Ключ = Имя + Тип (для легитимных повторений)
-    Dim dictNames As Object     ' Все уникальные имена (для проверки связей)
-    Set dictFull = CreateObject("Scripting.Dictionary")
-    Set dictNameType = CreateObject("Scripting.Dictionary")
-    Set dictNames = CreateObject("Scripting.Dictionary")
-    
-    ' Добавляем системных родителей в словарь имён
-    Dim sysParents As Variant
-    sysParents = Split(SYSTEM_PARENTS, ";")
-    Dim sp As Long
-    For sp = LBound(sysParents) To UBound(sysParents)
-        dictNames(Trim(sysParents(sp))) = True
-    Next sp
-    
-    Dim totalRows As Long
-    Dim criticalDupes As Long
-    Dim legitRepeats As Long
-    Dim uniqueRows As Long
-    Dim outputRow As Long
-    outputRow = 2
-    
-    ' 5. Обработка каждого файла
-    Dim logText As String
-    logText = "=== ОТЧЕТ О СБОРКЕ ===" & vbCrLf
-    logText = logText & "Дата: " & Now() & vbCrLf
-    logText = logText & "Обработано файлов: " & filesCount & vbCrLf & vbCrLf
-    
-    Dim wbSrc As Workbook
-    Dim wsSrc As Worksheet
-    Dim lastRow As Long, srcRow As Long
-    Dim keyFull As String, keyNameType As String
-    Dim nameVal As String, typeVal As String, parentVal As String, childVal As String
-    
-    For i = 0 To filesCount - 1
-        Set wbSrc = Workbooks.Open(selectedFiles(i), ReadOnly:=True)
-        Set wsSrc = wbSrc.Worksheets(1) ' Берём первый лист каждого файла
-        
-        lastRow = wsSrc.Cells(wsSrc.Rows.Count, COL_NAME).End(xlUp).Row
-        
-        ' Определяем стартовую строку (пропуск заголовка)
-        Dim startRow As Long
-        startRow = 2
-        If InStr(UCase(Trim(wsSrc.Cells(1, COL_NAME).Value)), "ОТОБРАЖАЕМОЕ") > 0 Then
-            startRow = 2
-        Else
-            startRow = 1
-        End If
-        
-        logText = logText & "Файл: " & wbSrc.Name & vbCrLf
-        logText = logText & "  Строк данных: " & (lastRow - startRow + 1) & vbCrLf
-        
-        For srcRow = startRow To lastRow
-            nameVal = Trim(CStr(wsSrc.Cells(srcRow, COL_NAME).Value))
-            typeVal = Trim(CStr(wsSrc.Cells(srcRow, COL_TYPE).Value))
-            parentVal = NormalizeSeparators(Trim(CStr(wsSrc.Cells(srcRow, COL_PARENT).Value)))
-            childVal = NormalizeSeparators(Trim(CStr(wsSrc.Cells(srcRow, COL_CHILDREN).Value)))
-            
-            ' Пропускаем полностью пустые строки
-            If nameVal = "" And typeVal = "" Then GoTo NextRow
-            
-            totalRows = totalRows + 1
-            
-            ' Ключи для проверки дубликатов
-            keyFull = nameVal & "|||" & typeVal & "|||" & parentVal & "|||" & childVal
-            keyNameType = nameVal & "|||" & typeVal
-            
-            ' Проверка на критический дубликат
-            If dictFull.Exists(keyFull) Then
-                criticalDupes = criticalDupes + 1
-                logText = logText & "  [КРИТ.ДУБЛ] " & nameVal & " (" & typeVal & ")" & vbCrLf
-                GoTo NextRow
-            End If
-            
-            ' Проверка на легитимное повторение
-            If dictNameType.Exists(keyNameType) Then
-                legitRepeats = legitRepeats + 1
-            Else
-                dictNameType.Add keyNameType, 1
-            End If
-            
-            ' Добавляем имя в словарь всех имён (для последующей проверки связей)
-            If nameVal <> "" And Not dictNames.Exists(nameVal) Then
-                dictNames.Add nameVal, True
-            End If
-            
-            ' Добавляем строку в результат
-            dictFull.Add keyFull, True
-            wsResult.Cells(outputRow, COL_NAME).Value = nameVal
-            wsResult.Cells(outputRow, COL_TYPE).Value = typeVal
-            wsResult.Cells(outputRow, COL_PARENT).Value = parentVal
-            wsResult.Cells(outputRow, COL_CHILDREN).Value = childVal
-            outputRow = outputRow + 1
-            uniqueRows = uniqueRows + 1
-            
-NextRow:
-        Next srcRow
-        
-        wbSrc.Close SaveChanges:=False
-        logText = logText & vbCrLf
+    '---------- 1. Легенда: цвет -> тип ----------
+    Dim legCells(1 To 6) As String
+    Dim legNames(1 To 6) As String
+    Dim legColors(1 To 6) As Long
+    legCells(1) = "B1": legCells(2) = "C1": legCells(3) = "B2"
+    legCells(4) = "C2": legCells(5) = "B3": legCells(6) = "C3"
+    Dim i As Long
+    For i = 1 To 6
+        legNames(i) = Trim(CStr(ws.Range(legCells(i)).Value))
+        legColors(i) = ws.Range(legCells(i)).Interior.Color
     Next i
-    
-    ' ========================================================================
-    ' ПРОВЕРКА ЦЕЛОСТНОСТИ СВЯЗЕЙ + ПОДСВЕТКА ПРОБЛЕМ
-    ' ========================================================================
-    Dim danglingRefs As Long
-    Dim danglingLog As String
-    danglingLog = ""
-    danglingRefs = 0
-    
-    ' Словарь для отслеживания строк с повторениями (для подсветки)
-    Dim dictRepeatRows As Object
-    Set dictRepeatRows = CreateObject("Scripting.Dictionary")
-    
-    ' Собираем информацию о повторениях
-    Dim r As Long
-    For r = 2 To outputRow - 1
-        Dim rowKey As String
-        rowKey = Trim(CStr(wsResult.Cells(r, COL_NAME).Value)) & "|||" & Trim(CStr(wsResult.Cells(r, COL_TYPE).Value))
-        If rowKey <> "|||" Then
-            If Not dictRepeatRows.Exists(rowKey) Then
-                dictRepeatRows.Add rowKey, r  ' Запоминаем первую строку
-            Else
-                ' Помечаем обе строки как повторяющиеся
-                Dim firstRow As Long
-                firstRow = dictRepeatRows(rowKey)
-                dictRepeatRows(rowKey) = -firstRow  ' Отрицательное = есть повтор
+
+    '---------- 2. Сканирование структуры ----------
+    ReDim Nodes(1 To 20000)
+    NodeCount = 0
+    Dim lastAtLevel(1 To LAST_COL) As Long
+    For i = 1 To LAST_COL: lastAtLevel(i) = 0: Next i
+
+    Dim lastRow As Long, lr As Long, c As Long, r As Long
+    lastRow = 0
+    For c = 1 To LAST_COL
+        lr = ws.Cells(ws.Rows.Count, c).End(xlUp).Row
+        If lr > lastRow Then lastRow = lr
+    Next c
+
+    For r = FIRST_ROW To lastRow
+        For c = 1 To LAST_COL
+            Dim v As Variant
+            v = ws.Cells(r, c).Value
+            If Not IsEmpty(v) Then
+                If Len(Trim(CStr(v))) > 0 Then
+                    Dim colr As Long
+                    colr = ws.Cells(r, c).Interior.Color
+                    Dim tName As String
+                    tName = ColorToType(colr, legColors, legNames)
+                    If tName <> "" Then                      ' цвет из легенды => это узел структуры
+                        NodeCount = NodeCount + 1
+                        With Nodes(NodeCount)
+                            .Name = Trim(CStr(v))
+                            .NodeType = tName
+                            .Level = c
+                            .RowIdx = r
+                            .ColIdx = c
+                            .ColorCode = colr
+                            .Children = ""
+                            If c = 1 Then
+                                .ParentIdx = 0
+                            Else
+                                .ParentIdx = lastAtLevel(c - 1)
+                            End If
+                        End With
+                        ' спец-правило: корень
+                        If Nodes(NodeCount).Name = "Объект" Then
+                            Nodes(NodeCount).NodeType = "Папка"
+                            Nodes(NodeCount).ParentIdx = 0
+                        End If
+                        lastAtLevel(c) = NodeCount
+                        Dim k As Long
+                        For k = c + 1 To LAST_COL            ' сброс более глубоких уровней
+                            lastAtLevel(k) = 0
+                        Next k
+                    End If
+                End If
             End If
-        End If
+        Next c
     Next r
-    
-    ' Проверка висячих ссылок и подсветка
-    For r = 2 To outputRow - 1
-        Dim parents As String
-        parents = CStr(wsResult.Cells(r, COL_PARENT).Value)
-        Dim hasDangling As Boolean
-        hasDangling = False
-        
-        If parents <> "" Then
-            Dim arrParents As Variant
-            arrParents = Split(parents, SEPARATOR)
+
+    '---------- 3. Агрегация детей ----------
+    For i = 1 To NodeCount
+        If Nodes(i).ParentIdx > 0 Then
             Dim p As Long
-            For p = LBound(arrParents) To UBound(arrParents)
-                Dim parentName As String
-                parentName = Trim(arrParents(p))
-                If parentName <> "" And Not dictNames.Exists(parentName) Then
-                    danglingRefs = danglingRefs + 1
-                    hasDangling = True
-                    danglingLog = danglingLog & "  Строка " & r & ": """ & parentName & """ (родитель для """ & wsResult.Cells(r, COL_NAME).Value & """)" & vbCrLf
-                End If
-            Next p
-        End If
-        
-        ' Подсветка висячей ссылки (красный)
-        If hasDangling Then
-            wsResult.Range("A" & r & ":D" & r).Interior.Color = COLOR_DANGLING
-        End If
-        
-        ' Подсветка пустых полей (оранжевый)
-        Dim curName As String, curType As String
-        curName = Trim(CStr(wsResult.Cells(r, COL_NAME).Value))
-        curType = Trim(CStr(wsResult.Cells(r, COL_TYPE).Value))
-        If (curName = "" And curType <> "") Or (curName <> "" And curType = "") Then
-            wsResult.Range("A" & r & ":D" & r).Interior.Color = COLOR_EMPTY
-        End If
-        
-        ' Подсветка неизвестного типа (фиолетовый)
-        If curType <> "" Then
-            Dim validArr As Variant
-            validArr = Split(VALID_TYPES, ";")
-            Dim v As Long, typeFound As Boolean
-            typeFound = False
-            For v = LBound(validArr) To UBound(validArr)
-                If Trim(validArr(v)) = curType Then
-                    typeFound = True
-                    Exit For
-                End If
-            Next v
-            If Not typeFound Then
-                wsResult.Range("A" & r & ":D" & r).Interior.Color = COLOR_UNKNOWN_TYPE
+            p = Nodes(i).ParentIdx
+            If Len(Nodes(p).Children) = 0 Then
+                Nodes(p).Children = Nodes(i).Name
+            Else
+                Nodes(p).Children = Nodes(p).Children & "; " & Nodes(i).Name
             End If
         End If
-    Next r
-    
-    ' Подсветка легитимных повторений (жёлтый) — только если нет более серьёзной проблемы
-    Dim keyRepeat As Variant
-    For Each keyRepeat In dictRepeatRows.Keys
-        Dim storedRow As Long
-        storedRow = dictRepeatRows(keyRepeat)
-        If storedRow < 0 Then
-            ' Есть повтор — подсвечиваем обе строки (если они ещё не подсвечены красным)
-            Dim absRow As Long
-            absRow = Abs(storedRow)
-            HighlightIfNotDangling wsResult, absRow
-            ' Найти вторую строку с тем же ключом
-            Dim r2 As Long
-            For r2 = 2 To outputRow - 1
-                Dim rk2 As String
-                rk2 = Trim(CStr(wsResult.Cells(r2, COL_NAME).Value)) & "|||" & Trim(CStr(wsResult.Cells(r2, COL_TYPE).Value))
-                If rk2 = keyRepeat And r2 <> absRow Then
-                    HighlightIfNotDangling wsResult, r2
-                End If
-            Next r2
+    Next i
+
+    '---------- 4. Вывод листов ----------
+    WriteFlatTable
+    WriteTraceability
+    WriteLog
+    MsgBox "Готово. Узлов: " & NodeCount, vbInformation
+End Sub
+
+'---------------- Вспомогательные функции ----------------
+
+Private Function ColorToType(ByVal colr As Long, legColors() As Long, legNames() As String) As String
+    Dim i As Long
+    For i = 1 To 6
+        If colr = legColors(i) Then
+            ColorToType = legNames(i)
+            Exit Function
         End If
-    Next keyRepeat
-    
-    logText = logText & "=== ПРОВЕРКА ЦЕЛОСТНОСТИ СВЯЗЕЙ ===" & vbCrLf
-    If danglingRefs = 0 Then
-        logText = logText & "Висячих ссылок не обнаружено. Все родители существуют в таблице." & vbCrLf
-    Else
-        logText = logText & "Найдено висячих ссылок: " & danglingRefs & vbCrLf
-        logText = logText & danglingLog & vbCrLf
-    End If
-    logText = logText & vbCrLf
-    
-    ' ========================================================================
-    ' ИТОГОВЫЙ ОТЧЁТ — сохранение в текстовый файл (Unicode)
-    ' ========================================================================
-    logText = logText & "=== ИТОГ ===" & vbCrLf
-    logText = logText & "Всего строк до проверки: " & totalRows & vbCrLf
-    logText = logText & "Критических дубликатов удалено: " & criticalDupes & vbCrLf
-    logText = logText & "Легитимных повторений сохранено: " & legitRepeats & vbCrLf
-    logText = logText & "Итого уникальных строк: " & uniqueRows & vbCrLf
-    logText = logText & "Висячих ссылок: " & danglingRefs & vbCrLf
-    logText = logText & vbCrLf
-    logText = logText & "=== ЛЕГЕНДА ПОДСВЕТКИ ===" & vbCrLf
-    logText = logText & "Красный фон    — висячая ссылка (родитель не найден)" & vbCrLf
-    logText = logText & "Жёлтый фон     — объект встречается в нескольких родителях" & vbCrLf
-    logText = logText & "Оранжевый фон  — пустое обязательное поле (имя или тип)" & vbCrLf
-    logText = logText & "Фиолетовый фон — неизвестный тип (не из списка допустимых)" & vbCrLf
-    
-    ' --- Сохранение полного отчёта в .txt файл ---
-    Dim logFilePath As String
-    Dim logFolder As String
-    
-    ' Определяем папку для сохранения (папка результирующей книги)
-    logFolder = wbResult.Path
-    If logFolder = "" Then
-        ' Если книга ещё не сохранена — используем папку "Мои документы"
-        logFolder = Environ("USERPROFILE") & "\Documents"
-    End If
-    
-    ' Формируем имя файла с датой и временем
-    logFilePath = logFolder & "\Отчет_о_сборке_" & Format(Now, "yyyymmdd_hhmmss") & ".txt"
-    
-    ' Записываем файл в кодировке Unicode (третий параметр True)
-    Dim fso As Object
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    Dim ts As Object
-    Set ts = fso.CreateTextFile(logFilePath, True, True) ' True, True = перезапись + Unicode
-    ts.Write logText
-    ts.Close
-    Set ts = Nothing
-    Set fso = Nothing
-    
-    ' --- В Excel записываем только краткую сводку со ссылкой на файл ---
-    Dim wsLog As Worksheet
-    Set wsLog = wbResult.Worksheets(SHEET_LOG)
-    
-    With wsLog
-        .Range("A1").Value = "ПОЛНЫЙ ОТЧЁТ СОХРАНЁН В ФАЙЛ:"
-        .Range("A1").Font.Bold = True
-        .Range("A1").Font.Size = 12
-        
-        ' Кликабельная гиперссылка на файл отчёта
-        .Hyperlinks.Add Anchor:=.Range("A2"), _
-                        Address:=logFilePath, _
-                        TextToDisplay:=logFilePath
-        
-        .Range("A4").Value = "КРАТКАЯ СВОДКА:"
-        .Range("A4").Font.Bold = True
-        
-        .Range("A5").Value = "Дата и время сборки:"
-        .Range("B5").Value = Now
-        
-        .Range("A6").Value = "Обработано файлов:"
-        .Range("B6").Value = filesCount
-        
-        .Range("A7").Value = "Всего строк до проверки:"
-        .Range("B7").Value = totalRows
-        
-        .Range("A8").Value = "Критических дубликатов удалено:"
-        .Range("B8").Value = criticalDupes
-        
-        .Range("A9").Value = "Легитимных повторений сохранено:"
-        .Range("B9").Value = legitRepeats
-        
-        .Range("A10").Value = "Итого уникальных строк:"
-        .Range("B10").Value = uniqueRows
-        
-        .Range("A11").Value = "Висячих ссылок:"
-        .Range("B11").Value = danglingRefs
-        
-        .Range("A11").Font.Color = IIf(danglingRefs > 0, RGB(200, 0, 0), RGB(0, 128, 0))
-        .Range("B11").Font.Color = IIf(danglingRefs > 0, RGB(200, 0, 0), RGB(0, 128, 0))
-        
-        .Columns("A").ColumnWidth = 35
-        .Columns("B").ColumnWidth = 80
-    End With
-    
-    ' ========================================================================
-    ' ФОРМАТИРОВАНИЕ (без сортировки!)
-    ' ========================================================================
-    FormatResultSheet wsResult, outputRow - 1
-    
-    ' Автоширина колонок
-    wsResult.Columns("A:D").AutoFit
-    wsResult.Columns("C:D").ColumnWidth = 60  ' Широкие колонки для списков
-    
-    Application.ScreenUpdating = True
-    Application.Calculation = xlCalculationAutomatic
-    Application.DisplayAlerts = True
-    
-    ' Финальное сообщение
-    Dim msg As String
-    msg = "Сборка завершена!" & vbCrLf & _
-          "Уникальных строк: " & uniqueRows & vbCrLf & _
-          "Удалено дубликатов: " & criticalDupes & vbCrLf & _
-          "Легитимных повторений: " & legitRepeats & vbCrLf & _
-          "Висячих ссылок: " & danglingRefs
-    
-    If danglingRefs > 0 Then
-        msg = msg & vbCrLf & vbCrLf & "? ВНИМАНИЕ: найдены висячие ссылки (подсвечены красным)!"
-        MsgBox msg, vbExclamation, "Результат (с предупреждениями)"
-    Else
-        MsgBox msg, vbInformation, "Результат"
-    End If
-End Sub
-
-' ============================================================================
-' ВСПОМОГАТЕЛЬНАЯ: подсветка строки, если она ещё не красная
-' ============================================================================
-Private Sub HighlightIfNotDangling(ws As Worksheet, rowNum As Long)
-    Dim currentColor As Long
-    currentColor = ws.Cells(rowNum, COL_NAME).Interior.Color
-    If currentColor <> COLOR_DANGLING Then
-        ws.Range("A" & rowNum & ":D" & rowNum).Interior.Color = COLOR_REPEAT
-    End If
-End Sub
-
-' ============================================================================
-' НОРМАЛИЗАЦИЯ РАЗДЕЛИТЕЛЕЙ
-' ============================================================================
-Private Function NormalizeSeparators(ByVal text As String) As String
-    ' Заменяем различные варианты разделителей на единый "; "
-    text = Replace(text, ";", SEPARATOR)
-    text = Replace(text, ";;", SEPARATOR)
-    text = Replace(text, ", ", SEPARATOR)
-    text = Replace(text, " ,", SEPARATOR)
-    
-    ' Удаляем двойные пробелы вокруг разделителя
-    Do While InStr(text, "  ") > 0
-        text = Replace(text, "  ", " ")
-    Loop
-    
-    ' Удаляем лишние разделители в начале и конце
-    text = Trim(text)
-    If Left(text, Len(SEPARATOR)) = SEPARATOR Then
-        text = Mid(text, Len(SEPARATOR) + 1)
-    End If
-    If Right(text, Len(SEPARATOR)) = SEPARATOR Then
-        text = Left(text, Len(text) - Len(SEPARATOR))
-    End If
-    
-    NormalizeSeparators = text
+    Next i
+    ColorToType = ""          ' цвет не из легенды => служебная ячейка
 End Function
 
-' ============================================================================
-' ФОРМАТИРОВАНИЕ ЛИСТА РЕЗУЛЬТАТА (без сортировки!)
-' ============================================================================
-Private Sub FormatResultSheet(ws As Worksheet, lastRow As Long)
-    ' Заголовки
-    With ws.Range("A1:D1")
-        .Font.Bold = True
-        .Interior.Color = RGB(200, 220, 240)
-        .HorizontalAlignment = xlCenter
-    End With
-    
-    ' Границы
-    ws.Range("A1:D" & lastRow).Borders.LineStyle = xlContinuous
-    
-    ' Автофильтр
-    ws.Range("A1:D1").AutoFilter
-    
-    ' Закрепление заголовка
-    ws.Range("A2").Select
-    ActiveWindow.FreezePanes = True
+Private Function LeadCode(ByVal s As String) As String
+    Dim re As Object
+    Set re = CreateObject("VBScript.RegExp")
+    re.Pattern = "^(\d+(?:\.\d+)*)"
+    If re.Test(s) Then
+        LeadCode = re.Execute(s)(0).SubMatches(0)
+    Else
+        LeadCode = ""
+    End If
+End Function
+
+Private Function CodeDepth(ByVal code As String) As Long
+    If code = "" Then CodeDepth = 0: Exit Function
+    CodeDepth = UBound(Split(code, ".")) + 1
+End Function
+
+Private Function HexRGB(ByVal c As Long) As String
+    Dim r As Long, g As Long, b As Long
+    r = c Mod 256: g = (c \ 256) Mod 256: b = (c \ 65536) Mod 256
+    HexRGB = UCase(Right("00" & Hex(r), 2) & Right("00" & Hex(g), 2) & Right("00" & Hex(b), 2))
+End Function
+
+Private Function ParentName(ByVal idx As Long) As String
+    If idx = 0 Then
+        ParentName = ""
+    Else
+        ParentName = Nodes(idx).Name
+    End If
+End Function
+
+Private Sub GetSheet(ByVal nm As String, ByRef out As Worksheet)
+    On Error Resume Next
+    ThisWorkbook.Worksheets(nm).Delete
+    On Error GoTo 0
+    Set out = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+    out.Name = nm
 End Sub
 
+'---------------- Лист 1: целевая плоская таблица ----------------
+Private Sub WriteFlatTable()
+    Dim ws As Worksheet
+    GetSheet "Плоская_таблица", ws
+    ws.Range("A1:D1").Value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из")
+    Dim i As Long, r As Long
+    r = 2
+    For i = 1 To NodeCount
+        Dim parentCell As String
+        If Nodes(i).Name = "Объект" Then
+            parentCell = "projectfolder"
+        Else
+            parentCell = ParentName(Nodes(i).ParentIdx)
+        End If
+        ws.Cells(r, 1).Value = Nodes(i).Name
+        ws.Cells(r, 2).Value = Nodes(i).NodeType
+        ws.Cells(r, 3).Value = parentCell
+        ws.Cells(r, 4).Value = Nodes(i).Children
+        r = r + 1
+    Next i
+    ws.Columns("A:D").AutoFit
+End Sub
+
+'---------------- Лист 2: трассировка ----------------
+Private Sub WriteTraceability()
+    Dim ws As Worksheet
+    GetSheet "Трассировка", ws
+    ws.Range("A1:H1").Value = Array("№", "Строка", "Столбец", "Уровень", "Отображаемое имя", "Тип", "Цвет RGB", "Родитель")
+    Dim i As Long
+    For i = 1 To NodeCount
+        ws.Cells(i + 1, 1).Value = i
+        ws.Cells(i + 1, 2).Value = Nodes(i).RowIdx
+        ws.Cells(i + 1, 3).Value = Nodes(i).ColIdx
+        ws.Cells(i + 1, 4).Value = Nodes(i).Level
+        ws.Cells(i + 1, 5).Value = Nodes(i).Name
+        ws.Cells(i + 1, 6).Value = Nodes(i).NodeType
+        ws.Cells(i + 1, 7).Value = HexRGB(Nodes(i).ColorCode)
+        ws.Cells(i + 1, 8).Value = ParentName(Nodes(i).ParentIdx)
+    Next i
+    ws.Columns("A:H").AutoFit
+End Sub
+
+'---------------- Лист 3: журнал аномалий ----------------
+Private Sub WriteLog()
+    Dim ws As Worksheet
+    GetSheet "Журнал", ws
+    ws.Range("A1:D1").Value = Array("Код проблемы", "Элемент", "Родитель", "Описание")
+    Dim r As Long
+    r = 2
+    Dim i As Long
+    For i = 1 To NodeCount
+        Dim nm As String, pn As String
+        nm = Nodes(i).Name
+        pn = ParentName(Nodes(i).ParentIdx)
+
+        ' сирота (не корень и без родителя)
+        If Nodes(i).ParentIdx = 0 And nm <> "Объект" Then
+            ws.Cells(r, 1).Value = "ORPHAN": ws.Cells(r, 2).Value = nm
+            ws.Cells(r, 4).Value = "Не найден родитель уровня N-1"
+            r = r + 1
+        End If
+
+        ' ECM-документ не должен иметь детей
+        If Nodes(i).NodeType = "ECM-документ" And Len(Nodes(i).Children) > 0 Then
+            ws.Cells(r, 1).Value = "LEAF_HAS_CHILDREN": ws.Cells(r, 2).Value = nm
+            ws.Cells(r, 4).Value = "ECM-документ с дочерними элементами: " & Nodes(i).Children
+            r = r + 1
+        End If
+
+        ' проверки кодов
+        Dim cc As String, pc As String
+        cc = LeadCode(nm)
+        pc = LeadCode(pn)
+        If cc <> "" And pc <> "" Then
+            If Left(cc, Len(pc) + 1) <> pc & "." Then
+                ws.Cells(r, 1).Value = "CODE_PARENT_MISMATCH": ws.Cells(r, 2).Value = nm
+                ws.Cells(r, 3).Value = pn
+                ws.Cells(r, 4).Value = "Код ребенка не продолжает код родителя"
+                r = r + 1
+            End If
+            If CodeDepth(cc) <> CodeDepth(pc) + 1 Then
+                ws.Cells(r, 1).Value = "CODE_DEPTH_JUMP": ws.Cells(r, 2).Value = nm
+                ws.Cells(r, 3).Value = pn
+                ws.Cells(r, 4).Value = "Глубина кода ребенка не равна глубине родителя + 1"
+                r = r + 1
+            End If
+        End If
+    Next i
+    ws.Columns("A:D").AutoFit
+End Sub
