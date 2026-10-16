@@ -70,8 +70,8 @@ Public Sub RestoreUI()
         "Восстановить кнопки и оформление")
 
     actions = Array( _
-        "CreateProjectFolders", _
-        "CheckSourceFiles", _
+        "CreateProjectFolders_Click", _
+        "CheckSourceFiles_Click", _
         "BuildFlatStructure_Click", _
         "RecheckFlatTable_Click", _
         "AssembleDraft_Click", _
@@ -169,31 +169,38 @@ End Sub
 ' ------------------------------------------------------------
 ' 1. Создать папки проекта
 ' ------------------------------------------------------------
-Public Sub CreateProjectFolders()
+Public Sub CreateProjectFolders_Click()
     On Error GoTo ErrHandler
-    Mod_Folders.CreateProjectFolders
-    Mod_Util.WriteLog "Создание папок проекта выполнено"
-    MsgBox "Папки проекта созданы"
+
+    Call Mod_Folders.CreateProjectFolders
+    Mod_Util.WriteLog "CreateProjectFolders_Click: папки созданы"
     Exit Sub
+
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в CreateProjectFolders: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteError "F003", "CreateProjectFolders_Click: " & Err.Description
+    MsgBox "Ошибка F003: " & Err.Description, vbCritical, "Папки проекта"
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
 ' 2. Проверить исходные данные
 ' ------------------------------------------------------------
-Public Sub CheckSourceFiles()
+Public Sub CheckSourceFiles_Click()
     Dim ok As Boolean
+
     On Error GoTo ErrHandler
+
     ok = Mod_Folders.CheckSourceFolders
-    Mod_Util.WriteLog "Проверка исходных данных: " & IIf(ok, "OK", "есть проблемы")
-    MsgBox "Проверка завершена. Смотрите лог."
+    If ok Then
+        MsgBox "Все исходные файлы найдены.", vbInformation, "Проверка исходных данных"
+    Else
+        MsgBox "Есть проблемы. Смотрите лог 05_Логи.", vbExclamation, "Проверка исходных данных"
+    End If
     Exit Sub
+
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в CheckSourceFiles: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteError "F004", "CheckSourceFiles_Click: " & Err.Description
+    MsgBox "Ошибка F004: " & Err.Description, vbCritical, "Проверка исходных данных"
     Err.Clear
 End Sub
 
