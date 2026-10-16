@@ -2,18 +2,18 @@ Attribute VB_Name = "Mod_Prompt"
 Option Explicit
 
 ' ============================================================================
-' Модуль промптов: формирование промптов для следующего шага и исправлений,
-' чтение списка и текущей позиции шагов.
-' Реализация W4 (разделы 2, 3, 8, 9, 13 спецификации Spec_Dispatcher.md).
-' Коды ошибок: P001 — нет Шаги.txt, P002 — ошибка формирования промта шага,
-' P003 — ошибка формирования промта исправления.
+' РњРѕРґСѓР»СЊ РїСЂРѕРјРїС‚РѕРІ: С„РѕСЂРјРёСЂРѕРІР°РЅРёРµ РїСЂРѕРјРїС‚РѕРІ РґР»СЏ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР° Рё РёСЃРїСЂР°РІР»РµРЅРёР№,
+' С‡С‚РµРЅРёРµ СЃРїРёСЃРєР° Рё С‚РµРєСѓС‰РµР№ РїРѕР·РёС†РёРё С€Р°РіРѕРІ.
+' Р РµР°Р»РёР·Р°С†РёСЏ W4 (СЂР°Р·РґРµР»С‹ 2, 3, 8, 9, 13 СЃРїРµС†РёС„РёРєР°С†РёРё Spec_Dispatcher.md).
+' РљРѕРґС‹ РѕС€РёР±РѕРє: P001 вЂ” РЅРµС‚ РЁР°РіРё.txt, P002 вЂ” РѕС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РїСЂРѕРјС‚Р° С€Р°РіР°,
+' P003 вЂ” РѕС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РїСЂРѕРјС‚Р° РёСЃРїСЂР°РІР»РµРЅРёСЏ.
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
-' ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Private)
+' Р’РЎРџРћРњРћР“РђРўР•Р›Р¬РќР«Р• Р¤РЈРќРљР¦РР (Private)
 ' ---------------------------------------------------------------------------
 
-' Возвращает путь без завершающего разделителя "\".
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСѓС‚СЊ Р±РµР· Р·Р°РІРµСЂС€Р°СЋС‰РµРіРѕ СЂР°Р·РґРµР»РёС‚РµР»СЏ "\".
 Private Function NormPath(ByVal p As String) As String
     Do While Len(p) > 1 And Right(p, 1) = "\"
         p = Left(p, Len(p) - 1)
@@ -21,8 +21,8 @@ Private Function NormPath(ByVal p As String) As String
     NormPath = p
 End Function
 
-' Создаёт цепочку папок по полному пути (аналог mkdir -p).
-' Препроцессор никогда не удаляет папки и файлы (раздел 3 спецификации).
+' РЎРѕР·РґР°С‘С‚ С†РµРїРѕС‡РєСѓ РїР°РїРѕРє РїРѕ РїРѕР»РЅРѕРјСѓ РїСѓС‚Рё (Р°РЅР°Р»РѕРі mkdir -p).
+' РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ РЅРёРєРѕРіРґР° РЅРµ СѓРґР°Р»СЏРµС‚ РїР°РїРєРё Рё С„Р°Р№Р»С‹ (СЂР°Р·РґРµР» 3 СЃРїРµС†РёС„РёРєР°С†РёРё).
 Private Sub EnsureFolder(ByVal folderPath As String)
     Dim parts() As String
     Dim cur As String
@@ -31,7 +31,7 @@ Private Sub EnsureFolder(ByVal folderPath As String)
     If Dir(folderPath, vbDirectory) <> "" Then Exit Sub
 
     parts = Split(folderPath, "\")
-    cur = parts(0)                       ' диск или UNC-префикс
+    cur = parts(0)                       ' РґРёСЃРє РёР»Рё UNC-РїСЂРµС„РёРєСЃ
     For i = 1 To UBound(parts)
         If parts(i) <> "" Then
             cur = cur & "\" & parts(i)
@@ -40,9 +40,9 @@ Private Sub EnsureFolder(ByVal folderPath As String)
     Next i
 End Sub
 
-' Читает текстовый файл целиком в строку (через Line Input).
-' Если файла нет — возвращает пустую строку (вызывающий сам решает,
-' считать ли это ошибкой).
+' Р§РёС‚Р°РµС‚ С‚РµРєСЃС‚РѕРІС‹Р№ С„Р°Р№Р» С†РµР»РёРєРѕРј РІ СЃС‚СЂРѕРєСѓ (С‡РµСЂРµР· Line Input).
+' Р•СЃР»Рё С„Р°Р№Р»Р° РЅРµС‚ вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ РїСѓСЃС‚СѓСЋ СЃС‚СЂРѕРєСѓ (РІС‹Р·С‹РІР°СЋС‰РёР№ СЃР°Рј СЂРµС€Р°РµС‚,
+' СЃС‡РёС‚Р°С‚СЊ Р»Рё СЌС‚Рѕ РѕС€РёР±РєРѕР№).
 Private Function ReadTextFile(ByVal filePath As String) As String
     Dim fnum As Integer
     Dim s As String
@@ -61,14 +61,14 @@ Private Function ReadTextFile(ByVal filePath As String) As String
     Loop
     Close #fnum
 
-    ' убрать финальный перевод строки
+    ' СѓР±СЂР°С‚СЊ С„РёРЅР°Р»СЊРЅС‹Р№ РїРµСЂРµРІРѕРґ СЃС‚СЂРѕРєРё
     If Len(res) >= 2 Then
         If Right(res, 2) = vbCrLf Then res = Left(res, Len(res) - 2)
     End If
     ReadTextFile = res
 End Function
 
-' Сохраняет строку в текстовый файл (перезаписывает существующий).
+' РЎРѕС…СЂР°РЅСЏРµС‚ СЃС‚СЂРѕРєСѓ РІ С‚РµРєСЃС‚РѕРІС‹Р№ С„Р°Р№Р» (РїРµСЂРµР·Р°РїРёСЃС‹РІР°РµС‚ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№).
 Private Sub SaveTextFile(ByVal filePath As String, ByVal content As String)
     Dim fnum As Integer
     Dim lines() As String
@@ -83,8 +83,8 @@ Private Sub SaveTextFile(ByVal filePath As String, ByVal content As String)
     Close #fnum
 End Sub
 
-' Заменяет плейсхолдер в тексте только если он там есть.
-' Плейсхолдеры, отсутствующие в шаблоне, не добавляются.
+' Р—Р°РјРµРЅСЏРµС‚ РїР»РµР№СЃС…РѕР»РґРµСЂ РІ С‚РµРєСЃС‚Рµ С‚РѕР»СЊРєРѕ РµСЃР»Рё РѕРЅ С‚Р°Рј РµСЃС‚СЊ.
+' РџР»РµР№СЃС…РѕР»РґРµСЂС‹, РѕС‚СЃСѓС‚СЃС‚РІСѓСЋС‰РёРµ РІ С€Р°Р±Р»РѕРЅРµ, РЅРµ РґРѕР±Р°РІР»СЏСЋС‚СЃСЏ.
 Private Function ReplaceIfPresent(ByVal text As String, _
                                   ByVal placeholder As String, _
                                   ByVal value As String) As String
@@ -95,7 +95,7 @@ Private Function ReplaceIfPresent(ByVal text As String, _
     End If
 End Function
 
-' Извлекает номер шага из записи коллекции "NN|Имя_папки".
+' РР·РІР»РµРєР°РµС‚ РЅРѕРјРµСЂ С€Р°РіР° РёР· Р·Р°РїРёСЃРё РєРѕР»Р»РµРєС†РёРё "NN|РРјСЏ_РїР°РїРєРё".
 Private Function StepNumFromEntry(ByVal entry As String) As String
     Dim pos As Long
     pos = InStr(entry, "|")
@@ -106,7 +106,7 @@ Private Function StepNumFromEntry(ByVal entry As String) As String
     End If
 End Function
 
-' Извлекает имя папки из записи коллекции "NN|Имя_папки".
+' РР·РІР»РµРєР°РµС‚ РёРјСЏ РїР°РїРєРё РёР· Р·Р°РїРёСЃРё РєРѕР»Р»РµРєС†РёРё "NN|РРјСЏ_РїР°РїРєРё".
 Private Function StepNameFromEntry(ByVal entry As String) As String
     Dim pos As Long
     pos = InStr(entry, "|")
@@ -117,15 +117,15 @@ Private Function StepNameFromEntry(ByVal entry As String) As String
     End If
 End Function
 
-' Приводит номер шага к числовому виду (для сравнения "больше текущего").
+' РџСЂРёРІРѕРґРёС‚ РЅРѕРјРµСЂ С€Р°РіР° Рє С‡РёСЃР»РѕРІРѕРјСѓ РІРёРґСѓ (РґР»СЏ СЃСЂР°РІРЅРµРЅРёСЏ "Р±РѕР»СЊС€Рµ С‚РµРєСѓС‰РµРіРѕ").
 Private Function StepNumToLong(ByVal nn As String) As Long
     On Error Resume Next
     StepNumToLong = CLng(nn)
     On Error GoTo 0
 End Function
 
-' Возвращает имя последнего изменённого файла по указанной маске
-' в заданной папке. Если файлов нет — возвращает "".
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РёРјСЏ РїРѕСЃР»РµРґРЅРµРіРѕ РёР·РјРµРЅС‘РЅРЅРѕРіРѕ С„Р°Р№Р»Р° РїРѕ СѓРєР°Р·Р°РЅРЅРѕР№ РјР°СЃРєРµ
+' РІ Р·Р°РґР°РЅРЅРѕР№ РїР°РїРєРµ. Р•СЃР»Рё С„Р°Р№Р»РѕРІ РЅРµС‚ вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ "".
 Private Function LastModifiedFile(ByVal folderPath As String, ByVal mask As String) As String
     Dim fName As String
     Dim best As String
@@ -133,7 +133,7 @@ Private Function LastModifiedFile(ByVal folderPath As String, ByVal mask As Stri
 
     fName = Dir(folderPath & "\" & mask)
     Do While fName <> ""
-        If Left(fName, 2) <> "~$" Then           ' пропускаем временные файлы Excel
+        If Left(fName, 2) <> "~$" Then           ' РїСЂРѕРїСѓСЃРєР°РµРј РІСЂРµРјРµРЅРЅС‹Рµ С„Р°Р№Р»С‹ Excel
             If best = "" Then
                 best = fName
                 bestDate = FileDateTime(folderPath & "\" & fName)
@@ -147,9 +147,9 @@ Private Function LastModifiedFile(ByVal folderPath As String, ByVal mask As Stri
     LastModifiedFile = best
 End Function
 
-' Читает лист «Ошибки» книги сводной таблицы в текст
-' (строки через vbCrLf, колонки через " | ").
-' Возвращает False, если лист не найден.
+' Р§РёС‚Р°РµС‚ Р»РёСЃС‚ В«РћС€РёР±РєРёВ» РєРЅРёРіРё СЃРІРѕРґРЅРѕР№ С‚Р°Р±Р»РёС†С‹ РІ С‚РµРєСЃС‚
+' (СЃС‚СЂРѕРєРё С‡РµСЂРµР· vbCrLf, РєРѕР»РѕРЅРєРё С‡РµСЂРµР· " | ").
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ False, РµСЃР»Рё Р»РёСЃС‚ РЅРµ РЅР°Р№РґРµРЅ.
 Private Function ReadErrorsSheetText(ByVal wb As Workbook, ByRef outText As String) As Boolean
     Dim ws As Worksheet
     Dim lastRow As Long
@@ -160,7 +160,7 @@ Private Function ReadErrorsSheetText(ByVal wb As Workbook, ByRef outText As Stri
     Dim res As String
 
     On Error Resume Next
-    Set ws = wb.Worksheets("Ошибки")
+    Set ws = wb.Worksheets("РћС€РёР±РєРё")
     On Error GoTo 0
     If ws Is Nothing Then
         outText = ""
@@ -172,7 +172,7 @@ Private Function ReadErrorsSheetText(ByVal wb As Workbook, ByRef outText As Stri
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
     If lastCol < 1 Then lastCol = 1
 
-    ' строка 1 — заголовки («Код», «Источник», «Сообщение»), строки 2+ — ошибки
+    ' СЃС‚СЂРѕРєР° 1 вЂ” Р·Р°РіРѕР»РѕРІРєРё (В«РљРѕРґВ», В«РСЃС‚РѕС‡РЅРёРєВ», В«РЎРѕРѕР±С‰РµРЅРёРµВ»), СЃС‚СЂРѕРєРё 2+ вЂ” РѕС€РёР±РєРё
     For r = 2 To lastRow
         lineText = ""
         For c = 1 To lastCol
@@ -189,9 +189,9 @@ Private Function ReadErrorsSheetText(ByVal wb As Workbook, ByRef outText As Stri
     ReadErrorsSheetText = True
 End Function
 
-' Собирает фрагмент схемы из листа «Плоская_таблица» книги, сохранённой
-' в папке 02_Подготовка схемы (последняя по времени изменения книга).
-' Если файла/листа нет — возвращает "" и пишет предупреждение в лог.
+' РЎРѕР±РёСЂР°РµС‚ С„СЂР°РіРјРµРЅС‚ СЃС…РµРјС‹ РёР· Р»РёСЃС‚Р° В«РџР»РѕСЃРєР°СЏ_С‚Р°Р±Р»РёС†Р°В» РєРЅРёРіРё, СЃРѕС…СЂР°РЅС‘РЅРЅРѕР№
+' РІ РїР°РїРєРµ 02_РџРѕРґРіРѕС‚РѕРІРєР° СЃС…РµРјС‹ (РїРѕСЃР»РµРґРЅСЏСЏ РїРѕ РІСЂРµРјРµРЅРё РёР·РјРµРЅРµРЅРёСЏ РєРЅРёРіР°).
+' Р•СЃР»Рё С„Р°Р№Р»Р°/Р»РёСЃС‚Р° РЅРµС‚ вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ "" Рё РїРёС€РµС‚ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ РІ Р»РѕРі.
 Private Function GetSchemaFragment() As String
     Dim prepPath As String
     Dim fileName As String
@@ -211,14 +211,14 @@ Private Function GetSchemaFragment() As String
 
     GetSchemaFragment = ""
 
-    prepPath = Mod_Util.GetProjectRoot & "\02_Подготовка схемы"
+    prepPath = Mod_Util.GetProjectRoot & "\02_РџРѕРґРіРѕС‚РѕРІРєР° СЃС…РµРјС‹"
     If Dir(prepPath, vbDirectory) = "" Then
-        Mod_Util.WriteWarning "P002", "GetSchemaFragment: папка 02_Подготовка схемы не найдена, схема не включена."
+        Mod_Util.WriteWarning "P002", "GetSchemaFragment: РїР°РїРєР° 02_РџРѕРґРіРѕС‚РѕРІРєР° СЃС…РµРјС‹ РЅРµ РЅР°Р№РґРµРЅР°, СЃС…РµРјР° РЅРµ РІРєР»СЋС‡РµРЅР°."
         Exit Function
     End If
 
-    ' ищем самый свежий файл результата подготовки схемы
-    candidates(1) = "Плоская_таблица.xlsx"
+    ' РёС‰РµРј СЃР°РјС‹Р№ СЃРІРµР¶РёР№ С„Р°Р№Р» СЂРµР·СѓР»СЊС‚Р°С‚Р° РїРѕРґРіРѕС‚РѕРІРєРё СЃС…РµРјС‹
+    candidates(1) = "РџР»РѕСЃРєР°СЏ_С‚Р°Р±Р»РёС†Р°.xlsx"
     candidates(2) = "*.xlsx"
     candidates(3) = "*.xlsm"
     newest = ""
@@ -234,7 +234,7 @@ Private Function GetSchemaFragment() As String
     Next i
 
     If newest = "" Then
-        Mod_Util.WriteWarning "P002", "GetSchemaFragment: в 02_Подготовка схемы нет файла Плоская_таблица.xlsx, схема не включена."
+        Mod_Util.WriteWarning "P002", "GetSchemaFragment: РІ 02_РџРѕРґРіРѕС‚РѕРІРєР° СЃС…РµРјС‹ РЅРµС‚ С„Р°Р№Р»Р° РџР»РѕСЃРєР°СЏ_С‚Р°Р±Р»РёС†Р°.xlsx, СЃС…РµРјР° РЅРµ РІРєР»СЋС‡РµРЅР°."
         Exit Function
     End If
 
@@ -243,16 +243,16 @@ Private Function GetSchemaFragment() As String
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo 0
-        Mod_Util.WriteWarning "P002", "GetSchemaFragment: не удалось открыть файл схемы '" & newest & "', схема не включена."
+        Mod_Util.WriteWarning "P002", "GetSchemaFragment: РЅРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ С„Р°Р№Р» СЃС…РµРјС‹ '" & newest & "', СЃС…РµРјР° РЅРµ РІРєР»СЋС‡РµРЅР°."
         Exit Function
     End If
     On Error GoTo 0
 
     On Error Resume Next
-    Set ws = wb.Worksheets("Плоская_таблица")
+    Set ws = wb.Worksheets("РџР»РѕСЃРєР°СЏ_С‚Р°Р±Р»РёС†Р°")
     On Error GoTo 0
     If ws Is Nothing Then
-        Mod_Util.WriteWarning "P002", "GetSchemaFragment: в файле '" & newest & "' нет листа 'Плоская_таблица', схема не включена."
+        Mod_Util.WriteWarning "P002", "GetSchemaFragment: РІ С„Р°Р№Р»Рµ '" & newest & "' РЅРµС‚ Р»РёСЃС‚Р° 'РџР»РѕСЃРєР°СЏ_С‚Р°Р±Р»РёС†Р°', СЃС…РµРјР° РЅРµ РІРєР»СЋС‡РµРЅР°."
         wb.Close SaveChanges:=False
         Exit Function
     End If
@@ -279,12 +279,12 @@ Private Function GetSchemaFragment() As String
 End Function
 
 ' ---------------------------------------------------------------------------
-' ПУБЛИЧЕСКИЕ ПРОЦЕДУРЫ И ФУНКЦИИ
+' РџРЈР‘Р›РР§Р•РЎРљРР• РџР РћР¦Р•Р”РЈР Р« Р Р¤РЈРќРљР¦РР
 ' ---------------------------------------------------------------------------
 
-' Читает список шагов (<корень>\04_Промты\Шаги.txt) и возвращает его
-' коллекцией. Каждая запись — строка вида "NN|Имя_папки".
-' При отсутствии файла: ошибка P001, MsgBox, пустая коллекция.
+' Р§РёС‚Р°РµС‚ СЃРїРёСЃРѕРє С€Р°РіРѕРІ (<РєРѕСЂРµРЅСЊ>\04_РџСЂРѕРјС‚С‹\РЁР°РіРё.txt) Рё РІРѕР·РІСЂР°С‰Р°РµС‚ РµРіРѕ
+' РєРѕР»Р»РµРєС†РёРµР№. РљР°Р¶РґР°СЏ Р·Р°РїРёСЃСЊ вЂ” СЃС‚СЂРѕРєР° РІРёРґР° "NN|РРјСЏ_РїР°РїРєРё".
+' РџСЂРё РѕС‚СЃСѓС‚СЃС‚РІРёРё С„Р°Р№Р»Р°: РѕС€РёР±РєР° P001, MsgBox, РїСѓСЃС‚Р°СЏ РєРѕР»Р»РµРєС†РёСЏ.
 Public Function ReadStepList() As Collection
     Dim col As Collection
     Dim fnum As Integer
@@ -298,18 +298,18 @@ Public Function ReadStepList() As Collection
     On Error GoTo ErrHandler
 
     Dim filePath As String
-    filePath = Mod_Util.GetProjectRoot & "\04_Промты\Шаги.txt"
+    filePath = Mod_Util.GetProjectRoot & "\04_РџСЂРѕРјС‚С‹\РЁР°РіРё.txt"
 
-    ' файла нет ? P001, MsgBox, пустая коллекция
+    ' С„Р°Р№Р»Р° РЅРµС‚ ? P001, MsgBox, РїСѓСЃС‚Р°СЏ РєРѕР»Р»РµРєС†РёСЏ
     If Dir(filePath) = "" Then
-        Mod_Util.WriteError "P001", "ReadStepList: не найден Шаги.txt"
-        MsgBox "Ошибка P001: не найден файл Шаги.txt (" & vbCrLf & filePath & ")", _
-               vbCritical, "Промты"
+        Mod_Util.WriteError "P001", "ReadStepList: РЅРµ РЅР°Р№РґРµРЅ РЁР°РіРё.txt"
+        MsgBox "РћС€РёР±РєР° P001: РЅРµ РЅР°Р№РґРµРЅ С„Р°Р№Р» РЁР°РіРё.txt (" & vbCrLf & filePath & ")", _
+               vbCritical, "РџСЂРѕРјС‚С‹"
         Set ReadStepList = col
         Exit Function
     End If
 
-    ' формат строки: "NN = Имя_папки"
+    ' С„РѕСЂРјР°С‚ СЃС‚СЂРѕРєРё: "NN = РРјСЏ_РїР°РїРєРё"
     fnum = FreeFile
     Open filePath For Input As #fnum
     Do While Not EOF(fnum)
@@ -330,16 +330,16 @@ Public Function ReadStepList() As Collection
     Exit Function
 
 ErrHandler:
-    Mod_Util.WriteError "P001", "ReadStepList: ошибка чтения Шаги.txt. Ошибка: " & Err.Description
-    MsgBox "Ошибка P001: не удалось прочитать файл Шаги.txt." & vbCrLf & Err.Description, _
-           vbCritical, "Промты"
+    Mod_Util.WriteError "P001", "ReadStepList: РѕС€РёР±РєР° С‡С‚РµРЅРёСЏ РЁР°РіРё.txt. РћС€РёР±РєР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° P001: РЅРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ С„Р°Р№Р» РЁР°РіРё.txt." & vbCrLf & Err.Description, _
+           vbCritical, "РџСЂРѕРјС‚С‹"
     Err.Clear
     Set ReadStepList = col
 End Function
 
-' Возвращает номер текущего шага — последней существующей папки Шаг_*
-' в 03_Результаты генерации\01_По шагам\ согласно порядку из Шаги.txt.
-' Если папок нет — возвращает "".
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РЅРѕРјРµСЂ С‚РµРєСѓС‰РµРіРѕ С€Р°РіР° вЂ” РїРѕСЃР»РµРґРЅРµР№ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµР№ РїР°РїРєРё РЁР°Рі_*
+' РІ 03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\01_РџРѕ С€Р°РіР°Рј\ СЃРѕРіР»Р°СЃРЅРѕ РїРѕСЂСЏРґРєСѓ РёР· РЁР°РіРё.txt.
+' Р•СЃР»Рё РїР°РїРѕРє РЅРµС‚ вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ "".
 Public Function ReadCurrentStep() As String
     Dim steps As Collection
     Dim stepsPath As String
@@ -356,10 +356,10 @@ Public Function ReadCurrentStep() As String
     If steps Is Nothing Then Exit Function
     If steps.Count = 0 Then Exit Function
 
-    stepsPath = Mod_Util.GetProjectRoot & "\03_Результаты генерации\01_По шагам"
+    stepsPath = Mod_Util.GetProjectRoot & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\01_РџРѕ С€Р°РіР°Рј"
     If Dir(stepsPath, vbDirectory) = "" Then Exit Function
 
-    ' идём по порядку Шаги.txt и запоминаем последнюю существующую папку
+    ' РёРґС‘Рј РїРѕ РїРѕСЂСЏРґРєСѓ РЁР°РіРё.txt Рё Р·Р°РїРѕРјРёРЅР°РµРј РїРѕСЃР»РµРґРЅСЋСЋ СЃСѓС‰РµСЃС‚РІСѓСЋС‰СѓСЋ РїР°РїРєСѓ
     found = ""
     For i = 1 To steps.Count
         nn = StepNumFromEntry(steps(i))
@@ -371,16 +371,16 @@ Public Function ReadCurrentStep() As String
     Exit Function
 
 ErrHandler:
-    Mod_Util.WriteError "P002", "ReadCurrentStep: ошибка определения текущего шага. Ошибка: " & Err.Description
-    MsgBox "Ошибка P002: не удалось определить текущий шаг." & vbCrLf & Err.Description, _
-           vbCritical, "Промты"
+    Mod_Util.WriteError "P002", "ReadCurrentStep: РѕС€РёР±РєР° РѕРїСЂРµРґРµР»РµРЅРёСЏ С‚РµРєСѓС‰РµРіРѕ С€Р°РіР°. РћС€РёР±РєР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° P002: РЅРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ С‚РµРєСѓС‰РёР№ С€Р°Рі." & vbCrLf & Err.Description, _
+           vbCritical, "РџСЂРѕРјС‚С‹"
     Err.Clear
     ReadCurrentStep = ""
 End Function
 
-' Возвращает номер следующего шага (шаг из Шаги.txt, идущий сразу за
-' текущим). Если текущего шага нет — первый шаг из Шаги.txt.
-' Если следующий не найден — возвращает "".
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РЅРѕРјРµСЂ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР° (С€Р°Рі РёР· РЁР°РіРё.txt, РёРґСѓС‰РёР№ СЃСЂР°Р·Сѓ Р·Р°
+' С‚РµРєСѓС‰РёРј). Р•СЃР»Рё С‚РµРєСѓС‰РµРіРѕ С€Р°РіР° РЅРµС‚ вЂ” РїРµСЂРІС‹Р№ С€Р°Рі РёР· РЁР°РіРё.txt.
+' Р•СЃР»Рё СЃР»РµРґСѓСЋС‰РёР№ РЅРµ РЅР°Р№РґРµРЅ вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ "".
 Public Function ReadNextStep() As String
     Dim steps As Collection
     Dim current As String
@@ -396,13 +396,13 @@ Public Function ReadNextStep() As String
 
     current = ReadCurrentStep()
 
-    ' текущего шага нет — возвращаем первый шаг из Шаги.txt
+    ' С‚РµРєСѓС‰РµРіРѕ С€Р°РіР° РЅРµС‚ вЂ” РІРѕР·РІСЂР°С‰Р°РµРј РїРµСЂРІС‹Р№ С€Р°Рі РёР· РЁР°РіРё.txt
     If current = "" Then
         ReadNextStep = StepNumFromEntry(steps(1))
         Exit Function
     End If
 
-    ' следующий — запись, идущая сразу за текущей
+    ' СЃР»РµРґСѓСЋС‰РёР№ вЂ” Р·Р°РїРёСЃСЊ, РёРґСѓС‰Р°СЏ СЃСЂР°Р·Сѓ Р·Р° С‚РµРєСѓС‰РµР№
     For i = 1 To steps.Count - 1
         If StepNumFromEntry(steps(i)) = current Then
             ReadNextStep = StepNumFromEntry(steps(i + 1))
@@ -410,19 +410,19 @@ Public Function ReadNextStep() As String
         End If
     Next i
 
-    ' следующий не найден
+    ' СЃР»РµРґСѓСЋС‰РёР№ РЅРµ РЅР°Р№РґРµРЅ
     ReadNextStep = ""
     Exit Function
 
 ErrHandler:
-    Mod_Util.WriteError "P002", "ReadNextStep: ошибка определения следующего шага. Ошибка: " & Err.Description
-    MsgBox "Ошибка P002: не удалось определить следующий шаг." & vbCrLf & Err.Description, _
-           vbCritical, "Промты"
+    Mod_Util.WriteError "P002", "ReadNextStep: РѕС€РёР±РєР° РѕРїСЂРµРґРµР»РµРЅРёСЏ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°. РћС€РёР±РєР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° P002: РЅРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ СЃР»РµРґСѓСЋС‰РёР№ С€Р°Рі." & vbCrLf & Err.Description, _
+           vbCritical, "РџСЂРѕРјС‚С‹"
     Err.Clear
     ReadNextStep = ""
 End Function
 
-' Формирует промпт для выполнения следующего шага (разделы 9 и 13).
+' Р¤РѕСЂРјРёСЂСѓРµС‚ РїСЂРѕРјРїС‚ РґР»СЏ РІС‹РїРѕР»РЅРµРЅРёСЏ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР° (СЂР°Р·РґРµР»С‹ 9 Рё 13).
 Public Sub MakeNextStepPrompt()
     Dim root As String
     Dim steps As Collection
@@ -446,48 +446,48 @@ Public Sub MakeNextStepPrompt()
     On Error GoTo ErrHandler
 
     root = NormPath(Mod_Util.GetProjectRoot)
-    stepsPath = root & "\03_Результаты генерации\01_По шагам"
-    promptsPath = root & "\04_Промты"
-    readyPath = root & "\03_Результаты генерации\04_Промты_готовые"
-    registriesPath = root & "\03_Результаты генерации\03_Реестры"
+    stepsPath = root & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\01_РџРѕ С€Р°РіР°Рј"
+    promptsPath = root & "\04_РџСЂРѕРјС‚С‹"
+    readyPath = root & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\04_РџСЂРѕРјС‚С‹_РіРѕС‚РѕРІС‹Рµ"
+    registriesPath = root & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\03_Р РµРµСЃС‚СЂС‹"
 
-    ' 1. Список шагов (при отсутствии Шаги.txt ReadStepList сама
-    '    сообщит ошибку P001 и вернёт пустую коллекцию)
+    ' 1. РЎРїРёСЃРѕРє С€Р°РіРѕРІ (РїСЂРё РѕС‚СЃСѓС‚СЃС‚РІРёРё РЁР°РіРё.txt ReadStepList СЃР°РјР°
+    '    СЃРѕРѕР±С‰РёС‚ РѕС€РёР±РєСѓ P001 Рё РІРµСЂРЅС‘С‚ РїСѓСЃС‚СѓСЋ РєРѕР»Р»РµРєС†РёСЋ)
     Set steps = ReadStepList()
     If steps Is Nothing Then Exit Sub
     If steps.Count = 0 Then Exit Sub
 
-    ' 2. Текущий и следующий шаги
+    ' 2. РўРµРєСѓС‰РёР№ Рё СЃР»РµРґСѓСЋС‰РёР№ С€Р°РіРё
     current = ReadCurrentStep()
     nextNN = ReadNextStep()
 
-    ' 3. Следующего шага нет ? финальный аудит (раздел 9)
+    ' 3. РЎР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР° РЅРµС‚ ? С„РёРЅР°Р»СЊРЅС‹Р№ Р°СѓРґРёС‚ (СЂР°Р·РґРµР» 9)
     If nextNN = "" Then
-        ' проверка: нет ли папки с номером больше текущего (неожиданная декомпозиция)
+        ' РїСЂРѕРІРµСЂРєР°: РЅРµС‚ Р»Рё РїР°РїРєРё СЃ РЅРѕРјРµСЂРѕРј Р±РѕР»СЊС€Рµ С‚РµРєСѓС‰РµРіРѕ (РЅРµРѕР¶РёРґР°РЅРЅР°СЏ РґРµРєРѕРјРїРѕР·РёС†РёСЏ)
         If current <> "" Then
             Dim subName As String
             Dim folderNN As String
-            subName = Dir(stepsPath & "\Шаг_*", vbDirectory)
+            subName = Dir(stepsPath & "\РЁР°Рі_*", vbDirectory)
             Do While subName <> ""
                 If (GetAttr(stepsPath & "\" & subName) And vbDirectory) = vbDirectory Then
-                    folderNN = Mid(subName, 6)          ' "Шаг_NN..." -> "NN..."
+                    folderNN = Mid(subName, 6)          ' "РЁР°Рі_NN..." -> "NN..."
                     i = InStr(folderNN, "_")
                     If i > 0 Then folderNN = Left(folderNN, i - 1)
-                    ' сверяем папку со списком Шаги.txt: если её там нет и
-                    ' номер больше текущего — unexpected step (раздел 9)
+                    ' СЃРІРµСЂСЏРµРј РїР°РїРєСѓ СЃРѕ СЃРїРёСЃРєРѕРј РЁР°РіРё.txt: РµСЃР»Рё РµС‘ С‚Р°Рј РЅРµС‚ Рё
+                    ' РЅРѕРјРµСЂ Р±РѕР»СЊС€Рµ С‚РµРєСѓС‰РµРіРѕ вЂ” unexpected step (СЂР°Р·РґРµР» 9)
                     Dim inList As Boolean
                     inList = False
                     For j = 1 To steps.Count
                         If StepNameFromEntry(steps(j)) = subName Then inList = True
                     Next j
                     If Not inList And StepNumToLong(folderNN) > StepNumToLong(current) Then
-                        Mod_Util.WriteError "P002", "MakeNextStepPrompt: найдена папка '" & _
-                            subName & "' с номером больше текущего, но в Шаги.txt нет " & _
-                            "соответствующей строки. Обновите Шаги.txt."
-                        MsgBox "Ошибка P002: в 01_По шагам есть папка '" & subName & "', " & _
-                               "которой нет в Шаги.txt." & vbCrLf & _
-                               "Добавьте строку для этого шага в Шаги.txt.", _
-                               vbCritical, "Промт следующего шага"
+                        Mod_Util.WriteError "P002", "MakeNextStepPrompt: РЅР°Р№РґРµРЅР° РїР°РїРєР° '" & _
+                            subName & "' СЃ РЅРѕРјРµСЂРѕРј Р±РѕР»СЊС€Рµ С‚РµРєСѓС‰РµРіРѕ, РЅРѕ РІ РЁР°РіРё.txt РЅРµС‚ " & _
+                            "СЃРѕРѕС‚РІРµС‚СЃС‚РІСѓСЋС‰РµР№ СЃС‚СЂРѕРєРё. РћР±РЅРѕРІРёС‚Рµ РЁР°РіРё.txt."
+                        MsgBox "РћС€РёР±РєР° P002: РІ 01_РџРѕ С€Р°РіР°Рј РµСЃС‚СЊ РїР°РїРєР° '" & subName & "', " & _
+                               "РєРѕС‚РѕСЂРѕР№ РЅРµС‚ РІ РЁР°РіРё.txt." & vbCrLf & _
+                               "Р”РѕР±Р°РІСЊС‚Рµ СЃС‚СЂРѕРєСѓ РґР»СЏ СЌС‚РѕРіРѕ С€Р°РіР° РІ РЁР°РіРё.txt.", _
+                               vbCritical, "РџСЂРѕРјС‚ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°"
                         Exit Sub
                     End If
                 End If
@@ -495,46 +495,46 @@ Public Sub MakeNextStepPrompt()
             Loop
         End If
 
-        ' читаем шаблон того же уровня (prompt_step_template_v1.md)
+        ' С‡РёС‚Р°РµРј С€Р°Р±Р»РѕРЅ С‚РѕРіРѕ Р¶Рµ СѓСЂРѕРІРЅСЏ (prompt_step_template_v1.md)
         template = ReadTextFile(promptsPath & "\prompt_step_template_v1.md")
         If template = "" Then
-            Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон prompt_step_template_v1.md"
-            MsgBox "Ошибка P002: не найден шаблон prompt_step_template_v1.md в папке 04_Промты.", _
-                   vbCritical, "Промт следующего шага"
+            Mod_Util.WriteError "P002", "MakeNextStepPrompt: РЅРµ РЅР°Р№РґРµРЅ С€Р°Р±Р»РѕРЅ prompt_step_template_v1.md"
+            MsgBox "РћС€РёР±РєР° P002: РЅРµ РЅР°Р№РґРµРЅ С€Р°Р±Р»РѕРЅ prompt_step_template_v1.md РІ РїР°РїРєРµ 04_РџСЂРѕРјС‚С‹.", _
+                   vbCritical, "РџСЂРѕРјС‚ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°"
             Exit Sub
         End If
 
-        ' реестры и фрагмент схемы (при отсутствии — пустая строка и предупреждение)
-        regTypes = ReadTextFile(registriesPath & "\Реестр_типов.txt")
+        ' СЂРµРµСЃС‚СЂС‹ Рё С„СЂР°РіРјРµРЅС‚ СЃС…РµРјС‹ (РїСЂРё РѕС‚СЃСѓС‚СЃС‚РІРёРё вЂ” РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР° Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ)
+        regTypes = ReadTextFile(registriesPath & "\Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ.txt")
         If regTypes = "" Then
-            Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Реестр_типов.txt не найден или пуст, подставлена пустая строка."
+            Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ.txt РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РїСѓСЃС‚, РїРѕРґСЃС‚Р°РІР»РµРЅР° РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР°."
         End If
-        regCoverage = ReadTextFile(registriesPath & "\Реестр_покрытия.txt")
+        regCoverage = ReadTextFile(registriesPath & "\Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ.txt")
         If regCoverage = "" Then
-            Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Реестр_покрытия.txt не найден или пуст, подставлена пустая строка."
+            Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ.txt РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РїСѓСЃС‚, РїРѕРґСЃС‚Р°РІР»РµРЅР° РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР°."
         End If
         schema = GetSchemaFragment()
 
-        ' финальный аудит: NN = 99, STEP_NAME = Шаг_99_Финал
+        ' С„РёРЅР°Р»СЊРЅС‹Р№ Р°СѓРґРёС‚: NN = 99, STEP_NAME = РЁР°Рі_99_Р¤РёРЅР°Р»
         result = template
         result = ReplaceIfPresent(result, "{NN}", "99")
-        result = ReplaceIfPresent(result, "{STEP_NAME}", "Шаг_99_Финал")
+        result = ReplaceIfPresent(result, "{STEP_NAME}", "РЁР°Рі_99_Р¤РёРЅР°Р»")
         result = ReplaceIfPresent(result, "{REGISTRY_TYPES}", regTypes)
         result = ReplaceIfPresent(result, "{REGISTRY_COVERAGE}", regCoverage)
         result = ReplaceIfPresent(result, "{SCHEMA}", schema)
 
-        EnsureFolder stepsPath & "\Шаг_99_Финал"
+        EnsureFolder stepsPath & "\РЁР°Рі_99_Р¤РёРЅР°Р»"
         EnsureFolder readyPath
-        SaveTextFile readyPath & "\Промт_финального_аудита.md", result
+        SaveTextFile readyPath & "\РџСЂРѕРјС‚_С„РёРЅР°Р»СЊРЅРѕРіРѕ_Р°СѓРґРёС‚Р°.md", result
 
-        Mod_Util.WriteLog "MakeNextStepPrompt: сформирован финальный аудит"
-        MsgBox "Все шаги из Шаги.txt выполнены." & vbCrLf & _
-               "Сформирован Промт_финального_аудита.md, создана папка Шаг_99_Финал.", _
-               vbInformation, "Финальный аудит"
+        Mod_Util.WriteLog "MakeNextStepPrompt: СЃС„РѕСЂРјРёСЂРѕРІР°РЅ С„РёРЅР°Р»СЊРЅС‹Р№ Р°СѓРґРёС‚"
+        MsgBox "Р’СЃРµ С€Р°РіРё РёР· РЁР°РіРё.txt РІС‹РїРѕР»РЅРµРЅС‹." & vbCrLf & _
+               "РЎС„РѕСЂРјРёСЂРѕРІР°РЅ РџСЂРѕРјС‚_С„РёРЅР°Р»СЊРЅРѕРіРѕ_Р°СѓРґРёС‚Р°.md, СЃРѕР·РґР°РЅР° РїР°РїРєР° РЁР°Рі_99_Р¤РёРЅР°Р».", _
+               vbInformation, "Р¤РёРЅР°Р»СЊРЅС‹Р№ Р°СѓРґРёС‚"
         Exit Sub
     End If
 
-    ' 4. Имя папки следующего шага из Шаги.txt
+    ' 4. РРјСЏ РїР°РїРєРё СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР° РёР· РЁР°РіРё.txt
     nextName = ""
     For i = 1 To steps.Count
         If StepNumFromEntry(steps(i)) = nextNN Then
@@ -543,35 +543,35 @@ Public Sub MakeNextStepPrompt()
         End If
     Next i
     If nextName = "" Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt: в Шаги.txt не найдено имя папки для шага " & nextNN
-        MsgBox "Ошибка P002: в Шаги.txt не найдено имя папки для шага " & nextNN & ".", _
-               vbCritical, "Промт следующего шага"
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt: РІ РЁР°РіРё.txt РЅРµ РЅР°Р№РґРµРЅРѕ РёРјСЏ РїР°РїРєРё РґР»СЏ С€Р°РіР° " & nextNN
+        MsgBox "РћС€РёР±РєР° P002: РІ РЁР°РіРё.txt РЅРµ РЅР°Р№РґРµРЅРѕ РёРјСЏ РїР°РїРєРё РґР»СЏ С€Р°РіР° " & nextNN & ".", _
+               vbCritical, "РџСЂРѕРјС‚ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°"
         Exit Sub
     End If
 
-    ' 5. Шаблон промта шага
+    ' 5. РЁР°Р±Р»РѕРЅ РїСЂРѕРјС‚Р° С€Р°РіР°
     template = ReadTextFile(promptsPath & "\prompt_step_template_v1.md")
     If template = "" Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон prompt_step_template_v1.md"
-        MsgBox "Ошибка P002: не найден шаблон prompt_step_template_v1.md в папке 04_Промты.", _
-               vbCritical, "Промт следующего шага"
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt: РЅРµ РЅР°Р№РґРµРЅ С€Р°Р±Р»РѕРЅ prompt_step_template_v1.md"
+        MsgBox "РћС€РёР±РєР° P002: РЅРµ РЅР°Р№РґРµРЅ С€Р°Р±Р»РѕРЅ prompt_step_template_v1.md РІ РїР°РїРєРµ 04_РџСЂРѕРјС‚С‹.", _
+               vbCritical, "РџСЂРѕРјС‚ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°"
         Exit Sub
     End If
 
-    ' 6. Реестры из 03_Реестры (при отсутствии — пустая строка и предупреждение)
-    regTypes = ReadTextFile(registriesPath & "\Реестр_типов.txt")
+    ' 6. Р РµРµСЃС‚СЂС‹ РёР· 03_Р РµРµСЃС‚СЂС‹ (РїСЂРё РѕС‚СЃСѓС‚СЃС‚РІРёРё вЂ” РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР° Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ)
+    regTypes = ReadTextFile(registriesPath & "\Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ.txt")
     If regTypes = "" Then
-        Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Реестр_типов.txt не найден или пуст, подставлена пустая строка."
+        Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ.txt РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РїСѓСЃС‚, РїРѕРґСЃС‚Р°РІР»РµРЅР° РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР°."
     End If
-    regCoverage = ReadTextFile(registriesPath & "\Реестр_покрытия.txt")
+    regCoverage = ReadTextFile(registriesPath & "\Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ.txt")
     If regCoverage = "" Then
-        Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Реестр_покрытия.txt не найден или пуст, подставлена пустая строка."
+        Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ.txt РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РїСѓСЃС‚, РїРѕРґСЃС‚Р°РІР»РµРЅР° РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР°."
     End If
 
-    ' 7. Фрагмент схемы из 02_Подготовка схемы (Плоская_таблица.xlsx, если есть)
+    ' 7. Р¤СЂР°РіРјРµРЅС‚ СЃС…РµРјС‹ РёР· 02_РџРѕРґРіРѕС‚РѕРІРєР° СЃС…РµРјС‹ (РџР»РѕСЃРєР°СЏ_С‚Р°Р±Р»РёС†Р°.xlsx, РµСЃР»Рё РµСЃС‚СЊ)
     schema = GetSchemaFragment()
 
-    ' 8. Подстановка плейсхолдеров (только тех, что есть в шаблоне)
+    ' 8. РџРѕРґСЃС‚Р°РЅРѕРІРєР° РїР»РµР№СЃС…РѕР»РґРµСЂРѕРІ (С‚РѕР»СЊРєРѕ С‚РµС…, С‡С‚Рѕ РµСЃС‚СЊ РІ С€Р°Р±Р»РѕРЅРµ)
     result = template
     result = ReplaceIfPresent(result, "{NN}", nextNN)
     result = ReplaceIfPresent(result, "{STEP_NAME}", nextName)
@@ -579,29 +579,29 @@ Public Sub MakeNextStepPrompt()
     result = ReplaceIfPresent(result, "{REGISTRY_COVERAGE}", regCoverage)
     result = ReplaceIfPresent(result, "{SCHEMA}", schema)
 
-    ' 9. Папка шага создаётся только по факту формирования промта (раздел 3)
+    ' 9. РџР°РїРєР° С€Р°РіР° СЃРѕР·РґР°С‘С‚СЃСЏ С‚РѕР»СЊРєРѕ РїРѕ С„Р°РєС‚Сѓ С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РїСЂРѕРјС‚Р° (СЂР°Р·РґРµР» 3)
     stepFolder = stepsPath & "\" & nextName
     EnsureFolder stepFolder
 
-    ' 10. Сохранение готового промта
+    ' 10. РЎРѕС…СЂР°РЅРµРЅРёРµ РіРѕС‚РѕРІРѕРіРѕ РїСЂРѕРјС‚Р°
     EnsureFolder readyPath
-    promptFile = readyPath & "\Промт_шаг_" & nextNN & ".md"
+    promptFile = readyPath & "\РџСЂРѕРјС‚_С€Р°Рі_" & nextNN & ".md"
     SaveTextFile promptFile, result
 
-    Mod_Util.WriteLog "MakeNextStepPrompt: сформирован промт шага " & nextNN
-    MsgBox "Сформирован промт шага " & nextNN & " (" & nextName & "):" & vbCrLf & _
+    Mod_Util.WriteLog "MakeNextStepPrompt: СЃС„РѕСЂРјРёСЂРѕРІР°РЅ РїСЂРѕРјС‚ С€Р°РіР° " & nextNN
+    MsgBox "РЎС„РѕСЂРјРёСЂРѕРІР°РЅ РїСЂРѕРјС‚ С€Р°РіР° " & nextNN & " (" & nextName & "):" & vbCrLf & _
            promptFile & vbCrLf & vbCrLf & _
-           "Создана папка шага: " & stepFolder, vbInformation, "Промт следующего шага"
+           "РЎРѕР·РґР°РЅР° РїР°РїРєР° С€Р°РіР°: " & stepFolder, vbInformation, "РџСЂРѕРјС‚ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°"
     Exit Sub
 
 ErrHandler:
-    Mod_Util.WriteError "P002", "MakeNextStepPrompt: ошибка формирования промта шага. Ошибка: " & Err.Description
-    MsgBox "Ошибка P002: не удалось сформировать промт следующего шага." & vbCrLf & _
-           Err.Description, vbCritical, "Промт следующего шага"
+    Mod_Util.WriteError "P002", "MakeNextStepPrompt: РѕС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РїСЂРѕРјС‚Р° С€Р°РіР°. РћС€РёР±РєР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° P002: РЅРµ СѓРґР°Р»РѕСЃСЊ СЃС„РѕСЂРјРёСЂРѕРІР°С‚СЊ РїСЂРѕРјС‚ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°." & vbCrLf & _
+           Err.Description, vbCritical, "РџСЂРѕРјС‚ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°"
     Err.Clear
 End Sub
 
-' Формирует промпт для исправления ошибок текущего шага (раздел 13).
+' Р¤РѕСЂРјРёСЂСѓРµС‚ РїСЂРѕРјРїС‚ РґР»СЏ РёСЃРїСЂР°РІР»РµРЅРёСЏ РѕС€РёР±РѕРє С‚РµРєСѓС‰РµРіРѕ С€Р°РіР° (СЂР°Р·РґРµР» 13).
 Public Sub MakeFixPrompt()
     Dim root As String
     Dim current As String
@@ -622,37 +622,37 @@ Public Sub MakeFixPrompt()
     On Error GoTo ErrHandler
 
     root = NormPath(Mod_Util.GetProjectRoot)
-    promptsPath = root & "\04_Промты"
-    readyPath = root & "\03_Результаты генерации\04_Промты_готовые"
-    registriesPath = root & "\03_Результаты генерации\03_Реестры"
-    summaryPath = root & "\03_Результаты генерации\02_Сводные"
+    promptsPath = root & "\04_РџСЂРѕРјС‚С‹"
+    readyPath = root & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\04_РџСЂРѕРјС‚С‹_РіРѕС‚РѕРІС‹Рµ"
+    registriesPath = root & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\03_Р РµРµСЃС‚СЂС‹"
+    summaryPath = root & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\02_РЎРІРѕРґРЅС‹Рµ"
 
-    ' 1. Текущий шаг
+    ' 1. РўРµРєСѓС‰РёР№ С€Р°Рі
     current = ReadCurrentStep()
     If current = "" Then
-        Mod_Util.WriteError "P003", "MakeFixPrompt: текущий шаг не определён (нет папок Шаг_* в 01_По шагам)"
-        MsgBox "Ошибка P003: текущий шаг не определён — в 03_Результаты генерации\01_По шагам " & _
-               "нет ни одной папки шага.", vbCritical, "Промт исправления"
+        Mod_Util.WriteError "P003", "MakeFixPrompt: С‚РµРєСѓС‰РёР№ С€Р°Рі РЅРµ РѕРїСЂРµРґРµР»С‘РЅ (РЅРµС‚ РїР°РїРѕРє РЁР°Рі_* РІ 01_РџРѕ С€Р°РіР°Рј)"
+        MsgBox "РћС€РёР±РєР° P003: С‚РµРєСѓС‰РёР№ С€Р°Рі РЅРµ РѕРїСЂРµРґРµР»С‘РЅ вЂ” РІ 03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\01_РџРѕ С€Р°РіР°Рј " & _
+               "РЅРµС‚ РЅРё РѕРґРЅРѕР№ РїР°РїРєРё С€Р°РіР°.", vbCritical, "РџСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ"
         Exit Sub
     End If
 
-    ' 2. Последняя сводная из 02_Сводные
+    ' 2. РџРѕСЃР»РµРґРЅСЏСЏ СЃРІРѕРґРЅР°СЏ РёР· 02_РЎРІРѕРґРЅС‹Рµ
     If Dir(summaryPath, vbDirectory) = "" Then
-        Mod_Util.WriteError "P003", "MakeFixPrompt: папка 02_Сводные не найдена: " & summaryPath
-        MsgBox "Ошибка P003: папка 02_Сводные не найдена." & vbCrLf & summaryPath, _
-               vbCritical, "Промт исправления"
+        Mod_Util.WriteError "P003", "MakeFixPrompt: РїР°РїРєР° 02_РЎРІРѕРґРЅС‹Рµ РЅРµ РЅР°Р№РґРµРЅР°: " & summaryPath
+        MsgBox "РћС€РёР±РєР° P003: РїР°РїРєР° 02_РЎРІРѕРґРЅС‹Рµ РЅРµ РЅР°Р№РґРµРЅР°." & vbCrLf & summaryPath, _
+               vbCritical, "РџСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ"
         Exit Sub
     End If
 
-    ' фиксированное имя последней сводной; если его нет — последний xlsx по дате
+    ' С„РёРєСЃРёСЂРѕРІР°РЅРЅРѕРµ РёРјСЏ РїРѕСЃР»РµРґРЅРµР№ СЃРІРѕРґРЅРѕР№; РµСЃР»Рё РµРіРѕ РЅРµС‚ вЂ” РїРѕСЃР»РµРґРЅРёР№ xlsx РїРѕ РґР°С‚Рµ
     fileName = Dir(summaryPath & "\zhc_okks_gost_FINAL.xlsx")
     If fileName = "" Then
         fileName = LastModifiedFile(summaryPath, "*.xlsx")
     End If
     If fileName = "" Then
-        Mod_Util.WriteError "P003", "MakeFixPrompt: в 02_Сводные нет файла zhc_okks_gost_FINAL.xlsx"
-        MsgBox "Ошибка P003: в папке 02_Сводные не найден файл сводной " & _
-               "zhc_okks_gost_FINAL.xlsx.", vbCritical, "Промт исправления"
+        Mod_Util.WriteError "P003", "MakeFixPrompt: РІ 02_РЎРІРѕРґРЅС‹Рµ РЅРµС‚ С„Р°Р№Р»Р° zhc_okks_gost_FINAL.xlsx"
+        MsgBox "РћС€РёР±РєР° P003: РІ РїР°РїРєРµ 02_РЎРІРѕРґРЅС‹Рµ РЅРµ РЅР°Р№РґРµРЅ С„Р°Р№Р» СЃРІРѕРґРЅРѕР№ " & _
+               "zhc_okks_gost_FINAL.xlsx.", vbCritical, "РџСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ"
         Exit Sub
     End If
     finalFile = summaryPath & "\" & fileName
@@ -662,53 +662,53 @@ Public Sub MakeFixPrompt()
     Set wb = Workbooks.Open(finalFile, ReadOnly:=True, UpdateLinks:=0)
     On Error GoTo ErrHandler
     If wb Is Nothing Then
-        Mod_Util.WriteError "P003", "MakeFixPrompt: не удалось открыть сводную: " & finalFile
-        MsgBox "Ошибка P003: не удалось открыть файл сводной:" & vbCrLf & finalFile, _
-               vbCritical, "Промт исправления"
+        Mod_Util.WriteError "P003", "MakeFixPrompt: РЅРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ СЃРІРѕРґРЅСѓСЋ: " & finalFile
+        MsgBox "РћС€РёР±РєР° P003: РЅРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ С„Р°Р№Р» СЃРІРѕРґРЅРѕР№:" & vbCrLf & finalFile, _
+               vbCritical, "РџСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ"
         Exit Sub
     End If
 
-    ' 3. Лист «Ошибки»
+    ' 3. Р›РёСЃС‚ В«РћС€РёР±РєРёВ»
     errorsText = ""
     If Not ReadErrorsSheetText(wb, errorsText) Then
-        Mod_Util.WriteError "P003", "MakeFixPrompt: в сводной не найден лист 'Ошибки': " & finalFile
+        Mod_Util.WriteError "P003", "MakeFixPrompt: РІ СЃРІРѕРґРЅРѕР№ РЅРµ РЅР°Р№РґРµРЅ Р»РёСЃС‚ 'РћС€РёР±РєРё': " & finalFile
         wb.Close SaveChanges:=False
-        MsgBox "Ошибка P003: в файле сводной не найден лист 'Ошибки'." & vbCrLf & finalFile, _
-               vbCritical, "Промт исправления"
+        MsgBox "РћС€РёР±РєР° P003: РІ С„Р°Р№Р»Рµ СЃРІРѕРґРЅРѕР№ РЅРµ РЅР°Р№РґРµРЅ Р»РёСЃС‚ 'РћС€РёР±РєРё'." & vbCrLf & finalFile, _
+               vbCritical, "РџСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ"
         Exit Sub
     End If
     wb.Close SaveChanges:=False
 
-    ' 4. Ошибок нет — ничего не формируем (раздел 13)
+    ' 4. РћС€РёР±РѕРє РЅРµС‚ вЂ” РЅРёС‡РµРіРѕ РЅРµ С„РѕСЂРјРёСЂСѓРµРј (СЂР°Р·РґРµР» 13)
     If errorsText = "" Then
-        Mod_Util.WriteLog "MakeFixPrompt: ошибок нет"
-        MsgBox "Ошибок нет, исправлять нечего.", vbInformation, "Промт исправления"
+        Mod_Util.WriteLog "MakeFixPrompt: РѕС€РёР±РѕРє РЅРµС‚"
+        MsgBox "РћС€РёР±РѕРє РЅРµС‚, РёСЃРїСЂР°РІР»СЏС‚СЊ РЅРµС‡РµРіРѕ.", vbInformation, "РџСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ"
         Exit Sub
     End If
 
-    ' 5. Шаблон промта исправления
+    ' 5. РЁР°Р±Р»РѕРЅ РїСЂРѕРјС‚Р° РёСЃРїСЂР°РІР»РµРЅРёСЏ
     template = ReadTextFile(promptsPath & "\prompt_fix_v1.0.md")
     If template = "" Then
-        Mod_Util.WriteError "P003", "MakeFixPrompt: не найден шаблон prompt_fix_v1.0.md"
-        MsgBox "Ошибка P003: не найден шаблон prompt_fix_v1.0.md в папке 04_Промты.", _
-               vbCritical, "Промт исправления"
+        Mod_Util.WriteError "P003", "MakeFixPrompt: РЅРµ РЅР°Р№РґРµРЅ С€Р°Р±Р»РѕРЅ prompt_fix_v1.0.md"
+        MsgBox "РћС€РёР±РєР° P003: РЅРµ РЅР°Р№РґРµРЅ С€Р°Р±Р»РѕРЅ prompt_fix_v1.0.md РІ РїР°РїРєРµ 04_РџСЂРѕРјС‚С‹.", _
+               vbCritical, "РџСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ"
         Exit Sub
     End If
 
-    ' 6. Оба реестра (при отсутствии — пустая строка и предупреждение)
-    regTypes = ReadTextFile(registriesPath & "\Реестр_типов.txt")
+    ' 6. РћР±Р° СЂРµРµСЃС‚СЂР° (РїСЂРё РѕС‚СЃСѓС‚СЃС‚РІРёРё вЂ” РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР° Рё РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ)
+    regTypes = ReadTextFile(registriesPath & "\Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ.txt")
     If regTypes = "" Then
-        Mod_Util.WriteWarning "P003", "MakeFixPrompt: Реестр_типов.txt не найден или пуст, подставлена пустая строка."
+        Mod_Util.WriteWarning "P003", "MakeFixPrompt: Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ.txt РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РїСѓСЃС‚, РїРѕРґСЃС‚Р°РІР»РµРЅР° РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР°."
     End If
-    regCoverage = ReadTextFile(registriesPath & "\Реестр_покрытия.txt")
+    regCoverage = ReadTextFile(registriesPath & "\Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ.txt")
     If regCoverage = "" Then
-        Mod_Util.WriteWarning "P003", "MakeFixPrompt: Реестр_покрытия.txt не найден или пуст, подставлена пустая строка."
+        Mod_Util.WriteWarning "P003", "MakeFixPrompt: Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ.txt РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РїСѓСЃС‚, РїРѕРґСЃС‚Р°РІР»РµРЅР° РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР°."
     End If
 
-    ' 7. Фрагмент схемы текущего шага
+    ' 7. Р¤СЂР°РіРјРµРЅС‚ СЃС…РµРјС‹ С‚РµРєСѓС‰РµРіРѕ С€Р°РіР°
     schema = GetSchemaFragment()
 
-    ' 8. Подстановка плейсхолдеров (только тех, что есть в шаблоне)
+    ' 8. РџРѕРґСЃС‚Р°РЅРѕРІРєР° РїР»РµР№СЃС…РѕР»РґРµСЂРѕРІ (С‚РѕР»СЊРєРѕ С‚РµС…, С‡С‚Рѕ РµСЃС‚СЊ РІ С€Р°Р±Р»РѕРЅРµ)
     result = template
     result = ReplaceIfPresent(result, "{NN}", current)
     result = ReplaceIfPresent(result, "{ERRORS}", errorsText)
@@ -716,19 +716,19 @@ Public Sub MakeFixPrompt()
     result = ReplaceIfPresent(result, "{REGISTRY_COVERAGE}", regCoverage)
     result = ReplaceIfPresent(result, "{SCHEMA}", schema)
 
-    ' 9. Сохранение готового промта
+    ' 9. РЎРѕС…СЂР°РЅРµРЅРёРµ РіРѕС‚РѕРІРѕРіРѕ РїСЂРѕРјС‚Р°
     EnsureFolder readyPath
-    SaveTextFile readyPath & "\Промт_исправление_шаг_" & current & ".md", result
+    SaveTextFile readyPath & "\РџСЂРѕРјС‚_РёСЃРїСЂР°РІР»РµРЅРёРµ_С€Р°Рі_" & current & ".md", result
 
-    Mod_Util.WriteLog "MakeFixPrompt: сформирован промт исправления шага " & current
-    MsgBox "Сформирован промт исправления шага " & current & ":" & vbCrLf & _
-           readyPath & "\Промт_исправление_шаг_" & current & ".md", _
-           vbInformation, "Промт исправления"
+    Mod_Util.WriteLog "MakeFixPrompt: СЃС„РѕСЂРјРёСЂРѕРІР°РЅ РїСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ С€Р°РіР° " & current
+    MsgBox "РЎС„РѕСЂРјРёСЂРѕРІР°РЅ РїСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ С€Р°РіР° " & current & ":" & vbCrLf & _
+           readyPath & "\РџСЂРѕРјС‚_РёСЃРїСЂР°РІР»РµРЅРёРµ_С€Р°Рі_" & current & ".md", _
+           vbInformation, "РџСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ"
     Exit Sub
 
 ErrHandler:
-    Mod_Util.WriteError "P003", "MakeFixPrompt: ошибка формирования промта исправления. Ошибка: " & Err.Description
-    MsgBox "Ошибка P003: не удалось сформировать промт исправления." & vbCrLf & _
-           Err.Description, vbCritical, "Промт исправления"
+    Mod_Util.WriteError "P003", "MakeFixPrompt: РѕС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РїСЂРѕРјС‚Р° РёСЃРїСЂР°РІР»РµРЅРёСЏ. РћС€РёР±РєР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° P003: РЅРµ СѓРґР°Р»РѕСЃСЊ СЃС„РѕСЂРјРёСЂРѕРІР°С‚СЊ РїСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ." & vbCrLf & _
+           Err.Description, vbCritical, "РџСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ"
     Err.Clear
 End Sub

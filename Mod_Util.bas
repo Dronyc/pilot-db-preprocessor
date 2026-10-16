@@ -2,28 +2,28 @@ Attribute VB_Name = "Mod_Util"
 Option Explicit
 
 ' ============================================================================
-' Модуль утилит: пути проекта, журналирование, чтение конфигурации.
-' Реализация W4 (разделы 2, 5 спецификации Spec_Dispatcher.md).
-' Пути строятся как в Mod_Registry / Mod_Prompt: <корень>\NN_Имя_папки,
-' корень берётся из именованного диапазона ProjectRoot листа "Настройки".
-' Коды ошибок модуля: U003 - ошибка подготовки листа "Настройки",
-' U004 - ошибка выбора папки проекта, U002 - ошибка чтения configuration.txt.
+' РњРѕРґСѓР»СЊ СѓС‚РёР»РёС‚: РїСѓС‚Рё РїСЂРѕРµРєС‚Р°, Р¶СѓСЂРЅР°Р»РёСЂРѕРІР°РЅРёРµ, С‡С‚РµРЅРёРµ РєРѕРЅС„РёРіСѓСЂР°С†РёРё.
+' Р РµР°Р»РёР·Р°С†РёСЏ W4 (СЂР°Р·РґРµР»С‹ 2, 5 СЃРїРµС†РёС„РёРєР°С†РёРё Spec_Dispatcher.md).
+' РџСѓС‚Рё СЃС‚СЂРѕСЏС‚СЃСЏ РєР°Рє РІ Mod_Registry / Mod_Prompt: <РєРѕСЂРµРЅСЊ>\NN_РРјСЏ_РїР°РїРєРё,
+' РєРѕСЂРµРЅСЊ Р±РµСЂС‘С‚СЃСЏ РёР· РёРјРµРЅРѕРІР°РЅРЅРѕРіРѕ РґРёР°РїР°Р·РѕРЅР° ProjectRoot Р»РёСЃС‚Р° "РќР°СЃС‚СЂРѕР№РєРё".
+' РљРѕРґС‹ РѕС€РёР±РѕРє РјРѕРґСѓР»СЏ: U003 - РѕС€РёР±РєР° РїРѕРґРіРѕС‚РѕРІРєРё Р»РёСЃС‚Р° "РќР°СЃС‚СЂРѕР№РєРё",
+' U004 - РѕС€РёР±РєР° РІС‹Р±РѕСЂР° РїР°РїРєРё РїСЂРѕРµРєС‚Р°, U002 - РѕС€РёР±РєР° С‡С‚РµРЅРёСЏ configuration.txt.
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
-' КОНСТАНТЫ И ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Private)
+' РљРћРќРЎРўРђРќРўР« Р Р’РЎРџРћРњРћР“РђРўР•Р›Р¬РќР«Р• Р¤РЈРќРљР¦РР (Private)
 ' ---------------------------------------------------------------------------
 
-' Имена именованных диапазонов листа "Настройки" (раздел 5 спецификации).
+' РРјРµРЅР° РёРјРµРЅРѕРІР°РЅРЅС‹С… РґРёР°РїР°Р·РѕРЅРѕРІ Р»РёСЃС‚Р° "РќР°СЃС‚СЂРѕР№РєРё" (СЂР°Р·РґРµР» 5 СЃРїРµС†РёС„РёРєР°С†РёРё).
 Private Const NAME_CHECK_MODE As String = "CheckMode"
 Private Const NAME_AUTO_OPEN_RESULTS As String = "AutoOpenResults"
 Private Const NAME_PROMPT_GEN_VERSION As String = "PromptGenVersion"
 Private Const NAME_PROMPT_FIX_VERSION As String = "PromptFixVersion"
 
-' Пароль защиты служебных листов (единый для книги Препроцессора).
+' РџР°СЂРѕР»СЊ Р·Р°С‰РёС‚С‹ СЃР»СѓР¶РµР±РЅС‹С… Р»РёСЃС‚РѕРІ (РµРґРёРЅС‹Р№ РґР»СЏ РєРЅРёРіРё РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂР°).
 Private Const SHEET_PASSWORD As String = "pilot"
 
-' Возвращает путь без завершающего разделителя "\".
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСѓС‚СЊ Р±РµР· Р·Р°РІРµСЂС€Р°СЋС‰РµРіРѕ СЂР°Р·РґРµР»РёС‚РµР»СЏ "\".
 Private Function NormPath(ByVal p As String) As String
     Do While Len(p) > 1 And Right(p, 1) = "\"
         p = Left(p, Len(p) - 1)
@@ -32,71 +32,71 @@ Private Function NormPath(ByVal p As String) As String
 End Function
 
 ' ---------------------------------------------------------------------------
-' ПУБЛИЧЕСКИЕ ПРОЦЕДУРЫ И ФУНКЦИИ
+' РџРЈР‘Р›РР§Р•РЎРљРР• РџР РћР¦Р•Р”РЈР Р« Р Р¤РЈРќРљР¦РР
 ' ---------------------------------------------------------------------------
 
-' Возвращает корневую папку проекта из именованного диапазона ProjectRoot
-' на листе "Настройки". Если диапазон не найден или значение пустое -
-' пишет в лог "GetProjectRoot: ProjectRoot не задан" и возвращает "".
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РєРѕСЂРЅРµРІСѓСЋ РїР°РїРєСѓ РїСЂРѕРµРєС‚Р° РёР· РёРјРµРЅРѕРІР°РЅРЅРѕРіРѕ РґРёР°РїР°Р·РѕРЅР° ProjectRoot
+' РЅР° Р»РёСЃС‚Рµ "РќР°СЃС‚СЂРѕР№РєРё". Р•СЃР»Рё РґРёР°РїР°Р·РѕРЅ РЅРµ РЅР°Р№РґРµРЅ РёР»Рё Р·РЅР°С‡РµРЅРёРµ РїСѓСЃС‚РѕРµ -
+' РїРёС€РµС‚ РІ Р»РѕРі "GetProjectRoot: ProjectRoot РЅРµ Р·Р°РґР°РЅ" Рё РІРѕР·РІСЂР°С‰Р°РµС‚ "".
 Public Function GetProjectRoot() As String
-    ' Корень проекта — всегда папка, где лежит файл .xlsm.
-    ' Если книга не сохранена (ThisWorkbook.Path = "") — возвращаем "".
+    ' РљРѕСЂРµРЅСЊ РїСЂРѕРµРєС‚Р° вЂ” РІСЃРµРіРґР° РїР°РїРєР°, РіРґРµ Р»РµР¶РёС‚ С„Р°Р№Р» .xlsm.
+    ' Р•СЃР»Рё РєРЅРёРіР° РЅРµ СЃРѕС…СЂР°РЅРµРЅР° (ThisWorkbook.Path = "") вЂ” РІРѕР·РІСЂР°С‰Р°РµРј "".
     If ThisWorkbook.path <> "" Then
         GetProjectRoot = NormPath(ThisWorkbook.path)
     Else
         GetProjectRoot = ""
     End If
 End Function
-' Возвращает путь к папке логов: <корень>\05_Логи.
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСѓС‚СЊ Рє РїР°РїРєРµ Р»РѕРіРѕРІ: <РєРѕСЂРµРЅСЊ>\05_Р›РѕРіРё.
 Public Function GetLogsFolder() As String
     Dim root As String
     root = GetProjectRoot()
     If root = "" Then
         GetLogsFolder = ""
     Else
-        GetLogsFolder = root & "\05_Логи"
+        GetLogsFolder = root & "\05_Р›РѕРіРё"
     End If
 End Function
 
-' Возвращает путь к папке результатов: <корень>\03_Результаты генерации.
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСѓС‚СЊ Рє РїР°РїРєРµ СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ: <РєРѕСЂРµРЅСЊ>\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё.
 Public Function GetResultsFolder() As String
     Dim root As String
     root = GetProjectRoot()
     If root = "" Then
         GetResultsFolder = ""
     Else
-        GetResultsFolder = root & "\03_Результаты генерации"
+        GetResultsFolder = root & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё"
     End If
 End Function
 
-' Возвращает путь к папке промптов: <корень>\04_Промты.
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСѓС‚СЊ Рє РїР°РїРєРµ РїСЂРѕРјРїС‚РѕРІ: <РєРѕСЂРµРЅСЊ>\04_РџСЂРѕРјС‚С‹.
 Public Function GetPromptsFolder() As String
     Dim root As String
     root = GetProjectRoot()
     If root = "" Then
         GetPromptsFolder = ""
     Else
-        GetPromptsFolder = root & "\04_Промты"
+        GetPromptsFolder = root & "\04_РџСЂРѕРјС‚С‹"
     End If
 End Function
 
-' Возвращает путь к папке шагов: <корень>\03_Результаты генерации\01_По шагам.
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСѓС‚СЊ Рє РїР°РїРєРµ С€Р°РіРѕРІ: <РєРѕСЂРµРЅСЊ>\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\01_РџРѕ С€Р°РіР°Рј.
 Public Function GetStepsFolder() As String
     Dim root As String
     root = GetProjectRoot()
     If root = "" Then
         GetStepsFolder = ""
     Else
-        GetStepsFolder = root & "\03_Результаты генерации\01_По шагам"
+        GetStepsFolder = root & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\01_РџРѕ С€Р°РіР°Рј"
     End If
 End Function
 
-' Записывает сообщение в журнал <корень>\05_Логи\Препроцессор_YYYY-MM-DD.log.
-' Формат строки: [YYYY-MM-DD HH:NN:SS] <message>.
-' ВАЖНО: обработка ошибок здесь сознательно НЕ применяется - WriteLog
-' вызывается из обработчиков ошибок других процедур, и любая собственная
-' ошибка могла бы зациклить журналирование. Если корень не задан или
-' запись невозможна - молча выходит.
+' Р—Р°РїРёСЃС‹РІР°РµС‚ СЃРѕРѕР±С‰РµРЅРёРµ РІ Р¶СѓСЂРЅР°Р» <РєРѕСЂРµРЅСЊ>\05_Р›РѕРіРё\РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ_YYYY-MM-DD.log.
+' Р¤РѕСЂРјР°С‚ СЃС‚СЂРѕРєРё: [YYYY-MM-DD HH:NN:SS] <message>.
+' Р’РђР–РќРћ: РѕР±СЂР°Р±РѕС‚РєР° РѕС€РёР±РѕРє Р·РґРµСЃСЊ СЃРѕР·РЅР°С‚РµР»СЊРЅРѕ РќР• РїСЂРёРјРµРЅСЏРµС‚СЃСЏ - WriteLog
+' РІС‹Р·С‹РІР°РµС‚СЃСЏ РёР· РѕР±СЂР°Р±РѕС‚С‡РёРєРѕРІ РѕС€РёР±РѕРє РґСЂСѓРіРёС… РїСЂРѕС†РµРґСѓСЂ, Рё Р»СЋР±Р°СЏ СЃРѕР±СЃС‚РІРµРЅРЅР°СЏ
+' РѕС€РёР±РєР° РјРѕРіР»Р° Р±С‹ Р·Р°С†РёРєР»РёС‚СЊ Р¶СѓСЂРЅР°Р»РёСЂРѕРІР°РЅРёРµ. Р•СЃР»Рё РєРѕСЂРµРЅСЊ РЅРµ Р·Р°РґР°РЅ РёР»Рё
+' Р·Р°РїРёСЃСЊ РЅРµРІРѕР·РјРѕР¶РЅР° - РјРѕР»С‡Р° РІС‹С…РѕРґРёС‚.
 Public Sub WriteLog(ByVal message As String)
     Dim root As String
     Dim logsPath As String
@@ -104,12 +104,12 @@ Public Sub WriteLog(ByVal message As String)
     Dim fnum As Integer
 
     root = GetProjectRoot()
-    If root = "" Then Exit Sub          ' корень не задан - молча выходим
+    If root = "" Then Exit Sub          ' РєРѕСЂРµРЅСЊ РЅРµ Р·Р°РґР°РЅ - РјРѕР»С‡Р° РІС‹С…РѕРґРёРј
 
-    logsPath = root & "\05_Логи"
+    logsPath = root & "\05_Р›РѕРіРё"
     If Dir(logsPath, vbDirectory) = "" Then MkDir logsPath
 
-    logFile = logsPath & "\Препроцессор_" & Format(Date, "yyyy-mm-dd") & ".log"
+    logFile = logsPath & "\РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ_" & Format(Date, "yyyy-mm-dd") & ".log"
 
     fnum = FreeFile
     Open logFile For Append As #fnum
@@ -117,20 +117,20 @@ Public Sub WriteLog(ByVal message As String)
     Close #fnum
 End Sub
 
-' Записывает ошибку с кодом в журнал: "[ERROR <код>] <сообщение>".
+' Р—Р°РїРёСЃС‹РІР°РµС‚ РѕС€РёР±РєСѓ СЃ РєРѕРґРѕРј РІ Р¶СѓСЂРЅР°Р»: "[ERROR <РєРѕРґ>] <СЃРѕРѕР±С‰РµРЅРёРµ>".
 Public Sub WriteError(ByVal code As String, ByVal message As String)
     WriteLog "[ERROR " & code & "] " & message
 End Sub
 
-' Записывает предупреждение с кодом в журнал: "[WARN <код>] <сообщение>".
+' Р—Р°РїРёСЃС‹РІР°РµС‚ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ СЃ РєРѕРґРѕРј РІ Р¶СѓСЂРЅР°Р»: "[WARN <РєРѕРґ>] <СЃРѕРѕР±С‰РµРЅРёРµ>".
 Public Sub WriteWarning(ByVal code As String, ByVal message As String)
     WriteLog "[WARN " & code & "] " & message
 End Sub
 
-' Возвращает значение параметра конфигурации по ключу из файла
-' <корень>\01_Исходные данные\03_Конфигурация\configuration.txt.
-' Формат строки: "key=value" (без пробелов вокруг "="), регистр ключа значим.
-' Если корень/файл/ключ не найдены - возвращает "".
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ Р·РЅР°С‡РµРЅРёРµ РїР°СЂР°РјРµС‚СЂР° РєРѕРЅС„РёРіСѓСЂР°С†РёРё РїРѕ РєР»СЋС‡Сѓ РёР· С„Р°Р№Р»Р°
+' <РєРѕСЂРµРЅСЊ>\01_РСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ\03_РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ\configuration.txt.
+' Р¤РѕСЂРјР°С‚ СЃС‚СЂРѕРєРё: "key=value" (Р±РµР· РїСЂРѕР±РµР»РѕРІ РІРѕРєСЂСѓРі "="), СЂРµРіРёСЃС‚СЂ РєР»СЋС‡Р° Р·РЅР°С‡РёРј.
+' Р•СЃР»Рё РєРѕСЂРµРЅСЊ/С„Р°Р№Р»/РєР»СЋС‡ РЅРµ РЅР°Р№РґРµРЅС‹ - РІРѕР·РІСЂР°С‰Р°РµС‚ "".
 Public Function GetConfigValue(ByVal key As String) As String
     Dim root As String
     Dim cfgPath As String
@@ -143,10 +143,10 @@ Public Function GetConfigValue(ByVal key As String) As String
     On Error GoTo ErrHandler
 
     root = GetProjectRoot()
-    If root = "" Then Exit Function     ' корень не задан - тихо возвращаем ""
+    If root = "" Then Exit Function     ' РєРѕСЂРµРЅСЊ РЅРµ Р·Р°РґР°РЅ - С‚РёС…Рѕ РІРѕР·РІСЂР°С‰Р°РµРј ""
 
-    cfgPath = root & "\01_Исходные данные\03_Конфигурация\configuration.txt"
-    If Dir(cfgPath) = "" Then Exit Function   ' файла нет - возвращаем ""
+    cfgPath = root & "\01_РСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ\03_РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ\configuration.txt"
+    If Dir(cfgPath) = "" Then Exit Function   ' С„Р°Р№Р»Р° РЅРµС‚ - РІРѕР·РІСЂР°С‰Р°РµРј ""
 
     fnum = FreeFile
     Open cfgPath For Input As #fnum
@@ -154,7 +154,7 @@ Public Function GetConfigValue(ByVal key As String) As String
         Line Input #fnum, s
         posEq = InStr(s, "=")
         If posEq > 0 Then
-            ' сравнение ключа с учётом регистра ("key=value", без пробелов)
+            ' СЃСЂР°РІРЅРµРЅРёРµ РєР»СЋС‡Р° СЃ СѓС‡С‘С‚РѕРј СЂРµРіРёСЃС‚СЂР° ("key=value", Р±РµР· РїСЂРѕР±РµР»РѕРІ)
             If StrComp(Left(s, posEq - 1), key, vbBinaryCompare) = 0 Then
                 GetConfigValue = Mid(s, posEq + 1)
                 Close #fnum
@@ -164,33 +164,33 @@ Public Function GetConfigValue(ByVal key As String) As String
     Loop
     Close #fnum
 
-    ' ключ не найден - GetConfigValue уже равно ""
+    ' РєР»СЋС‡ РЅРµ РЅР°Р№РґРµРЅ - GetConfigValue СѓР¶Рµ СЂР°РІРЅРѕ ""
     Exit Function
 
 ErrHandler:
-    WriteError "U002", "GetConfigValue: ошибка чтения configuration.txt. Ошибка: " & Err.Description
+    WriteError "U002", "GetConfigValue: РѕС€РёР±РєР° С‡С‚РµРЅРёСЏ configuration.txt. РћС€РёР±РєР°: " & Err.Description
     GetConfigValue = ""
     Err.Clear
 End Function
 
-' Открывает указанную папку в проводнике Windows.
-' Если путь пустой или папки нет - молча выходит.
+' РћС‚РєСЂС‹РІР°РµС‚ СѓРєР°Р·Р°РЅРЅСѓСЋ РїР°РїРєСѓ РІ РїСЂРѕРІРѕРґРЅРёРєРµ Windows.
+' Р•СЃР»Рё РїСѓС‚СЊ РїСѓСЃС‚РѕР№ РёР»Рё РїР°РїРєРё РЅРµС‚ - РјРѕР»С‡Р° РІС‹С…РѕРґРёС‚.
 Public Sub OpenFolderInExplorer(ByVal path As String)
     If path = "" Then Exit Sub
     If Dir(path, vbDirectory) = "" Then Exit Sub
     Shell "explorer.exe """ & path & """", vbNormalFocus
 End Sub
 
-' Создаёт лист "Настройки" (если его нет), заполняет поля, выпадающие
-' списки и именованные диапазоны по разделу 5 спецификации Spec_Dispatcher.md:
-'   B2 ProjectRoot       - Корневая папка проекта;
-'   B3 CheckMode         - Режим проверки (Черновик / Строгая);
-'   B4 AutoOpenResults   - Автооткрытие папки результатов (да / нет);
-'   B5 PromptGenVersion  - Версия промта-генератора (по умолчанию 7.13);
-'   B6 PromptFixVersion  - Версия промта-исправления (по умолчанию 1.0).
-' Лист защищается паролем "pilot", редактируемыми остаются только B2:B6.
-' Существующие значения пользовательских настроек при повторном запуске
-' не перезаписываются.
+' РЎРѕР·РґР°С‘С‚ Р»РёСЃС‚ "РќР°СЃС‚СЂРѕР№РєРё" (РµСЃР»Рё РµРіРѕ РЅРµС‚), Р·Р°РїРѕР»РЅСЏРµС‚ РїРѕР»СЏ, РІС‹РїР°РґР°СЋС‰РёРµ
+' СЃРїРёСЃРєРё Рё РёРјРµРЅРѕРІР°РЅРЅС‹Рµ РґРёР°РїР°Р·РѕРЅС‹ РїРѕ СЂР°Р·РґРµР»Сѓ 5 СЃРїРµС†РёС„РёРєР°С†РёРё Spec_Dispatcher.md:
+'   B2 ProjectRoot       - РљРѕСЂРЅРµРІР°СЏ РїР°РїРєР° РїСЂРѕРµРєС‚Р°;
+'   B3 CheckMode         - Р РµР¶РёРј РїСЂРѕРІРµСЂРєРё (Р§РµСЂРЅРѕРІРёРє / РЎС‚СЂРѕРіР°СЏ);
+'   B4 AutoOpenResults   - РђРІС‚РѕРѕС‚РєСЂС‹С‚РёРµ РїР°РїРєРё СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ (РґР° / РЅРµС‚);
+'   B5 PromptGenVersion  - Р’РµСЂСЃРёСЏ РїСЂРѕРјС‚Р°-РіРµРЅРµСЂР°С‚РѕСЂР° (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ 7.13);
+'   B6 PromptFixVersion  - Р’РµСЂСЃРёСЏ РїСЂРѕРјС‚Р°-РёСЃРїСЂР°РІР»РµРЅРёСЏ (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ 1.0).
+' Р›РёСЃС‚ Р·Р°С‰РёС‰Р°РµС‚СЃСЏ РїР°СЂРѕР»РµРј "pilot", СЂРµРґР°РєС‚РёСЂСѓРµРјС‹РјРё РѕСЃС‚Р°СЋС‚СЃСЏ С‚РѕР»СЊРєРѕ B2:B6.
+' РЎСѓС‰РµСЃС‚РІСѓСЋС‰РёРµ Р·РЅР°С‡РµРЅРёСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРёС… РЅР°СЃС‚СЂРѕРµРє РїСЂРё РїРѕРІС‚РѕСЂРЅРѕРј Р·Р°РїСѓСЃРєРµ
+' РЅРµ РїРµСЂРµР·Р°РїРёСЃС‹РІР°СЋС‚СЃСЏ.
 Public Sub EnsureSettingsSheet()
     Dim ws As Worksheet
     Dim wb As Workbook
@@ -204,59 +204,59 @@ Public Sub EnsureSettingsSheet()
 
     Set wb = ThisWorkbook
 
-    ' 1. Поиск листа "Настройки"; если нет - создать в конце книги
+    ' 1. РџРѕРёСЃРє Р»РёСЃС‚Р° "РќР°СЃС‚СЂРѕР№РєРё"; РµСЃР»Рё РЅРµС‚ - СЃРѕР·РґР°С‚СЊ РІ РєРѕРЅС†Рµ РєРЅРёРіРё
     On Error Resume Next
-    Set ws = wb.Worksheets("Настройки")
+    Set ws = wb.Worksheets("РќР°СЃС‚СЂРѕР№РєРё")
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo ErrHandler
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
-        ws.Name = "Настройки"
+        ws.Name = "РќР°СЃС‚СЂРѕР№РєРё"
     Else
         On Error GoTo ErrHandler
-        ws.Unprotect Password:=SHEET_PASSWORD   ' снимаем защиту перед правкой
+        ws.Unprotect Password:=SHEET_PASSWORD   ' СЃРЅРёРјР°РµРј Р·Р°С‰РёС‚Сѓ РїРµСЂРµРґ РїСЂР°РІРєРѕР№
     End If
 
-    ' 2. Подписи (колонка A), имена диапазонов и значения по умолчанию -
-    '    пять полей раздела 5 спецификации
-    labels = Array("Режим проверки", _
-               "Автооткрытие папки результатов", _
-               "Версия промта-генератора", _
-               "Версия промта-исправления")
+    ' 2. РџРѕРґРїРёСЃРё (РєРѕР»РѕРЅРєР° A), РёРјРµРЅР° РґРёР°РїР°Р·РѕРЅРѕРІ Рё Р·РЅР°С‡РµРЅРёСЏ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ -
+    '    РїСЏС‚СЊ РїРѕР»РµР№ СЂР°Р·РґРµР»Р° 5 СЃРїРµС†РёС„РёРєР°С†РёРё
+    labels = Array("Р РµР¶РёРј РїСЂРѕРІРµСЂРєРё", _
+               "РђРІС‚РѕРѕС‚РєСЂС‹С‚РёРµ РїР°РїРєРё СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ", _
+               "Р’РµСЂСЃРёСЏ РїСЂРѕРјС‚Р°-РіРµРЅРµСЂР°С‚РѕСЂР°", _
+               "Р’РµСЂСЃРёСЏ РїСЂРѕРјС‚Р°-РёСЃРїСЂР°РІР»РµРЅРёСЏ")
     namesArr = Array(NAME_CHECK_MODE, NAME_AUTO_OPEN_RESULTS, _
                      NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION)
-    defaults = Array("Черновик", "да", "7.13", "1.0")
+    defaults = Array("Р§РµСЂРЅРѕРІРёРє", "РґР°", "7.13", "1.0")
 
     For i = 0 To 3
         RowIdx = i + 2
         ws.Cells(RowIdx, 1).value = CStr(labels(i))
-        ' значение по умолчанию ставим только если ячейка пуста
+        ' Р·РЅР°С‡РµРЅРёРµ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ СЃС‚Р°РІРёРј С‚РѕР»СЊРєРѕ РµСЃР»Рё СЏС‡РµР№РєР° РїСѓСЃС‚Р°
         If Trim(CStr(ws.Cells(RowIdx, 2).value)) = "" Then
             ws.Cells(RowIdx, 2).value = CStr(defaults(i))
         End If
     Next i
 
-    ws.Range("A1").value = "Настройки Препроцессора"
+    ws.Range("A1").value = "РќР°СЃС‚СЂРѕР№РєРё РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂР°"
     ws.Columns("A:B").AutoFit
 
-    ' 3. Выпадающие списки (Validation): B3 - режим проверки, B4 - автооткрытие
+    ' 3. Р’С‹РїР°РґР°СЋС‰РёРµ СЃРїРёСЃРєРё (Validation): B3 - СЂРµР¶РёРј РїСЂРѕРІРµСЂРєРё, B4 - Р°РІС‚РѕРѕС‚РєСЂС‹С‚РёРµ
     With ws.Range("B3").Validation
         .Delete
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, Formula1:="Черновик,Строгая"
+             Operator:=xlBetween, Formula1:="Р§РµСЂРЅРѕРІРёРє,РЎС‚СЂРѕРіР°СЏ"
         .IgnoreBlank = True
         .InCellDropdown = True
     End With
     With ws.Range("B4").Validation
         .Delete
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, Formula1:="да,нет"
+             Operator:=xlBetween, Formula1:="РґР°,РЅРµС‚"
         .IgnoreBlank = True
         .InCellDropdown = True
     End With
 
-    ' 4. Именованные диапазоны - создавать, если их ещё нет
-    '    (существующие имена не трогаем, чтобы не переопределить ссылку)
+    ' 4. РРјРµРЅРѕРІР°РЅРЅС‹Рµ РґРёР°РїР°Р·РѕРЅС‹ - СЃРѕР·РґР°РІР°С‚СЊ, РµСЃР»Рё РёС… РµС‰С‘ РЅРµС‚
+    '    (СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёРµ РёРјРµРЅР° РЅРµ С‚СЂРѕРіР°РµРј, С‡С‚РѕР±С‹ РЅРµ РїРµСЂРµРѕРїСЂРµРґРµР»РёС‚СЊ СЃСЃС‹Р»РєСѓ)
     For i = 0 To 3
         On Error Resume Next
         Dim nmChk As Name
@@ -271,17 +271,17 @@ Public Sub EnsureSettingsSheet()
         Set nmChk = Nothing
     Next i
 
-    ' 5. Защита листа от случайной правки: разблокированы только B2:B6
+    ' 5. Р—Р°С‰РёС‚Р° Р»РёСЃС‚Р° РѕС‚ СЃР»СѓС‡Р°Р№РЅРѕР№ РїСЂР°РІРєРё: СЂР°Р·Р±Р»РѕРєРёСЂРѕРІР°РЅС‹ С‚РѕР»СЊРєРѕ B2:B6
     ws.Cells.Locked = True
     ws.Range("B2:B5").Locked = False
     ws.Protect Password:=SHEET_PASSWORD
 
-    WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён"
+    WriteLog "EnsureSettingsSheet: Р»РёСЃС‚ 'РќР°СЃС‚СЂРѕР№РєРё' СЃРѕР·РґР°РЅ/РѕР±РЅРѕРІР»С‘РЅ"
     Exit Sub
 
 ErrHandler:
-    WriteError "U003", "EnsureSettingsSheet: ошибка подготовки листа 'Настройки'. Ошибка: " & Err.Description
-    MsgBox "Ошибка U003: не удалось подготовить лист 'Настройки'." & vbCrLf & Err.Description, _
-           vbCritical, "Настройки"
+    WriteError "U003", "EnsureSettingsSheet: РѕС€РёР±РєР° РїРѕРґРіРѕС‚РѕРІРєРё Р»РёСЃС‚Р° 'РќР°СЃС‚СЂРѕР№РєРё'. РћС€РёР±РєР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° U003: РЅРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРіРѕС‚РѕРІРёС‚СЊ Р»РёСЃС‚ 'РќР°СЃС‚СЂРѕР№РєРё'." & vbCrLf & Err.Description, _
+           vbCritical, "РќР°СЃС‚СЂРѕР№РєРё"
     Err.Clear
 End Sub

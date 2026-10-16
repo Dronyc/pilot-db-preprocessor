@@ -2,20 +2,20 @@ Attribute VB_Name = "Mod_Registry"
 Option Explicit
 
 ' ============================================================================
-' Модуль реестров: построение, запись файлов реестров, обновление листов.
-' Реализация W4 (OPT-08): RegTypes — все системные имена из листа «Типы»,
-' RegCoverage — уникальные системные имена типов с покрытием из листа
-' «Атрибуты». Файлы пишутся в 03_Результаты генерации\03_Реестры,
-' листы _Реестр_типов и _Реестр_покрытия защищаются паролем «pilot».
+' РњРѕРґСѓР»СЊ СЂРµРµСЃС‚СЂРѕРІ: РїРѕСЃС‚СЂРѕРµРЅРёРµ, Р·Р°РїРёСЃСЊ С„Р°Р№Р»РѕРІ СЂРµРµСЃС‚СЂРѕРІ, РѕР±РЅРѕРІР»РµРЅРёРµ Р»РёСЃС‚РѕРІ.
+' Р РµР°Р»РёР·Р°С†РёСЏ W4 (OPT-08): RegTypes вЂ” РІСЃРµ СЃРёСЃС‚РµРјРЅС‹Рµ РёРјРµРЅР° РёР· Р»РёСЃС‚Р° В«РўРёРїС‹В»,
+' RegCoverage вЂ” СѓРЅРёРєР°Р»СЊРЅС‹Рµ СЃРёСЃС‚РµРјРЅС‹Рµ РёРјРµРЅР° С‚РёРїРѕРІ СЃ РїРѕРєСЂС‹С‚РёРµРј РёР· Р»РёСЃС‚Р°
+' В«РђС‚СЂРёР±СѓС‚С‹В». Р¤Р°Р№Р»С‹ РїРёС€СѓС‚СЃСЏ РІ 03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\03_Р РµРµСЃС‚СЂС‹,
+' Р»РёСЃС‚С‹ _Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ Рё _Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ Р·Р°С‰РёС‰Р°СЋС‚СЃСЏ РїР°СЂРѕР»РµРј В«pilotВ».
 ' ============================================================================
 
-' Модульные словари-реестры (доступны только внутри Mod_Registry)
-Private RegTypes As Object      ' системные имена типов (множество)
-Private RegCoverage As Object   ' системные имена типов с покрытием (множество)
+' РњРѕРґСѓР»СЊРЅС‹Рµ СЃР»РѕРІР°СЂРё-СЂРµРµСЃС‚СЂС‹ (РґРѕСЃС‚СѓРїРЅС‹ С‚РѕР»СЊРєРѕ РІРЅСѓС‚СЂРё Mod_Registry)
+Private RegTypes As Object      ' СЃРёСЃС‚РµРјРЅС‹Рµ РёРјРµРЅР° С‚РёРїРѕРІ (РјРЅРѕР¶РµСЃС‚РІРѕ)
+Private RegCoverage As Object   ' СЃРёСЃС‚РµРјРЅС‹Рµ РёРјРµРЅР° С‚РёРїРѕРІ СЃ РїРѕРєСЂС‹С‚РёРµРј (РјРЅРѕР¶РµСЃС‚РІРѕ)
 
-' Возвращает отсортированный по алфавиту массив ключей словаря.
-' Пузырьковая сортировка достаточна для имён реестров и не требует
-' дополнительных зависимостей.
+' Р’РѕР·РІСЂР°С‰Р°РµС‚ РѕС‚СЃРѕСЂС‚РёСЂРѕРІР°РЅРЅС‹Р№ РїРѕ Р°Р»С„Р°РІРёС‚Сѓ РјР°СЃСЃРёРІ РєР»СЋС‡РµР№ СЃР»РѕРІР°СЂСЏ.
+' РџСѓР·С‹СЂСЊРєРѕРІР°СЏ СЃРѕСЂС‚РёСЂРѕРІРєР° РґРѕСЃС‚Р°С‚РѕС‡РЅР° РґР»СЏ РёРјС‘РЅ СЂРµРµСЃС‚СЂРѕРІ Рё РЅРµ С‚СЂРµР±СѓРµС‚
+' РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹С… Р·Р°РІРёСЃРёРјРѕСЃС‚РµР№.
 Private Function SortedKeys(ByVal dict As Object) As String()
     Dim keys As Variant
     Dim arr() As String
@@ -51,7 +51,7 @@ Private Function SortedKeys(ByVal dict As Object) As String()
     SortedKeys = arr
 End Function
 
-' Сохраняет массив строк в текстовый файл (перезаписывает существующий).
+' РЎРѕС…СЂР°РЅСЏРµС‚ РјР°СЃСЃРёРІ СЃС‚СЂРѕРє РІ С‚РµРєСЃС‚РѕРІС‹Р№ С„Р°Р№Р» (РїРµСЂРµР·Р°РїРёСЃС‹РІР°РµС‚ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№).
 Private Sub WriteTextFile(ByVal filePath As String, arr() As String)
     Dim fnum As Integer
     Dim i As Long
@@ -64,43 +64,43 @@ Private Sub WriteTextFile(ByVal filePath As String, arr() As String)
     Close #fnum
 End Sub
 
-' Строит внутренние реестры объектов.
+' РЎС‚СЂРѕРёС‚ РІРЅСѓС‚СЂРµРЅРЅРёРµ СЂРµРµСЃС‚СЂС‹ РѕР±СЉРµРєС‚РѕРІ.
 Public Sub BuildRegistries()
-    Dim wsT As Worksheet      ' лист «Типы»
-    Dim wsA As Worksheet      ' лист «Атрибуты»
+    Dim wsT As Worksheet      ' Р»РёСЃС‚ В«РўРёРїС‹В»
+    Dim wsA As Worksheet      ' Р»РёСЃС‚ В«РђС‚СЂРёР±СѓС‚С‹В»
     Dim lastRow As Long
     Dim r As Long
     Dim nm As String
 
     On Error GoTo ErrHandler
 
-    ' Очистка модульных словарей перед заполнением (гарантия повторного запуска)
+    ' РћС‡РёСЃС‚РєР° РјРѕРґСѓР»СЊРЅС‹С… СЃР»РѕРІР°СЂРµР№ РїРµСЂРµРґ Р·Р°РїРѕР»РЅРµРЅРёРµРј (РіР°СЂР°РЅС‚РёСЏ РїРѕРІС‚РѕСЂРЅРѕРіРѕ Р·Р°РїСѓСЃРєР°)
     Set RegTypes = CreateObject("Scripting.Dictionary")
     Set RegCoverage = CreateObject("Scripting.Dictionary")
 
-    ' Поиск листа «Типы» в книге сводной (активная книга сборки)
+    ' РџРѕРёСЃРє Р»РёСЃС‚Р° В«РўРёРїС‹В» РІ РєРЅРёРіРµ СЃРІРѕРґРЅРѕР№ (Р°РєС‚РёРІРЅР°СЏ РєРЅРёРіР° СЃР±РѕСЂРєРё)
     On Error Resume Next
-    Set wsT = ActiveWorkbook.Worksheets("Типы")
+    Set wsT = ActiveWorkbook.Worksheets("РўРёРїС‹")
     On Error GoTo ErrHandler
     If wsT Is Nothing Then
-        Mod_Util.WriteError "R001", "BuildRegistries: в книге не найден лист 'Типы'."
-        MsgBox "Ошибка R001: в книге не найден лист 'Типы'.", vbCritical, "Реестры"
+        Mod_Util.WriteError "R001", "BuildRegistries: РІ РєРЅРёРіРµ РЅРµ РЅР°Р№РґРµРЅ Р»РёСЃС‚ 'РўРёРїС‹'."
+        MsgBox "РћС€РёР±РєР° R001: РІ РєРЅРёРіРµ РЅРµ РЅР°Р№РґРµРЅ Р»РёСЃС‚ 'РўРёРїС‹'.", vbCritical, "Р РµРµСЃС‚СЂС‹"
         Err.Clear
         Exit Sub
     End If
 
-    ' Поиск листа «Атрибуты»
+    ' РџРѕРёСЃРє Р»РёСЃС‚Р° В«РђС‚СЂРёР±СѓС‚С‹В»
     On Error Resume Next
-    Set wsA = ActiveWorkbook.Worksheets("Атрибуты")
+    Set wsA = ActiveWorkbook.Worksheets("РђС‚СЂРёР±СѓС‚С‹")
     On Error GoTo ErrHandler
     If wsA Is Nothing Then
-        Mod_Util.WriteError "R002", "BuildRegistries: в книге не найден лист 'Атрибуты'."
-        MsgBox "Ошибка R002: в книге не найден лист 'Атрибуты'.", vbCritical, "Реестры"
+        Mod_Util.WriteError "R002", "BuildRegistries: РІ РєРЅРёРіРµ РЅРµ РЅР°Р№РґРµРЅ Р»РёСЃС‚ 'РђС‚СЂРёР±СѓС‚С‹'."
+        MsgBox "РћС€РёР±РєР° R002: РІ РєРЅРёРіРµ РЅРµ РЅР°Р№РґРµРЅ Р»РёСЃС‚ 'РђС‚СЂРёР±СѓС‚С‹'.", vbCritical, "Р РµРµСЃС‚СЂС‹"
         Err.Clear
         Exit Sub
     End If
 
-    ' Реестр типов: обход листа «Типы» со 2-й строки, колонка 1
+    ' Р РµРµСЃС‚СЂ С‚РёРїРѕРІ: РѕР±С…РѕРґ Р»РёСЃС‚Р° В«РўРёРїС‹В» СЃРѕ 2-Р№ СЃС‚СЂРѕРєРё, РєРѕР»РѕРЅРєР° 1
     lastRow = wsT.Cells(wsT.Rows.Count, 1).End(xlUp).Row
     For r = 2 To lastRow
         nm = Trim(CStr(wsT.Cells(r, 1).Value))
@@ -109,7 +109,7 @@ Public Sub BuildRegistries()
         End If
     Next r
 
-    ' Реестр покрытия: уникальные системные имена типов из листа «Атрибуты»
+    ' Р РµРµСЃС‚СЂ РїРѕРєСЂС‹С‚РёСЏ: СѓРЅРёРєР°Р»СЊРЅС‹Рµ СЃРёСЃС‚РµРјРЅС‹Рµ РёРјРµРЅР° С‚РёРїРѕРІ РёР· Р»РёСЃС‚Р° В«РђС‚СЂРёР±СѓС‚С‹В»
     lastRow = wsA.Cells(wsA.Rows.Count, 1).End(xlUp).Row
     For r = 2 To lastRow
         nm = Trim(CStr(wsA.Cells(r, 1).Value))
@@ -118,18 +118,18 @@ Public Sub BuildRegistries()
         End If
     Next r
 
-    Mod_Util.WriteLog "BuildRegistries: типов " & RegTypes.Count & ", покрытий " & RegCoverage.Count
+    Mod_Util.WriteLog "BuildRegistries: С‚РёРїРѕРІ " & RegTypes.Count & ", РїРѕРєСЂС‹С‚РёР№ " & RegCoverage.Count
     Exit Sub
 
 ErrHandler:
-    Mod_Util.WriteError "R001", "BuildRegistries: ошибка построения реестров. Ошибка: " & Err.Description
-    MsgBox "Ошибка при построении реестров: " & Err.Description, vbCritical, "Реестры"
+    Mod_Util.WriteError "R001", "BuildRegistries: РѕС€РёР±РєР° РїРѕСЃС‚СЂРѕРµРЅРёСЏ СЂРµРµСЃС‚СЂРѕРІ. РћС€РёР±РєР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° РїСЂРё РїРѕСЃС‚СЂРѕРµРЅРёРё СЂРµРµСЃС‚СЂРѕРІ: " & Err.Description, vbCritical, "Р РµРµСЃС‚СЂС‹"
     Err.Clear
 End Sub
 
-' Записывает файлы реестров на диск.
-' Распределение кодов ошибок: R005 — реестры не построены / непредвиденная
-' ошибка, R004 — ошибка создания папки, R003 — ошибка записи файла.
+' Р—Р°РїРёСЃС‹РІР°РµС‚ С„Р°Р№Р»С‹ СЂРµРµСЃС‚СЂРѕРІ РЅР° РґРёСЃРє.
+' Р Р°СЃРїСЂРµРґРµР»РµРЅРёРµ РєРѕРґРѕРІ РѕС€РёР±РѕРє: R005 вЂ” СЂРµРµСЃС‚СЂС‹ РЅРµ РїРѕСЃС‚СЂРѕРµРЅС‹ / РЅРµРїСЂРµРґРІРёРґРµРЅРЅР°СЏ
+' РѕС€РёР±РєР°, R004 вЂ” РѕС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ РїР°РїРєРё, R003 вЂ” РѕС€РёР±РєР° Р·Р°РїРёСЃРё С„Р°Р№Р»Р°.
 Public Sub WriteRegistryFiles()
     Dim path As String
     Dim arrT() As String
@@ -137,24 +137,24 @@ Public Sub WriteRegistryFiles()
 
     On Error GoTo ErrHandler
 
-    ' 1. Проверка «реестры не построены» ? код R005
+    ' 1. РџСЂРѕРІРµСЂРєР° В«СЂРµРµСЃС‚СЂС‹ РЅРµ РїРѕСЃС‚СЂРѕРµРЅС‹В» ? РєРѕРґ R005
     If RegTypes Is Nothing Or RegCoverage Is Nothing Then
-        Mod_Util.WriteError "R005", "WriteRegistryFiles: реестры не построены, вызовите BuildRegistries."
-        MsgBox "Ошибка R005: реестры не построены. Сначала вызовите BuildRegistries.", vbCritical, "Реестры"
+        Mod_Util.WriteError "R005", "WriteRegistryFiles: СЂРµРµСЃС‚СЂС‹ РЅРµ РїРѕСЃС‚СЂРѕРµРЅС‹, РІС‹Р·РѕРІРёС‚Рµ BuildRegistries."
+        MsgBox "РћС€РёР±РєР° R005: СЂРµРµСЃС‚СЂС‹ РЅРµ РїРѕСЃС‚СЂРѕРµРЅС‹. РЎРЅР°С‡Р°Р»Р° РІС‹Р·РѕРІРёС‚Рµ BuildRegistries.", vbCritical, "Р РµРµСЃС‚СЂС‹"
         Err.Clear
         Exit Sub
     End If
 
-    ' 2. Папка реестров: корень проекта + подпуть (по разделу 2 спецификации)
-    path = Mod_Util.GetProjectRoot & "\03_Результаты генерации\03_Реестры"
+    ' 2. РџР°РїРєР° СЂРµРµСЃС‚СЂРѕРІ: РєРѕСЂРµРЅСЊ РїСЂРѕРµРєС‚Р° + РїРѕРґРїСѓС‚СЊ (РїРѕ СЂР°Р·РґРµР»Сѓ 2 СЃРїРµС†РёС„РёРєР°С†РёРё)
+    path = Mod_Util.GetProjectRoot & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\03_Р РµРµСЃС‚СЂС‹"
 
-    ' 3. Создание папки, если её нет ? код R004 при ошибке
+    ' 3. РЎРѕР·РґР°РЅРёРµ РїР°РїРєРё, РµСЃР»Рё РµС‘ РЅРµС‚ ? РєРѕРґ R004 РїСЂРё РѕС€РёР±РєРµ
     If Dir(path, vbDirectory) = "" Then
         On Error Resume Next
         MkDir path
         If Err.Number <> 0 Then
-            Mod_Util.WriteError "R004", "WriteRegistryFiles: не удалось создать папку " & path & ". Ошибка: " & Err.Description
-            MsgBox "Ошибка R004: не удалось создать папку " & path, vbCritical, "Реестры"
+            Mod_Util.WriteError "R004", "WriteRegistryFiles: РЅРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РїР°РїРєСѓ " & path & ". РћС€РёР±РєР°: " & Err.Description
+            MsgBox "РћС€РёР±РєР° R004: РЅРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РїР°РїРєСѓ " & path, vbCritical, "Р РµРµСЃС‚СЂС‹"
             Err.Clear
             On Error GoTo ErrHandler
             Exit Sub
@@ -162,41 +162,41 @@ Public Sub WriteRegistryFiles()
         On Error GoTo ErrHandler
     End If
 
-    ' 4. Файл Реестр_типов.txt: по одному имени на строку, по алфавиту ? R003 при ошибке
+    ' 4. Р¤Р°Р№Р» Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ.txt: РїРѕ РѕРґРЅРѕРјСѓ РёРјРµРЅРё РЅР° СЃС‚СЂРѕРєСѓ, РїРѕ Р°Р»С„Р°РІРёС‚Сѓ ? R003 РїСЂРё РѕС€РёР±РєРµ
     arrT = SortedKeys(RegTypes)
     On Error Resume Next
-    WriteTextFile path & "\Реестр_типов.txt", arrT
+    WriteTextFile path & "\Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ.txt", arrT
     If Err.Number <> 0 Then
-        Mod_Util.WriteError "R003", "WriteRegistryFiles: не удалось записать Реестр_типов.txt. Ошибка: " & Err.Description
-        MsgBox "Ошибка R003: не удалось записать Реестр_типов.txt", vbCritical, "Реестры"
+        Mod_Util.WriteError "R003", "WriteRegistryFiles: РЅРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїРёСЃР°С‚СЊ Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ.txt. РћС€РёР±РєР°: " & Err.Description
+        MsgBox "РћС€РёР±РєР° R003: РЅРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїРёСЃР°С‚СЊ Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ.txt", vbCritical, "Р РµРµСЃС‚СЂС‹"
         Err.Clear
     End If
     On Error GoTo ErrHandler
 
-    ' 5. Файл Реестр_покрытия.txt: по одному имени на строку, по алфавиту ? R003 при ошибке
+    ' 5. Р¤Р°Р№Р» Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ.txt: РїРѕ РѕРґРЅРѕРјСѓ РёРјРµРЅРё РЅР° СЃС‚СЂРѕРєСѓ, РїРѕ Р°Р»С„Р°РІРёС‚Сѓ ? R003 РїСЂРё РѕС€РёР±РєРµ
     arrC = SortedKeys(RegCoverage)
     On Error Resume Next
-    WriteTextFile path & "\Реестр_покрытия.txt", arrC
+    WriteTextFile path & "\Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ.txt", arrC
     If Err.Number <> 0 Then
-        Mod_Util.WriteError "R003", "WriteRegistryFiles: не удалось записать Реестр_покрытия.txt. Ошибка: " & Err.Description
-        MsgBox "Ошибка R003: не удалось записать Реестр_покрытия.txt", vbCritical, "Реестры"
+        Mod_Util.WriteError "R003", "WriteRegistryFiles: РЅРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїРёСЃР°С‚СЊ Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ.txt. РћС€РёР±РєР°: " & Err.Description
+        MsgBox "РћС€РёР±РєР° R003: РЅРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїРёСЃР°С‚СЊ Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ.txt", vbCritical, "Р РµРµСЃС‚СЂС‹"
         Err.Clear
     End If
     On Error GoTo ErrHandler
 
-    ' 6. Финальный лог
-    Mod_Util.WriteLog "WriteRegistryFiles: сохранено " & RegTypes.Count & " типов, " & _
-                      RegCoverage.Count & " покрытий"
+    ' 6. Р¤РёРЅР°Р»СЊРЅС‹Р№ Р»РѕРі
+    Mod_Util.WriteLog "WriteRegistryFiles: СЃРѕС…СЂР°РЅРµРЅРѕ " & RegTypes.Count & " С‚РёРїРѕРІ, " & _
+                      RegCoverage.Count & " РїРѕРєСЂС‹С‚РёР№"
     Exit Sub
 
-    ' 7. Общий обработчик ошибок ? код R005
+    ' 7. РћР±С‰РёР№ РѕР±СЂР°Р±РѕС‚С‡РёРє РѕС€РёР±РѕРє ? РєРѕРґ R005
 ErrHandler:
-    Mod_Util.WriteError "R005", "WriteRegistryFiles: непредвиденная ошибка. Ошибка: " & Err.Description
-    MsgBox "Ошибка R005: непредвиденная ошибка при записи реестров.", vbCritical, "Реестры"
+    Mod_Util.WriteError "R005", "WriteRegistryFiles: РЅРµРїСЂРµРґРІРёРґРµРЅРЅР°СЏ РѕС€РёР±РєР°. РћС€РёР±РєР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° R005: РЅРµРїСЂРµРґРІРёРґРµРЅРЅР°СЏ РѕС€РёР±РєР° РїСЂРё Р·Р°РїРёСЃРё СЂРµРµСЃС‚СЂРѕРІ.", vbCritical, "Р РµРµСЃС‚СЂС‹"
     Err.Clear
 End Sub
 
-' Обновляет листы реестров в книге.
+' РћР±РЅРѕРІР»СЏРµС‚ Р»РёСЃС‚С‹ СЂРµРµСЃС‚СЂРѕРІ РІ РєРЅРёРіРµ.
 Public Sub UpdateRegistrySheets()
     Dim wb As Workbook
     Dim ws As Worksheet
@@ -206,41 +206,41 @@ Public Sub UpdateRegistrySheets()
     On Error GoTo ErrHandler
 
     If RegTypes Is Nothing Or RegCoverage Is Nothing Then
-        Mod_Util.WriteError "R005", "UpdateRegistrySheets: реестры не построены, вызовите BuildRegistries."
-        MsgBox "Ошибка R005: реестры не построены. Сначала вызовите BuildRegistries.", vbCritical, "Реестры"
+        Mod_Util.WriteError "R005", "UpdateRegistrySheets: СЂРµРµСЃС‚СЂС‹ РЅРµ РїРѕСЃС‚СЂРѕРµРЅС‹, РІС‹Р·РѕРІРёС‚Рµ BuildRegistries."
+        MsgBox "РћС€РёР±РєР° R005: СЂРµРµСЃС‚СЂС‹ РЅРµ РїРѕСЃС‚СЂРѕРµРЅС‹. РЎРЅР°С‡Р°Р»Р° РІС‹Р·РѕРІРёС‚Рµ BuildRegistries.", vbCritical, "Р РµРµСЃС‚СЂС‹"
         Err.Clear
         Exit Sub
     End If
 
     Set wb = ActiveWorkbook
 
-    ' ---------- ЛИСТ _Реестр_типов ----------
+    ' ---------- Р›РРЎРў _Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ ----------
     On Error Resume Next
-    Set ws = wb.Worksheets("_Реестр_типов")
+    Set ws = wb.Worksheets("_Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ")
     On Error GoTo ErrHandler
     If ws Is Nothing Then
-        ' Листа нет — создаём в конце книги
+        ' Р›РёСЃС‚Р° РЅРµС‚ вЂ” СЃРѕР·РґР°С‘Рј РІ РєРѕРЅС†Рµ РєРЅРёРіРё
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
-        ws.Name = "_Реестр_типов"
+        ws.Name = "_Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ"
     Else
-        ws.Unprotect Password:="pilot"   ' снимаем защиту перед очисткой
-        ws.UsedRange.ClearContents       ' очищаем содержимое UsedRange
+        ws.Unprotect Password:="pilot"   ' СЃРЅРёРјР°РµРј Р·Р°С‰РёС‚Сѓ РїРµСЂРµРґ РѕС‡РёСЃС‚РєРѕР№
+        ws.UsedRange.ClearContents       ' РѕС‡РёС‰Р°РµРј СЃРѕРґРµСЂР¶РёРјРѕРµ UsedRange
     End If
 
     arr = SortedKeys(RegTypes)
     For i = LBound(arr) To UBound(arr)
         ws.Cells(i - LBound(arr) + 1, 1).Value = arr(i)
     Next i
-    ws.Protect Password:="pilot"         ' защита паролем «pilot»
+    ws.Protect Password:="pilot"         ' Р·Р°С‰РёС‚Р° РїР°СЂРѕР»РµРј В«pilotВ»
     Set ws = Nothing
 
-    ' ---------- ЛИСТ _Реестр_покрытия ----------
+    ' ---------- Р›РРЎРў _Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ ----------
     On Error Resume Next
-    Set ws = wb.Worksheets("_Реестр_покрытия")
+    Set ws = wb.Worksheets("_Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ")
     On Error GoTo ErrHandler
     If ws Is Nothing Then
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
-        ws.Name = "_Реестр_покрытия"
+        ws.Name = "_Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ"
     Else
         ws.Unprotect Password:="pilot"
         ws.UsedRange.ClearContents
@@ -253,13 +253,13 @@ Public Sub UpdateRegistrySheets()
     ws.Protect Password:="pilot"
     Set ws = Nothing
 
-    Mod_Util.WriteLog "UpdateRegistrySheets: обновлено " & RegTypes.Count & " типов, " & _
-                      RegCoverage.Count & " покрытий"
+    Mod_Util.WriteLog "UpdateRegistrySheets: РѕР±РЅРѕРІР»РµРЅРѕ " & RegTypes.Count & " С‚РёРїРѕРІ, " & _
+                      RegCoverage.Count & " РїРѕРєСЂС‹С‚РёР№"
     Exit Sub
 
 ErrHandler:
-    Mod_Util.WriteError "R005", "UpdateRegistrySheets: ошибка обновления листов реестров. Ошибка: " & Err.Description
-    MsgBox "Ошибка R005: не удалось обновить листы реестров. " & vbCrLf & Err.Description, _
-           vbCritical, "Реестры"
+    Mod_Util.WriteError "R005", "UpdateRegistrySheets: РѕС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ Р»РёСЃС‚РѕРІ СЂРµРµСЃС‚СЂРѕРІ. РћС€РёР±РєР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° R005: РЅРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ Р»РёСЃС‚С‹ СЂРµРµСЃС‚СЂРѕРІ. " & vbCrLf & Err.Description, _
+           vbCritical, "Р РµРµСЃС‚СЂС‹"
     Err.Clear
 End Sub

@@ -2,17 +2,17 @@ Attribute VB_Name = "Mod_UI"
 Option Explicit
 
 ' ============================================================
-' Модуль: Mod_UI
-' Назначение: UI-слой проекта "Препроцессор структуры БД Pilot".
-'             Создание кнопок на листе "Препроцессор", форматирование
-'             листов, защита служебных листов, а также обработчики
-'             нажатий кнопок, делегирующие работу профильным модулям.
-' Зависимости: Mod_Util, Mod_Folders, Mod_Structure, Mod_Assembler,
+' РњРѕРґСѓР»СЊ: Mod_UI
+' РќР°Р·РЅР°С‡РµРЅРёРµ: UI-СЃР»РѕР№ РїСЂРѕРµРєС‚Р° "РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ СЃС‚СЂСѓРєС‚СѓСЂС‹ Р‘Р” Pilot".
+'             РЎРѕР·РґР°РЅРёРµ РєРЅРѕРїРѕРє РЅР° Р»РёСЃС‚Рµ "РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ", С„РѕСЂРјР°С‚РёСЂРѕРІР°РЅРёРµ
+'             Р»РёСЃС‚РѕРІ, Р·Р°С‰РёС‚Р° СЃР»СѓР¶РµР±РЅС‹С… Р»РёСЃС‚РѕРІ, Р° С‚Р°РєР¶Рµ РѕР±СЂР°Р±РѕС‚С‡РёРєРё
+'             РЅР°Р¶Р°С‚РёР№ РєРЅРѕРїРѕРє, РґРµР»РµРіРёСЂСѓСЋС‰РёРµ СЂР°Р±РѕС‚Сѓ РїСЂРѕС„РёР»СЊРЅС‹Рј РјРѕРґСѓР»СЏРј.
+' Р—Р°РІРёСЃРёРјРѕСЃС‚Рё: Mod_Util, Mod_Folders, Mod_Structure, Mod_Assembler,
 '              Mod_Prompt, Mod_Docs.
 ' ============================================================
 
 ' ------------------------------------------------------------
-' Восстановление UI: кнопки, оформление, защита листов.
+' Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ UI: РєРЅРѕРїРєРё, РѕС„РѕСЂРјР»РµРЅРёРµ, Р·Р°С‰РёС‚Р° Р»РёСЃС‚РѕРІ.
 ' ------------------------------------------------------------
 Public Sub RestoreUI()
     Dim ws As Worksheet
@@ -32,54 +32,54 @@ Public Sub RestoreUI()
 
     On Error GoTo ErrHandler
 
-    ' Проверка наличия листа "Препроцессор"
+    ' РџСЂРѕРІРµСЂРєР° РЅР°Р»РёС‡РёСЏ Р»РёСЃС‚Р° "РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ"
     Set ws = Nothing
     For Each wsAny In ThisWorkbook.Worksheets
-        If StrComp(wsAny.Name, "Препроцессор", vbTextCompare) = 0 Then
+        If StrComp(wsAny.Name, "РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ", vbTextCompare) = 0 Then
             Set ws = wsAny
             Exit For
         End If
     Next wsAny
 
     If ws Is Nothing Then
-        MsgBox "Лист Препроцессор не найден", vbExclamation
+        MsgBox "Р›РёСЃС‚ РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ РЅРµ РЅР°Р№РґРµРЅ", vbExclamation
         Exit Sub
     End If
 
-    ' Создание служебных листов, если их нет
+    ' РЎРѕР·РґР°РЅРёРµ СЃР»СѓР¶РµР±РЅС‹С… Р»РёСЃС‚РѕРІ, РµСЃР»Рё РёС… РЅРµС‚
     Call EnsureSheet_Readme(ThisWorkbook)
     Call Mod_Util.EnsureSettingsSheet
 
-    ' Удаление существующих Form Controls
+    ' РЈРґР°Р»РµРЅРёРµ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёС… Form Controls
     Do While ws.Buttons.Count > 0
         ws.Buttons(1).Delete
     Loop
 
-    ' Удаление существующих кнопок
+    ' РЈРґР°Р»РµРЅРёРµ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёС… РєРЅРѕРїРѕРє
     Do While ws.Shapes.Count > 0
         ws.Shapes(1).Delete
     Loop
     
-    ' Установка ширины столбцов До создания кнопок
+    ' РЈСЃС‚Р°РЅРѕРІРєР° С€РёСЂРёРЅС‹ СЃС‚РѕР»Р±С†РѕРІ Р”Рѕ СЃРѕР·РґР°РЅРёСЏ РєРЅРѕРїРѕРє
     ws.Columns("B").ColumnWidth = 40
     ws.Columns("C").ColumnWidth = 60
     ws.Columns("C").Font.Italic = True
     ws.Columns("C").Font.Color = RGB(89, 89, 89)
 
-    ' Подготовка списков кнопок
+    ' РџРѕРґРіРѕС‚РѕРІРєР° СЃРїРёСЃРєРѕРІ РєРЅРѕРїРѕРє
     captions = Array( _
-        "Создать папки проекта", _
-        "Проверить исходные данные", _
-        "Собрать плоскую таблицу из Схемы", _
-        "Повторный анализ преобразованного", _
-        "Собрать типы и атрибуты (черновик)", _
-        "Собрать типы и атрибуты (строгая)", _
-        "Сделать промт следующего шага", _
-        "Сделать промт исправления ошибок", _
-        "Показать, что нашёл Препроцессор", _
-        "Открыть папку Логи", _
-        "Обновить Readme", _
-        "Восстановить кнопки и оформление")
+        "РЎРѕР·РґР°С‚СЊ РїР°РїРєРё РїСЂРѕРµРєС‚Р°", _
+        "РџСЂРѕРІРµСЂРёС‚СЊ РёСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ", _
+        "РЎРѕР±СЂР°С‚СЊ РїР»РѕСЃРєСѓСЋ С‚Р°Р±Р»РёС†Сѓ РёР· РЎС…РµРјС‹", _
+        "РџРѕРІС‚РѕСЂРЅС‹Р№ Р°РЅР°Р»РёР· РїСЂРµРѕР±СЂР°Р·РѕРІР°РЅРЅРѕРіРѕ", _
+        "РЎРѕР±СЂР°С‚СЊ С‚РёРїС‹ Рё Р°С‚СЂРёР±СѓС‚С‹ (С‡РµСЂРЅРѕРІРёРє)", _
+        "РЎРѕР±СЂР°С‚СЊ С‚РёРїС‹ Рё Р°С‚СЂРёР±СѓС‚С‹ (СЃС‚СЂРѕРіР°СЏ)", _
+        "РЎРґРµР»Р°С‚СЊ РїСЂРѕРјС‚ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°", _
+        "РЎРґРµР»Р°С‚СЊ РїСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ РѕС€РёР±РѕРє", _
+        "РџРѕРєР°Р·Р°С‚СЊ, С‡С‚Рѕ РЅР°С€С‘Р» РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ", _
+        "РћС‚РєСЂС‹С‚СЊ РїР°РїРєСѓ Р›РѕРіРё", _
+        "РћР±РЅРѕРІРёС‚СЊ Readme", _
+        "Р’РѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ РєРЅРѕРїРєРё Рё РѕС„РѕСЂРјР»РµРЅРёРµ")
 
     actions = Array( _
         "CreateProjectFolders_Click", _
@@ -96,22 +96,22 @@ Public Sub RestoreUI()
         "RestoreUI_Click")
 
     tips = Array( _
-        "Создаёт структуру папок проекта", _
-        "Проверяет наличие файлов в 01_Исходные данные", _
-        "Преобразует исходную схему в плоскую таблицу", _
-        "Анализирует готовую плоскую таблицу без пересборки", _
-        "Собирает сводную в черновом режиме", _
-        "Собирает сводную в строгом режиме", _
-        "Формирует промт следующего шага и создаёт его папку", _
-        "Формирует промт исправления для текущего шага", _
-        "Показывает карту найденных шагов и файлов", _
-        "Открывает папку 05_Логи", _
-        "Формирует Readme.md из листа Readme", _
-        "Пересоздаёт кнопки, оформление и защиту листов")
+        "РЎРѕР·РґР°С‘С‚ СЃС‚СЂСѓРєС‚СѓСЂСѓ РїР°РїРѕРє РїСЂРѕРµРєС‚Р°", _
+        "РџСЂРѕРІРµСЂСЏРµС‚ РЅР°Р»РёС‡РёРµ С„Р°Р№Р»РѕРІ РІ 01_РСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ", _
+        "РџСЂРµРѕР±СЂР°Р·СѓРµС‚ РёСЃС…РѕРґРЅСѓСЋ СЃС…РµРјСѓ РІ РїР»РѕСЃРєСѓСЋ С‚Р°Р±Р»РёС†Сѓ", _
+        "РђРЅР°Р»РёР·РёСЂСѓРµС‚ РіРѕС‚РѕРІСѓСЋ РїР»РѕСЃРєСѓСЋ С‚Р°Р±Р»РёС†Сѓ Р±РµР· РїРµСЂРµСЃР±РѕСЂРєРё", _
+        "РЎРѕР±РёСЂР°РµС‚ СЃРІРѕРґРЅСѓСЋ РІ С‡РµСЂРЅРѕРІРѕРј СЂРµР¶РёРјРµ", _
+        "РЎРѕР±РёСЂР°РµС‚ СЃРІРѕРґРЅСѓСЋ РІ СЃС‚СЂРѕРіРѕРј СЂРµР¶РёРјРµ", _
+        "Р¤РѕСЂРјРёСЂСѓРµС‚ РїСЂРѕРјС‚ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР° Рё СЃРѕР·РґР°С‘С‚ РµРіРѕ РїР°РїРєСѓ", _
+        "Р¤РѕСЂРјРёСЂСѓРµС‚ РїСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ РґР»СЏ С‚РµРєСѓС‰РµРіРѕ С€Р°РіР°", _
+        "РџРѕРєР°Р·С‹РІР°РµС‚ РєР°СЂС‚Сѓ РЅР°Р№РґРµРЅРЅС‹С… С€Р°РіРѕРІ Рё С„Р°Р№Р»РѕРІ", _
+        "РћС‚РєСЂС‹РІР°РµС‚ РїР°РїРєСѓ 05_Р›РѕРіРё", _
+        "Р¤РѕСЂРјРёСЂСѓРµС‚ Readme.md РёР· Р»РёСЃС‚Р° Readme", _
+        "РџРµСЂРµСЃРѕР·РґР°С‘С‚ РєРЅРѕРїРєРё, РѕС„РѕСЂРјР»РµРЅРёРµ Рё Р·Р°С‰РёС‚Сѓ Р»РёСЃС‚РѕРІ")
 
-    ' Создание 12 кнопок в столбце B (строки 2, 4, ..., 24)
-    ' Используем Shapes.AddFormControl + Placement = xlFreeFloating,
-    ' чтобы кнопки не растягивались при изменении ширины столбцов и AutoFit.
+    ' РЎРѕР·РґР°РЅРёРµ 12 РєРЅРѕРїРѕРє РІ СЃС‚РѕР»Р±С†Рµ B (СЃС‚СЂРѕРєРё 2, 4, ..., 24)
+    ' РСЃРїРѕР»СЊР·СѓРµРј Shapes.AddFormControl + Placement = xlFreeFloating,
+    ' С‡С‚РѕР±С‹ РєРЅРѕРїРєРё РЅРµ СЂР°СЃС‚СЏРіРёРІР°Р»РёСЃСЊ РїСЂРё РёР·РјРµРЅРµРЅРёРё С€РёСЂРёРЅС‹ СЃС‚РѕР»Р±С†РѕРІ Рё AutoFit.
     rowBtn = 2
     For i = LBound(captions) To UBound(captions)
         Dim shpBtn As Shape
@@ -128,29 +128,29 @@ Public Sub RestoreUI()
             .HorizontalAlignment = xlCenter
             .VerticalAlignment = xlCenter
         End With
-        shpBtn.Fill.ForeColor.RGB = RGB(91, 155, 213)      ' синий
-        shpBtn.Line.ForeColor.RGB = RGB(0, 0, 0)           ' чёрная рамка
+        shpBtn.Fill.ForeColor.RGB = RGB(91, 155, 213)      ' СЃРёРЅРёР№
+        shpBtn.Line.ForeColor.RGB = RGB(0, 0, 0)           ' С‡С‘СЂРЅР°СЏ СЂР°РјРєР°
         shpBtn.Line.Weight = 1
         ws.Cells(rowBtn, 3).value = CStr(tips(i))
         rowBtn = rowBtn + 2
     Next i
     
-    ' Форматирование всех листов книги
+    ' Р¤РѕСЂРјР°С‚РёСЂРѕРІР°РЅРёРµ РІСЃРµС… Р»РёСЃС‚РѕРІ РєРЅРёРіРё
     For Each wsAny In ThisWorkbook.Worksheets
-        If StrComp(wsAny.Name, "Препроцессор", vbTextCompare) <> 0 Then
+        If StrComp(wsAny.Name, "РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ", vbTextCompare) <> 0 Then
             On Error Resume Next
             wsAny.Unprotect Password:="pilot"
             On Error GoTo ErrHandler
     
-            ' Первая строка - жирным
+            ' РџРµСЂРІР°СЏ СЃС‚СЂРѕРєР° - Р¶РёСЂРЅС‹Рј
             wsAny.Rows(1).Font.Bold = True
     
-            ' Автоширина столбцов
+            ' РђРІС‚РѕС€РёСЂРёРЅР° СЃС‚РѕР»Р±С†РѕРІ
             On Error Resume Next
             wsAny.Cells.EntireColumn.AutoFit
             On Error GoTo ErrHandler
     
-            ' Закрепление первой строки
+            ' Р—Р°РєСЂРµРїР»РµРЅРёРµ РїРµСЂРІРѕР№ СЃС‚СЂРѕРєРё
             On Error Resume Next
             wsAny.Activate
             wsAny.Range("A2").Select
@@ -160,9 +160,9 @@ Public Sub RestoreUI()
         End If
     Next wsAny
 
-    ' Защита служебных листов
+    ' Р—Р°С‰РёС‚Р° СЃР»СѓР¶РµР±РЅС‹С… Р»РёСЃС‚РѕРІ
     pass = "pilot"
-    srv = Array("_Реестр_типов", "_Реестр_покрытия", "_Ошибки", "_Предупреждения")
+    srv = Array("_Р РµРµСЃС‚СЂ_С‚РёРїРѕРІ", "_Р РµРµСЃС‚СЂ_РїРѕРєСЂС‹С‚РёСЏ", "_РћС€РёР±РєРё", "_РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ")
     For n = LBound(srv) To UBound(srv)
         Set wsSrv = Nothing
         For Each wsAny In ThisWorkbook.Worksheets
@@ -178,41 +178,41 @@ Public Sub RestoreUI()
         End If
     Next n
 
-    ' Активируем лист "Препроцессор"
+    ' РђРєС‚РёРІРёСЂСѓРµРј Р»РёСЃС‚ "РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ"
     On Error Resume Next
     ws.Activate
     On Error GoTo ErrHandler
     
-    ' Упорядочить листы: Препроцессор, Настройки, Readme, остальные
+    ' РЈРїРѕСЂСЏРґРѕС‡РёС‚СЊ Р»РёСЃС‚С‹: РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ, РќР°СЃС‚СЂРѕР№РєРё, Readme, РѕСЃС‚Р°Р»СЊРЅС‹Рµ
     Call ReorderSheets(ThisWorkbook)
 
-    Mod_Util.WriteLog "UI восстановлен: 12 кнопок, оформление, защита"
+    Mod_Util.WriteLog "UI РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ: 12 РєРЅРѕРїРѕРє, РѕС„РѕСЂРјР»РµРЅРёРµ, Р·Р°С‰РёС‚Р°"
     Exit Sub
 
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в RestoreUI: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteLog "РћС€РёР±РєР° РІ RestoreUI: " & Err.Description
+    MsgBox "РћС€РёР±РєР°: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 1. Создать папки проекта
+' 1. РЎРѕР·РґР°С‚СЊ РїР°РїРєРё РїСЂРѕРµРєС‚Р°
 ' ------------------------------------------------------------
 Public Sub CreateProjectFolders_Click()
     On Error GoTo ErrHandler
 
     Call Mod_Folders.CreateProjectFolders
-    Mod_Util.WriteLog "CreateProjectFolders_Click: папки созданы"
+    Mod_Util.WriteLog "CreateProjectFolders_Click: РїР°РїРєРё СЃРѕР·РґР°РЅС‹"
     Exit Sub
 
 ErrHandler:
     Mod_Util.WriteError "F003", "CreateProjectFolders_Click: " & Err.Description
-    MsgBox "Ошибка F003: " & Err.Description, vbCritical, "Папки проекта"
+    MsgBox "РћС€РёР±РєР° F003: " & Err.Description, vbCritical, "РџР°РїРєРё РїСЂРѕРµРєС‚Р°"
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 2. Проверить исходные данные
+' 2. РџСЂРѕРІРµСЂРёС‚СЊ РёСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ
 ' ------------------------------------------------------------
 Public Sub CheckSourceFiles_Click()
     Dim ok As Boolean
@@ -221,109 +221,109 @@ Public Sub CheckSourceFiles_Click()
 
     ok = Mod_Folders.CheckSourceFolders
     If ok Then
-        MsgBox "Все исходные файлы найдены.", vbInformation, "Проверка исходных данных"
+        MsgBox "Р’СЃРµ РёСЃС…РѕРґРЅС‹Рµ С„Р°Р№Р»С‹ РЅР°Р№РґРµРЅС‹.", vbInformation, "РџСЂРѕРІРµСЂРєР° РёСЃС…РѕРґРЅС‹С… РґР°РЅРЅС‹С…"
     Else
-        MsgBox "Есть проблемы. Смотрите лог 05_Логи.", vbExclamation, "Проверка исходных данных"
+        MsgBox "Р•СЃС‚СЊ РїСЂРѕР±Р»РµРјС‹. РЎРјРѕС‚СЂРёС‚Рµ Р»РѕРі 05_Р›РѕРіРё.", vbExclamation, "РџСЂРѕРІРµСЂРєР° РёСЃС…РѕРґРЅС‹С… РґР°РЅРЅС‹С…"
     End If
     Exit Sub
 
 ErrHandler:
     Mod_Util.WriteError "F004", "CheckSourceFiles_Click: " & Err.Description
-    MsgBox "Ошибка F004: " & Err.Description, vbCritical, "Проверка исходных данных"
+    MsgBox "РћС€РёР±РєР° F004: " & Err.Description, vbCritical, "РџСЂРѕРІРµСЂРєР° РёСЃС…РѕРґРЅС‹С… РґР°РЅРЅС‹С…"
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 3. Собрать плоскую таблицу из Схемы
+' 3. РЎРѕР±СЂР°С‚СЊ РїР»РѕСЃРєСѓСЋ С‚Р°Р±Р»РёС†Сѓ РёР· РЎС…РµРјС‹
 ' ------------------------------------------------------------
 Public Sub BuildFlatStructure_Click()
     On Error GoTo ErrHandler
     Mod_Structure.BuildFlatStructure
-    Mod_Util.WriteLog "Плоская таблица собрана"
-    MsgBox "Плоская таблица собрана"
+    Mod_Util.WriteLog "РџР»РѕСЃРєР°СЏ С‚Р°Р±Р»РёС†Р° СЃРѕР±СЂР°РЅР°"
+    MsgBox "РџР»РѕСЃРєР°СЏ С‚Р°Р±Р»РёС†Р° СЃРѕР±СЂР°РЅР°"
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в BuildFlatStructure_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteLog "РћС€РёР±РєР° РІ BuildFlatStructure_Click: " & Err.Description
+    MsgBox "РћС€РёР±РєР°: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 4. Повторный анализ преобразованного
+' 4. РџРѕРІС‚РѕСЂРЅС‹Р№ Р°РЅР°Р»РёР· РїСЂРµРѕР±СЂР°Р·РѕРІР°РЅРЅРѕРіРѕ
 ' ------------------------------------------------------------
 Public Sub RecheckFlatTable_Click()
     On Error GoTo ErrHandler
-    Mod_Util.WriteLog "Повторный анализ: функция появится в W4."
-    MsgBox "Функция появится в W4"
+    Mod_Util.WriteLog "РџРѕРІС‚РѕСЂРЅС‹Р№ Р°РЅР°Р»РёР·: С„СѓРЅРєС†РёСЏ РїРѕСЏРІРёС‚СЃСЏ РІ W4."
+    MsgBox "Р¤СѓРЅРєС†РёСЏ РїРѕСЏРІРёС‚СЃСЏ РІ W4"
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в RecheckFlatTable_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteLog "РћС€РёР±РєР° РІ RecheckFlatTable_Click: " & Err.Description
+    MsgBox "РћС€РёР±РєР°: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 5. Собрать типы и атрибуты (черновик)
+' 5. РЎРѕР±СЂР°С‚СЊ С‚РёРїС‹ Рё Р°С‚СЂРёР±СѓС‚С‹ (С‡РµСЂРЅРѕРІРёРє)
 ' ------------------------------------------------------------
 Public Sub AssembleDraft_Click()
     On Error GoTo ErrHandler
     Mod_Assembler.ValidateAndAssemble True
-    Mod_Util.WriteLog "Сводная собрана (черновик)"
-    MsgBox "Сводная собрана (черновик)"
+    Mod_Util.WriteLog "РЎРІРѕРґРЅР°СЏ СЃРѕР±СЂР°РЅР° (С‡РµСЂРЅРѕРІРёРє)"
+    MsgBox "РЎРІРѕРґРЅР°СЏ СЃРѕР±СЂР°РЅР° (С‡РµСЂРЅРѕРІРёРє)"
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в AssembleDraft_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteLog "РћС€РёР±РєР° РІ AssembleDraft_Click: " & Err.Description
+    MsgBox "РћС€РёР±РєР°: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 6. Собрать типы и атрибуты (строгая)
+' 6. РЎРѕР±СЂР°С‚СЊ С‚РёРїС‹ Рё Р°С‚СЂРёР±СѓС‚С‹ (СЃС‚СЂРѕРіР°СЏ)
 ' ------------------------------------------------------------
 Public Sub AssembleStrict_Click()
     On Error GoTo ErrHandler
     Mod_Assembler.ValidateAndAssemble False
-    Mod_Util.WriteLog "Сводная собрана (строгая)"
-    MsgBox "Сводная собрана (строгая)"
+    Mod_Util.WriteLog "РЎРІРѕРґРЅР°СЏ СЃРѕР±СЂР°РЅР° (СЃС‚СЂРѕРіР°СЏ)"
+    MsgBox "РЎРІРѕРґРЅР°СЏ СЃРѕР±СЂР°РЅР° (СЃС‚СЂРѕРіР°СЏ)"
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в AssembleStrict_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteLog "РћС€РёР±РєР° РІ AssembleStrict_Click: " & Err.Description
+    MsgBox "РћС€РёР±РєР°: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 7. Сделать промт следующего шага
+' 7. РЎРґРµР»Р°С‚СЊ РїСЂРѕРјС‚ СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°
 ' ------------------------------------------------------------
 Public Sub MakeNextStepPrompt_Click()
     On Error GoTo ErrHandler
-    ' Работа выполняется в Mod_Prompt (разделы 9 и 13 спецификации)
+    ' Р Р°Р±РѕС‚Р° РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ РІ Mod_Prompt (СЂР°Р·РґРµР»С‹ 9 Рё 13 СЃРїРµС†РёС„РёРєР°С†РёРё)
     Call Mod_Prompt.MakeNextStepPrompt
-    Mod_Util.WriteLog "MakeNextStepPrompt_Click: запуск формирования промта следующего шага"
+    Mod_Util.WriteLog "MakeNextStepPrompt_Click: Р·Р°РїСѓСЃРє С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РїСЂРѕРјС‚Р° СЃР»РµРґСѓСЋС‰РµРіРѕ С€Р°РіР°"
     Exit Sub
 ErrHandler:
     Mod_Util.WriteError "P002", "MakeNextStepPrompt_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    MsgBox "РћС€РёР±РєР°: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 8. Сделать промт исправления ошибок
+' 8. РЎРґРµР»Р°С‚СЊ РїСЂРѕРјС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ РѕС€РёР±РѕРє
 ' ------------------------------------------------------------
 Public Sub MakeFixPrompt_Click()
     On Error GoTo ErrHandler
-    ' Работа выполняется в Mod_Prompt (раздел 13 спецификации)
+    ' Р Р°Р±РѕС‚Р° РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ РІ Mod_Prompt (СЂР°Р·РґРµР» 13 СЃРїРµС†РёС„РёРєР°С†РёРё)
     Call Mod_Prompt.MakeFixPrompt
-    Mod_Util.WriteLog "MakeFixPrompt_Click: запуск формирования промта исправления"
+    Mod_Util.WriteLog "MakeFixPrompt_Click: Р·Р°РїСѓСЃРє С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РїСЂРѕРјС‚Р° РёСЃРїСЂР°РІР»РµРЅРёСЏ"
     Exit Sub
 ErrHandler:
     Mod_Util.WriteError "P003", "MakeFixPrompt_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    MsgBox "РћС€РёР±РєР°: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 9. Показать, что нашёл Препроцессор
+' 9. РџРѕРєР°Р·Р°С‚СЊ, С‡С‚Рѕ РЅР°С€С‘Р» РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ
 ' ------------------------------------------------------------
 Public Sub ShowDiscoveryReport_Click()
     Dim root As String
@@ -338,11 +338,11 @@ Public Sub ShowDiscoveryReport_Click()
 
     root = Mod_Util.GetStepsFolder()
     If root = "" Then
-        MsgBox "Папка шагов не найдена", vbExclamation
+        MsgBox "РџР°РїРєР° С€Р°РіРѕРІ РЅРµ РЅР°Р№РґРµРЅР°", vbExclamation
         Exit Sub
     End If
 
-    report = "Карта найденных шагов:" & vbCrLf & vbCrLf
+    report = "РљР°СЂС‚Р° РЅР°Р№РґРµРЅРЅС‹С… С€Р°РіРѕРІ:" & vbCrLf & vbCrLf
     total = 0
 
     subName = Dir(root & "\", vbDirectory)
@@ -356,64 +356,64 @@ Public Sub ShowDiscoveryReport_Click()
                     cnt = cnt + 1
                     fileName = Dir()
                 Loop
-                report = report & subName & " - файлов: " & CStr(cnt) & vbCrLf
+                report = report & subName & " - С„Р°Р№Р»РѕРІ: " & CStr(cnt) & vbCrLf
                 total = total + cnt
             End If
         End If
         subName = Dir()
     Loop
 
-    report = report & vbCrLf & "Всего файлов: " & CStr(total)
+    report = report & vbCrLf & "Р’СЃРµРіРѕ С„Р°Р№Р»РѕРІ: " & CStr(total)
     MsgBox report, vbInformation
-    Mod_Util.WriteLog "Показан отчёт обнаружения"
+    Mod_Util.WriteLog "РџРѕРєР°Р·Р°РЅ РѕС‚С‡С‘С‚ РѕР±РЅР°СЂСѓР¶РµРЅРёСЏ"
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в ShowDiscoveryReport_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteLog "РћС€РёР±РєР° РІ ShowDiscoveryReport_Click: " & Err.Description
+    MsgBox "РћС€РёР±РєР°: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 10. Открыть папку Логи
+' 10. РћС‚РєСЂС‹С‚СЊ РїР°РїРєСѓ Р›РѕРіРё
 ' ------------------------------------------------------------
 Public Sub OpenLogsFolder_Click()
     Dim p As String
     On Error GoTo ErrHandler
     p = Mod_Util.GetLogsFolder()
     Mod_Util.OpenFolderInExplorer p
-    Mod_Util.WriteLog "Открыта папка логов: " & p
+    Mod_Util.WriteLog "РћС‚РєСЂС‹С‚Р° РїР°РїРєР° Р»РѕРіРѕРІ: " & p
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в OpenLogsFolder_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteLog "РћС€РёР±РєР° РІ OpenLogsFolder_Click: " & Err.Description
+    MsgBox "РћС€РёР±РєР°: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 11. Обновить Readme
+' 11. РћР±РЅРѕРІРёС‚СЊ Readme
 ' ------------------------------------------------------------
 Public Sub UpdateReadme_Click()
     On Error GoTo ErrHandler
     Call Mod_Docs.UpdateReadme
-    Mod_Util.WriteLog "UpdateReadme_Click: документ обновлён"
+    Mod_Util.WriteLog "UpdateReadme_Click: РґРѕРєСѓРјРµРЅС‚ РѕР±РЅРѕРІР»С‘РЅ"
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteError "D003", "UpdateReadme_Click: ошибка обновления документа. Ошибка: " & Err.Description
-    MsgBox "Ошибка D003: не удалось обновить документ.", vbCritical, "Документация"
+    Mod_Util.WriteError "D003", "UpdateReadme_Click: РѕС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ РґРѕРєСѓРјРµРЅС‚Р°. РћС€РёР±РєР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° D003: РЅРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ РґРѕРєСѓРјРµРЅС‚.", vbCritical, "Р”РѕРєСѓРјРµРЅС‚Р°С†РёСЏ"
     Err.Clear
 End Sub
 
 ' ------------------------------------------------------------
-' 12. Восстановить кнопки и оформление
+' 12. Р’РѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ РєРЅРѕРїРєРё Рё РѕС„РѕСЂРјР»РµРЅРёРµ
 ' ------------------------------------------------------------
 Public Sub RestoreUI_Click()
     On Error GoTo ErrHandler
     RestoreUI
-    Mod_Util.WriteLog "UI восстановлен вручную"
+    Mod_Util.WriteLog "UI РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ РІСЂСѓС‡РЅСѓСЋ"
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в RestoreUI_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteLog "РћС€РёР±РєР° РІ RestoreUI_Click: " & Err.Description
+    MsgBox "РћС€РёР±РєР°: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
 
@@ -421,7 +421,7 @@ Private Sub EnsureSheet_Readme(ByVal wb As Workbook)
     Dim ws As Worksheet
     Dim wsAny As Worksheet
 
-    ' Проверка: есть ли лист "Readme"
+    ' РџСЂРѕРІРµСЂРєР°: РµСЃС‚СЊ Р»Рё Р»РёСЃС‚ "Readme"
     Set ws = Nothing
     For Each wsAny In wb.Worksheets
         If StrComp(wsAny.Name, "Readme", vbTextCompare) = 0 Then
@@ -433,20 +433,20 @@ Private Sub EnsureSheet_Readme(ByVal wb As Workbook)
     If ws Is Nothing Then
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
         ws.Name = "Readme"
-        ws.Range("A1").value = "Препроцессор структуры БД Pilot - инструкция"
-        ws.Range("A2").value = "Инструкция формируется процедурой Mod_Docs.UpdateReadme."
-        ws.Range("A3").value = "Нажмите кнопку ""Обновить Readme"" для пересборки."
+        ws.Range("A1").value = "РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ СЃС‚СЂСѓРєС‚СѓСЂС‹ Р‘Р” Pilot - РёРЅСЃС‚СЂСѓРєС†РёСЏ"
+        ws.Range("A2").value = "РРЅСЃС‚СЂСѓРєС†РёСЏ С„РѕСЂРјРёСЂСѓРµС‚СЃСЏ РїСЂРѕС†РµРґСѓСЂРѕР№ Mod_Docs.UpdateReadme."
+        ws.Range("A3").value = "РќР°Р¶РјРёС‚Рµ РєРЅРѕРїРєСѓ ""РћР±РЅРѕРІРёС‚СЊ Readme"" РґР»СЏ РїРµСЂРµСЃР±РѕСЂРєРё."
         ws.Range("A1").Font.Bold = True
         ws.Columns("A").ColumnWidth = 100
         ws.Rows("2:3").WrapText = True
-        Mod_Util.WriteLog "EnsureSheet_Readme: лист 'Readme' создан"
+        Mod_Util.WriteLog "EnsureSheet_Readme: Р»РёСЃС‚ 'Readme' СЃРѕР·РґР°РЅ"
     Else
-        Mod_Util.WriteLog "EnsureSheet_Readme: лист 'Readme' уже существует"
+        Mod_Util.WriteLog "EnsureSheet_Readme: Р»РёСЃС‚ 'Readme' СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚"
     End If
 End Sub
 
 '===============================================================
-' Переставляет листы в порядке: Препроцессор, Настройки, Readme
+' РџРµСЂРµСЃС‚Р°РІР»СЏРµС‚ Р»РёСЃС‚С‹ РІ РїРѕСЂСЏРґРєРµ: РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ, РќР°СЃС‚СЂРѕР№РєРё, Readme
 '===============================================================
 Private Sub ReorderSheets(ByVal wb As Workbook)
     Dim order As Variant
@@ -454,7 +454,7 @@ Private Sub ReorderSheets(ByVal wb As Workbook)
     Dim ws As Worksheet
     Dim anchor As Worksheet
 
-    order = Array("Препроцессор", "Настройки", "Readme")
+    order = Array("РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ", "РќР°СЃС‚СЂРѕР№РєРё", "Readme")
 
     Set anchor = Nothing
     For i = LBound(order) To UBound(order)
