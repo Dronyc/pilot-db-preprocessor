@@ -145,7 +145,7 @@ Public Function CheckSourceFolders() As Boolean
 
     ' четыре проверяемые папки: имя и требуемое расширение
     folders = Array(FOLDER_SCHEMA, FOLDER_DESC, FOLDER_CONFIG, FOLDER_LAYOUT)
-    exts = Array(".xlsx", ".docx", ".txt", ".xlsx")
+    exts = Array(".xlsx", ".docx", ".pilotcfx", ".xlsx")
 
     For i = LBound(folders) To UBound(folders)
         folderFull = root & "\" & CStr(folders(i))
