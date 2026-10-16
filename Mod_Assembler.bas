@@ -288,6 +288,11 @@ Private Sub BuildReports()
     ' OPT-08: вызов BuildRegistrySheet из сборки убран — реестры формирует Mod_Registry (W6)
     Call FillSummarySheet(wsReport, rTypes, rAttrs)
 
+    ' Реестры (W4/OPT-08): строим словари, пишем файлы, обновляем служебные листы
+    Call Mod_Registry.BuildRegistries
+    Call Mod_Registry.WriteRegistryFiles
+    Call Mod_Registry.UpdateRegistrySheets
+
     wsTypes.UsedRange.Columns.AutoFit
     wsAttrs.UsedRange.Columns.AutoFit
     wsErrors.UsedRange.Columns.AutoFit
