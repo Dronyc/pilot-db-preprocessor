@@ -5,16 +5,16 @@ Option Explicit
 ' Модуль утилит: пути проекта, журналирование, чтение конфигурации.
 ' Реализация W4 (разделы 2, 5 спецификации Spec_Dispatcher.md).
 ' Пути строятся как в Mod_Registry / Mod_Prompt: <корень>\NN_Имя_папки,
-' корень берётся из именованного диапазона ProjectRoot листа «Настройки».
-' Коды ошибок модуля: U003 — ошибка подготовки листа «Настройки»,
-' U004 — ошибка выбора папки проекта, U002 — ошибка чтения configuration.txt.
+' корень берётся из именованного диапазона ProjectRoot листа "Настройки".
+' Коды ошибок модуля: U003 - ошибка подготовки листа "Настройки",
+' U004 - ошибка выбора папки проекта, U002 - ошибка чтения configuration.txt.
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
 ' КОНСТАНТЫ И ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Private)
 ' ---------------------------------------------------------------------------
 
-' Имена именованных диапазонов листа «Настройки» (раздел 5 спецификации).
+' Имена именованных диапазонов листа "Настройки" (раздел 5 спецификации).
 Private Const NAME_CHECK_MODE As String = "CheckMode"
 Private Const NAME_AUTO_OPEN_RESULTS As String = "AutoOpenResults"
 Private Const NAME_PROMPT_GEN_VERSION As String = "PromptGenVersion"
@@ -36,18 +36,17 @@ End Function
 ' ---------------------------------------------------------------------------
 
 ' Возвращает корневую папку проекта из именованного диапазона ProjectRoot
-' на листе «Настройки». Если диапазон не найден или значение пустое —
+' на листе "Настройки". Если диапазон не найден или значение пустое -
 ' пишет в лог "GetProjectRoot: ProjectRoot не задан" и возвращает "".
 Public Function GetProjectRoot() As String
     ' Корень проекта — всегда папка, где лежит файл .xlsm.
     ' Если книга не сохранена (ThisWorkbook.Path = "") — возвращаем "".
-    If ThisWorkbook.Path <> "" Then
-        GetProjectRoot = NormPath(ThisWorkbook.Path)
+    If ThisWorkbook.path <> "" Then
+        GetProjectRoot = NormPath(ThisWorkbook.path)
     Else
         GetProjectRoot = ""
     End If
 End Function
-
 ' Возвращает путь к папке логов: <корень>\05_Логи.
 Public Function GetLogsFolder() As String
     Dim root As String
@@ -94,10 +93,10 @@ End Function
 
 ' Записывает сообщение в журнал <корень>\05_Логи\Препроцессор_YYYY-MM-DD.log.
 ' Формат строки: [YYYY-MM-DD HH:NN:SS] <message>.
-' ВАЖНО: обработка ошибок здесь сознательно НЕ применяется — WriteLog
+' ВАЖНО: обработка ошибок здесь сознательно НЕ применяется - WriteLog
 ' вызывается из обработчиков ошибок других процедур, и любая собственная
 ' ошибка могла бы зациклить журналирование. Если корень не задан или
-' запись невозможна — молча выходит.
+' запись невозможна - молча выходит.
 Public Sub WriteLog(ByVal message As String)
     Dim root As String
     Dim logsPath As String
@@ -105,7 +104,7 @@ Public Sub WriteLog(ByVal message As String)
     Dim fnum As Integer
 
     root = GetProjectRoot()
-    If root = "" Then Exit Sub          ' корень не задан — молча выходим
+    If root = "" Then Exit Sub          ' корень не задан - молча выходим
 
     logsPath = root & "\05_Логи"
     If Dir(logsPath, vbDirectory) = "" Then MkDir logsPath
@@ -131,7 +130,7 @@ End Sub
 ' Возвращает значение параметра конфигурации по ключу из файла
 ' <корень>\01_Исходные данные\03_Конфигурация\configuration.txt.
 ' Формат строки: "key=value" (без пробелов вокруг "="), регистр ключа значим.
-' Если корень/файл/ключ не найдены — возвращает "".
+' Если корень/файл/ключ не найдены - возвращает "".
 Public Function GetConfigValue(ByVal key As String) As String
     Dim root As String
     Dim cfgPath As String
@@ -144,10 +143,10 @@ Public Function GetConfigValue(ByVal key As String) As String
     On Error GoTo ErrHandler
 
     root = GetProjectRoot()
-    If root = "" Then Exit Function     ' корень не задан — тихо возвращаем ""
+    If root = "" Then Exit Function     ' корень не задан - тихо возвращаем ""
 
     cfgPath = root & "\01_Исходные данные\03_Конфигурация\configuration.txt"
-    If Dir(cfgPath) = "" Then Exit Function   ' файла нет — возвращаем ""
+    If Dir(cfgPath) = "" Then Exit Function   ' файла нет - возвращаем ""
 
     fnum = FreeFile
     Open cfgPath For Input As #fnum
@@ -165,7 +164,7 @@ Public Function GetConfigValue(ByVal key As String) As String
     Loop
     Close #fnum
 
-    ' ключ не найден — GetConfigValue уже равно ""
+    ' ключ не найден - GetConfigValue уже равно ""
     Exit Function
 
 ErrHandler:
@@ -175,27 +174,27 @@ ErrHandler:
 End Function
 
 ' Открывает указанную папку в проводнике Windows.
-' Если путь пустой или папки нет — молча выходит.
+' Если путь пустой или папки нет - молча выходит.
 Public Sub OpenFolderInExplorer(ByVal path As String)
     If path = "" Then Exit Sub
     If Dir(path, vbDirectory) = "" Then Exit Sub
     Shell "explorer.exe """ & path & """", vbNormalFocus
 End Sub
 
-' Создаёт лист «Настройки» (если его нет), заполняет поля, выпадающие
+' Создаёт лист "Настройки" (если его нет), заполняет поля, выпадающие
 ' списки и именованные диапазоны по разделу 5 спецификации Spec_Dispatcher.md:
-'   B2 ProjectRoot       — Корневая папка проекта;
-'   B3 CheckMode         — Режим проверки (Черновик / Строгая);
-'   B4 AutoOpenResults   — Автооткрытие папки результатов (да / нет);
-'   B5 PromptGenVersion  — Версия промта-генератора (по умолчанию 7.13);
-'   B6 PromptFixVersion  — Версия промта-исправления (по умолчанию 1.0).
-' Лист защищается паролем «pilot», редактируемыми остаются только B2:B6.
+'   B2 ProjectRoot       - Корневая папка проекта;
+'   B3 CheckMode         - Режим проверки (Черновик / Строгая);
+'   B4 AutoOpenResults   - Автооткрытие папки результатов (да / нет);
+'   B5 PromptGenVersion  - Версия промта-генератора (по умолчанию 7.13);
+'   B6 PromptFixVersion  - Версия промта-исправления (по умолчанию 1.0).
+' Лист защищается паролем "pilot", редактируемыми остаются только B2:B6.
 ' Существующие значения пользовательских настроек при повторном запуске
 ' не перезаписываются.
 Public Sub EnsureSettingsSheet()
     Dim ws As Worksheet
     Dim wb As Workbook
-    Dim rowIdx As Long
+    Dim RowIdx As Long
     Dim labels As Variant
     Dim namesArr As Variant
     Dim defaults As Variant
@@ -205,7 +204,7 @@ Public Sub EnsureSettingsSheet()
 
     Set wb = ThisWorkbook
 
-    ' 1. Поиск листа «Настройки»; если нет — создать в конце книги
+    ' 1. Поиск листа "Настройки"; если нет - создать в конце книги
     On Error Resume Next
     Set ws = wb.Worksheets("Настройки")
     If Err.Number <> 0 Then
@@ -218,29 +217,29 @@ Public Sub EnsureSettingsSheet()
         ws.Unprotect Password:=SHEET_PASSWORD   ' снимаем защиту перед правкой
     End If
 
-    ' 2. Подписи (колонка A), имена диапазонов и значения по умолчанию —
+    ' 2. Подписи (колонка A), имена диапазонов и значения по умолчанию -
     '    пять полей раздела 5 спецификации
     labels = Array("Режим проверки", _
                "Автооткрытие папки результатов", _
                "Версия промта-генератора", _
                "Версия промта-исправления")
     namesArr = Array(NAME_CHECK_MODE, NAME_AUTO_OPEN_RESULTS, _
-                    NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION)
+                     NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION)
     defaults = Array("Черновик", "да", "7.13", "1.0")
 
     For i = 0 To 3
-        rowIdx = i + 2
-        ws.Cells(rowIdx, 1).Value = CStr(labels(i))
+        RowIdx = i + 2
+        ws.Cells(RowIdx, 1).value = CStr(labels(i))
         ' значение по умолчанию ставим только если ячейка пуста
-        If Trim(CStr(ws.Cells(rowIdx, 2).Value)) = "" Then
-            ws.Cells(rowIdx, 2).Value = CStr(defaults(i))
+        If Trim(CStr(ws.Cells(RowIdx, 2).value)) = "" Then
+            ws.Cells(RowIdx, 2).value = CStr(defaults(i))
         End If
     Next i
 
-    ws.Range("A1").Value = "Настройки Препроцессора"
+    ws.Range("A1").value = "Настройки Препроцессора"
     ws.Columns("A:B").AutoFit
 
-    ' 3. Выпадающие списки (Validation): B3 — режим проверки, B4 — автооткрытие
+    ' 3. Выпадающие списки (Validation): B3 - режим проверки, B4 - автооткрытие
     With ws.Range("B3").Validation
         .Delete
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
@@ -256,7 +255,7 @@ Public Sub EnsureSettingsSheet()
         .InCellDropdown = True
     End With
 
-    ' 4. Именованные диапазоны — создавать, если их ещё нет
+    ' 4. Именованные диапазоны - создавать, если их ещё нет
     '    (существующие имена не трогаем, чтобы не переопределить ссылку)
     For i = 0 To 3
         On Error Resume Next

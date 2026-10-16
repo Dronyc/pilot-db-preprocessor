@@ -46,6 +46,10 @@ Public Sub RestoreUI()
         Exit Sub
     End If
 
+    ' Создание служебных листов, если их нет
+    Call EnsureSheet_Readme(ThisWorkbook)
+    Call Mod_Util.EnsureSettingsSheet
+
     ' Удаление существующих Form Controls
     Do While ws.Buttons.Count > 0
         ws.Buttons(1).Delete
@@ -178,6 +182,9 @@ Public Sub RestoreUI()
     On Error Resume Next
     ws.Activate
     On Error GoTo ErrHandler
+    
+    ' Упорядочить листы: Препроцессор, Настройки, Readme, остальные
+    Call ReorderSheets(ThisWorkbook)
 
     Mod_Util.WriteLog "UI восстановлен: 12 кнопок, оформление, защита"
     Exit Sub
@@ -410,6 +417,59 @@ ErrHandler:
     Err.Clear
 End Sub
 
+Private Sub EnsureSheet_Readme(ByVal wb As Workbook)
+    Dim ws As Worksheet
+    Dim wsAny As Worksheet
 
+    ' Проверка: есть ли лист "Readme"
+    Set ws = Nothing
+    For Each wsAny In wb.Worksheets
+        If StrComp(wsAny.Name, "Readme", vbTextCompare) = 0 Then
+            Set ws = wsAny
+            Exit For
+        End If
+    Next wsAny
 
+    If ws Is Nothing Then
+        Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
+        ws.Name = "Readme"
+        ws.Range("A1").value = "Препроцессор структуры БД Pilot - инструкция"
+        ws.Range("A2").value = "Инструкция формируется процедурой Mod_Docs.UpdateReadme."
+        ws.Range("A3").value = "Нажмите кнопку ""Обновить Readme"" для пересборки."
+        ws.Range("A1").Font.Bold = True
+        ws.Columns("A").ColumnWidth = 100
+        ws.Rows("2:3").WrapText = True
+        Mod_Util.WriteLog "EnsureSheet_Readme: лист 'Readme' создан"
+    Else
+        Mod_Util.WriteLog "EnsureSheet_Readme: лист 'Readme' уже существует"
+    End If
+End Sub
+
+'===============================================================
+' Переставляет листы в порядке: Препроцессор, Настройки, Readme
+'===============================================================
+Private Sub ReorderSheets(ByVal wb As Workbook)
+    Dim order As Variant
+    Dim i As Long
+    Dim ws As Worksheet
+    Dim anchor As Worksheet
+
+    order = Array("Препроцессор", "Настройки", "Readme")
+
+    Set anchor = Nothing
+    For i = LBound(order) To UBound(order)
+        Set ws = Nothing
+        On Error Resume Next
+        Set ws = wb.Worksheets(CStr(order(i)))
+        On Error GoTo 0
+        If Not ws Is Nothing Then
+            If anchor Is Nothing Then
+                ws.Move Before:=wb.Worksheets(1)
+            Else
+                ws.Move After:=anchor
+            End If
+            Set anchor = ws
+        End If
+    Next i
+End Sub
 

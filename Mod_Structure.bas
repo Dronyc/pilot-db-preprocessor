@@ -6,7 +6,6 @@ Option Explicit
 ' (или полная замена этапа извлечения: на выходе готовая плоская таблица)
 '=====================================================================
 
-Private Const SRC_SHEET As String = "Структура ЖЦ ИМ ИСП"  ' имя листа со структурой
 Private Const FIRST_ROW As Long = 8                        ' строка, с которой начинается структура (Объект)
 Private Const LAST_COL  As Long = 30                       ' максимальный столбец сканирования
 
@@ -34,7 +33,7 @@ Public Sub BuildFlatStructure()
     Dim resultsPath As String      ' папка 02_Подготовка схемы (результаты)
     On Error GoTo Fail
 
-    '---------- ИЗМЕНЕНИЕ 1: источник — фиксированная папка 01_Схема ----------
+    '---------- ИЗМЕНЕНИЕ 1: источник - фиксированная папка 01_Схема ----------
     path = Mod_Util.GetProjectRoot & "\01_Исходные данные\01_Схема"
 
     ' проверка существования папки
@@ -63,7 +62,7 @@ Public Sub BuildFlatStructure()
         GoTo NoFiles
     End If
 
-    ' открытие файла схемы (если уже открыт — используем его)
+    ' открытие файла схемы (если уже открыт - используем его)
     srcWasOpen = False
     On Error Resume Next
     Set wbSrc = Workbooks(fileName)
@@ -74,9 +73,11 @@ Public Sub BuildFlatStructure()
         Set wbSrc = Workbooks.Open(path & "\" & fileName, ReadOnly:=True)
     End If
 
-    ' лист-источник структуры — так же, как раньше работал с SRC_SHEET
+    ' лист-источник структуры - так же, как раньше работал с SRC_SHEET
     On Error Resume Next
-    Set ws = wbSrc.Worksheets(SRC_SHEET)
+    ' работаем с первым листом книги-источника
+    ' (в будущем можно расширить до обхода нескольких листов)
+    Set ws = wbSrc.Worksheets(1)
     On Error GoTo Fail
     If ws Is Nothing Then
         Err.Clear
@@ -94,7 +95,7 @@ Public Sub BuildFlatStructure()
     legCells(4) = "C2": legCells(5) = "B3": legCells(6) = "C3"
     Dim i As Long
     For i = 1 To 6
-        legNames(i) = Trim(CStr(ws.Range(legCells(i)).Value))
+        legNames(i) = Trim(CStr(ws.Range(legCells(i)).value))
         legColors(i) = ws.Range(legCells(i)).Interior.Color
     Next i
 
@@ -107,14 +108,14 @@ Public Sub BuildFlatStructure()
     Dim lastRow As Long, lr As Long, c As Long, r As Long
     lastRow = 0
     For c = 1 To LAST_COL
-        lr = ws.Cells(ws.Rows.Count, c).End(xlUp).Row
+        lr = ws.Cells(ws.Rows.Count, c).End(xlUp).row
         If lr > lastRow Then lastRow = lr
     Next c
 
     For r = FIRST_ROW To lastRow
         For c = 1 To LAST_COL
             Dim v As Variant
-            v = ws.Cells(r, c).Value
+            v = ws.Cells(r, c).value
             If Not IsEmpty(v) Then
                 If Len(Trim(CStr(v))) > 0 Then
                     Dim colr As Long
@@ -173,18 +174,18 @@ Public Sub BuildFlatStructure()
 
     ' ИЗМЕНЕНИЕ 2: результаты формируются как листы текущей книги (структура
     ' листов и колонки не менялись); сохраняем копию книги в resultsPath.
-    If Dir(resultsPath, vbDirectory) = "" Then MkDir resultsPath
-    Dim saveName As String
-    saveName = resultsPath & "\" & Format$(Now, "yyyy-mm-dd hhnnss") & ".xlsm"
-    On Error Resume Next
-    ThisWorkbook.SaveCopyAs saveName
-    Dim saveErr As Long
-    saveErr = Err.Number
-    On Error GoTo 0
-    If saveErr <> 0 Then
-        Mod_Util.WriteError "S005", "Ошибка сохранения результатов: " & Error$(saveErr)
-        MsgBox "Ошибка сохранения результатов.", vbExclamation
-    End If
+    'If Dir(resultsPath, vbDirectory) = "" Then MkDir resultsPath
+    'Dim saveName As String
+    'saveName = resultsPath & "\" & Format$(Now, "yyyy-mm-dd hhnnss") & ".xlsm"
+    'On Error Resume Next
+    'ThisWorkbook.SaveCopyAs saveName
+    'Dim saveErr As Long
+    'saveErr = Err.Number
+    'On Error GoTo 0
+    'If saveErr <> 0 Then
+    '    Mod_Util.WriteError "S005", "Ошибка сохранения результатов: " & Error$(saveErr)
+    '    MsgBox "Ошибка сохранения результатов.", vbExclamation
+    'End If
 
     '---------- 5. Финал ----------
     Mod_Util.WriteLog "BuildFlatStructure: узлов " & NodeCount
@@ -211,9 +212,12 @@ ManyFiles:                                  ' в папке больше одного xlsx
     MsgBox "В папке 01_Схема больше одного xlsx. Оставьте один.", vbExclamation
     Exit Sub
 
-OpenErr:                                    ' ошибка открытия файла схемы
-    Mod_Util.WriteError "S004", "Ошибка открытия файла схемы: " & Err.Description
-    MsgBox "Ошибка открытия файла схемы.", vbExclamation
+OpenErr:                                    ' в книге нет первого листа (или он недоступен)
+    Mod_Util.WriteError "S004", "BuildFlatStructure: не удалось получить первый лист из книги """ & _
+        wbSrc.Name & """."
+    MsgBox "Ошибка S004: не удалось получить лист из книги """ & wbSrc.Name & """.", _
+           vbExclamation, "Схема"
+    If Not srcWasOpen And Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
     Exit Sub
 
 Fail:                                       ' прочие ошибки (например, создание папки результатов)
@@ -279,7 +283,7 @@ End Sub
 Private Sub WriteFlatTable()
     Dim ws As Worksheet
     GetSheet "Плоская_таблица", ws
-    ws.Range("A1:D1").Value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из")
+    ws.Range("A1:D1").value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из")
     Dim i As Long, r As Long
     r = 2
     For i = 1 To NodeCount
@@ -289,10 +293,10 @@ Private Sub WriteFlatTable()
         Else
             parentCell = ParentName(Nodes(i).ParentIdx)
         End If
-        ws.Cells(r, 1).Value = Nodes(i).Name
-        ws.Cells(r, 2).Value = Nodes(i).NodeType
-        ws.Cells(r, 3).Value = parentCell
-        ws.Cells(r, 4).Value = Nodes(i).Children
+        ws.Cells(r, 1).value = Nodes(i).Name
+        ws.Cells(r, 2).value = Nodes(i).NodeType
+        ws.Cells(r, 3).value = parentCell
+        ws.Cells(r, 4).value = Nodes(i).Children
         r = r + 1
     Next i
     ws.Columns("A:D").AutoFit
@@ -302,28 +306,28 @@ End Sub
 Private Sub WriteTraceability()
     Dim ws As Worksheet
     GetSheet "Трассировка", ws
-    ws.Range("A1:H1").Value = Array("№", "Строка", "Столбец", "Уровень", "Отображаемое имя", "Тип", "Цвет RGB", "Родитель")
+    ws.Range("A1:H1").value = Array("№", "Строка", "Столбец", "Уровень", "Отображаемое имя", "Тип", "Цвет RGB", "Родитель")
     Dim i As Long
     For i = 1 To NodeCount
-        ws.Cells(i + 1, 1).Value = i
-        ws.Cells(i + 1, 2).Value = Nodes(i).RowIdx
-        ws.Cells(i + 1, 3).Value = Nodes(i).ColIdx
-        ws.Cells(i + 1, 4).Value = Nodes(i).Level
-        ws.Cells(i + 1, 5).Value = Nodes(i).Name
-        ws.Cells(i + 1, 6).Value = Nodes(i).NodeType
-        ws.Cells(i + 1, 7).Value = HexRGB(Nodes(i).ColorCode)
-        ws.Cells(i + 1, 8).Value = ParentName(Nodes(i).ParentIdx)
+        ws.Cells(i + 1, 1).value = i
+        ws.Cells(i + 1, 2).value = Nodes(i).RowIdx
+        ws.Cells(i + 1, 3).value = Nodes(i).ColIdx
+        ws.Cells(i + 1, 4).value = Nodes(i).Level
+        ws.Cells(i + 1, 5).value = Nodes(i).Name
+        ws.Cells(i + 1, 6).value = Nodes(i).NodeType
+        ws.Cells(i + 1, 7).value = HexRGB(Nodes(i).ColorCode)
+        ws.Cells(i + 1, 8).value = ParentName(Nodes(i).ParentIdx)
     Next i
     ws.Columns("A:H").AutoFit
 End Sub
 
 '---------------- Лист 3: журнал аномалий ----------------
 Private Sub WriteLog()
-    ' ИЗМЕНЕНИЕ 3: логирование — через Mod_Util (текст сообщения с итогами).
+    ' ИЗМЕНЕНИЕ 3: логирование - через Mod_Util (текст сообщения с итогами).
     Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
     Dim ws As Worksheet
-    GetSheet "Журнал", ws
-    ws.Range("A1:D1").Value = Array("Код проблемы", "Элемент", "Родитель", "Описание")
+    GetSheet "Аномалии схемы", ws
+    ws.Range("A1:D1").value = Array("Код проблемы", "Элемент", "Родитель", "Описание")
     Dim r As Long
     r = 2
     Dim i As Long
@@ -334,15 +338,8 @@ Private Sub WriteLog()
 
         ' сирота (не корень и без родителя)
         If Nodes(i).ParentIdx = 0 And nm <> "Объект" Then
-            ws.Cells(r, 1).Value = "ORPHAN": ws.Cells(r, 2).Value = nm
-            ws.Cells(r, 4).Value = "Не найден родитель уровня N-1"
-            r = r + 1
-        End If
-
-        ' ECM-документ не должен иметь детей
-        If Nodes(i).NodeType = "ECM-документ" And Len(Nodes(i).Children) > 0 Then
-            ws.Cells(r, 1).Value = "LEAF_HAS_CHILDREN": ws.Cells(r, 2).Value = nm
-            ws.Cells(r, 4).Value = "ECM-документ с дочерними элементами: " & Nodes(i).Children
+            ws.Cells(r, 1).value = "ORPHAN": ws.Cells(r, 2).value = nm
+            ws.Cells(r, 4).value = "Не найден родитель уровня N-1"
             r = r + 1
         End If
 
@@ -352,18 +349,21 @@ Private Sub WriteLog()
         pc = LeadCode(pn)
         If cc <> "" And pc <> "" Then
             If Left(cc, Len(pc) + 1) <> pc & "." Then
-                ws.Cells(r, 1).Value = "CODE_PARENT_MISMATCH": ws.Cells(r, 2).Value = nm
-                ws.Cells(r, 3).Value = pn
-                ws.Cells(r, 4).Value = "Код ребенка не продолжает код родителя"
+                ws.Cells(r, 1).value = "CODE_PARENT_MISMATCH": ws.Cells(r, 2).value = nm
+                ws.Cells(r, 3).value = pn
+                ws.Cells(r, 4).value = "Код ребенка не продолжает код родителя"
                 r = r + 1
             End If
             If CodeDepth(cc) <> CodeDepth(pc) + 1 Then
-                ws.Cells(r, 1).Value = "CODE_DEPTH_JUMP": ws.Cells(r, 2).Value = nm
-                ws.Cells(r, 3).Value = pn
-                ws.Cells(r, 4).Value = "Глубина кода ребенка не равна глубине родителя + 1"
+                ws.Cells(r, 1).value = "CODE_DEPTH_JUMP": ws.Cells(r, 2).value = nm
+                ws.Cells(r, 3).value = pn
+                ws.Cells(r, 4).value = "Глубина кода ребенка не равна глубине родителя + 1"
                 r = r + 1
             End If
         End If
     Next i
     ws.Columns("A:D").AutoFit
 End Sub
+
+
+
