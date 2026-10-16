@@ -358,13 +358,12 @@ End Sub
 ' ------------------------------------------------------------
 Public Sub UpdateReadme_Click()
     On Error GoTo ErrHandler
-    Mod_Docs.UpdateReadme
-    Mod_Util.WriteLog "Readme обновлён"
-    MsgBox "Readme обновлён"
+    Call Mod_Docs.UpdateReadme
+    Mod_Util.WriteLog "UpdateReadme_Click: документ обновлён"
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в UpdateReadme_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    Mod_Util.WriteError "D003", "UpdateReadme_Click: ошибка обновления документа. Ошибка: " & Err.Description
+    MsgBox "Ошибка D003: не удалось обновить документ.", vbCritical, "Документация"
     Err.Clear
 End Sub
 
