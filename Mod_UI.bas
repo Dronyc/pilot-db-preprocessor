@@ -261,12 +261,12 @@ End Sub
 ' ------------------------------------------------------------
 Public Sub MakeNextStepPrompt_Click()
     On Error GoTo ErrHandler
-    Mod_Prompt.MakeNextStepPrompt
-    Mod_Util.WriteLog "Промт следующего шага сформирован"
-    MsgBox "Промт следующего шага сформирован"
+    ' Работа выполняется в Mod_Prompt (разделы 9 и 13 спецификации)
+    Call Mod_Prompt.MakeNextStepPrompt
+    Mod_Util.WriteLog "MakeNextStepPrompt_Click: запуск формирования промта следующего шага"
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в MakeNextStepPrompt_Click: " & Err.Description
+    Mod_Util.WriteError "P002", "MakeNextStepPrompt_Click: " & Err.Description
     MsgBox "Ошибка: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
@@ -276,12 +276,12 @@ End Sub
 ' ------------------------------------------------------------
 Public Sub MakeFixPrompt_Click()
     On Error GoTo ErrHandler
-    Mod_Prompt.MakeFixPrompt
-    Mod_Util.WriteLog "Промт исправления сформирован"
-    MsgBox "Промт исправления сформирован"
+    ' Работа выполняется в Mod_Prompt (раздел 13 спецификации)
+    Call Mod_Prompt.MakeFixPrompt
+    Mod_Util.WriteLog "MakeFixPrompt_Click: запуск формирования промта исправления"
     Exit Sub
 ErrHandler:
-    Mod_Util.WriteLog "Ошибка в MakeFixPrompt_Click: " & Err.Description
+    Mod_Util.WriteError "P003", "MakeFixPrompt_Click: " & Err.Description
     MsgBox "Ошибка: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
