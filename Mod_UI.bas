@@ -3,8 +3,8 @@ Option Explicit
 
 ' ============================================================
 ' Модуль: Mod_UI
-' Назначение: UI-слой проекта «Препроцессор структуры БД Pilot».
-'             Создание кнопок на листе «Препроцессор», форматирование
+' Назначение: UI-слой проекта "Препроцессор структуры БД Pilot".
+'             Создание кнопок на листе "Препроцессор", форматирование
 '             листов, защита служебных листов, а также обработчики
 '             нажатий кнопок, делегирующие работу профильным модулям.
 ' Зависимости: Mod_Util, Mod_Folders, Mod_Structure, Mod_Assembler,
@@ -17,7 +17,6 @@ Option Explicit
 Public Sub RestoreUI()
     Dim ws As Worksheet
     Dim shp As Shape
-    Dim btn As Shape
     Dim i As Long
     Dim rowBtn As Long
     Dim captions As Variant
@@ -33,7 +32,7 @@ Public Sub RestoreUI()
 
     On Error GoTo ErrHandler
 
-    ' Проверка наличия листа «Препроцессор»
+    ' Проверка наличия листа "Препроцессор"
     Set ws = Nothing
     For Each wsAny In ThisWorkbook.Worksheets
         If StrComp(wsAny.Name, "Препроцессор", vbTextCompare) = 0 Then
@@ -48,11 +47,20 @@ Public Sub RestoreUI()
     End If
 
     ' Удаление существующих Form Controls
-    For Each shp In ws.Shapes
-        If shp.Type = msoFormControl Then
-            shp.Delete
-        End If
-    Next shp
+    Do While ws.Buttons.Count > 0
+        ws.Buttons(1).Delete
+    Loop
+
+    ' Удаление существующих кнопок
+    Do While ws.Shapes.Count > 0
+        ws.Shapes(1).Delete
+    Loop
+    
+    ' Установка ширины столбцов До создания кнопок
+    ws.Columns("B").ColumnWidth = 40
+    ws.Columns("C").ColumnWidth = 60
+    ws.Columns("C").Font.Italic = True
+    ws.Columns("C").Font.Color = RGB(89, 89, 89)
 
     ' Подготовка списков кнопок
     captions = Array( _
@@ -98,40 +106,54 @@ Public Sub RestoreUI()
         "Пересоздаёт кнопки, оформление и защиту листов")
 
     ' Создание 12 кнопок в столбце B (строки 2, 4, ..., 24)
+    ' Используем Shapes.AddFormControl + Placement = xlFreeFloating,
+    ' чтобы кнопки не растягивались при изменении ширины столбцов и AutoFit.
     rowBtn = 2
     For i = LBound(captions) To UBound(captions)
-        Set btn = ws.Shapes.AddFormControl(xlButtonControl, _
-            ws.Cells(rowBtn, 2).Left, ws.Cells(rowBtn, 2).Top, 260, 22)
-        With btn
-            .Name = "btnPilot_" & CStr(i + 1)
-            .OnAction = CStr(actions(i))
-            .ScreenTip = CStr(tips(i))
-            .TextFrame.Characters.Text = CStr(captions(i))
+        Dim shpBtn As Shape
+        Set shpBtn = ws.Shapes.AddFormControl( _
+            xlButtonControl, _
+            ws.Cells(rowBtn, 2).Left, _
+            ws.Cells(rowBtn, 2).Top, _
+            200, 22)
+        shpBtn.Placement = xlFreeFloating
+        shpBtn.Name = "btnPilot_" & CStr(i + 1)
+        shpBtn.OnAction = CStr(actions(i))
+        With shpBtn.TextFrame
+            .Characters.text = CStr(captions(i))
+            .HorizontalAlignment = xlCenter
+            .VerticalAlignment = xlCenter
         End With
+        shpBtn.Fill.ForeColor.RGB = RGB(91, 155, 213)      ' синий
+        shpBtn.Line.ForeColor.RGB = RGB(0, 0, 0)           ' чёрная рамка
+        shpBtn.Line.Weight = 1
+        ws.Cells(rowBtn, 3).value = CStr(tips(i))
         rowBtn = rowBtn + 2
     Next i
-
+    
     ' Форматирование всех листов книги
     For Each wsAny In ThisWorkbook.Worksheets
-        On Error Resume Next
-        wsAny.Unprotect Password:="pilot"
-        On Error GoTo ErrHandler
-
-        ' Первая строка — жирным
-        wsAny.Rows(1).Font.Bold = True
-
-        ' Автоширина столбцов
-        On Error Resume Next
-        wsAny.Cells.EntireColumn.AutoFit
-        On Error GoTo ErrHandler
-
-        ' Закрепление первой строки
-        On Error Resume Next
-        wsAny.Activate
-        wsAny.Range("A2").Select
-        ActiveWindow.FreezePanes = False
-        ActiveWindow.FreezePanes = True
-        On Error GoTo ErrHandler
+        If StrComp(wsAny.Name, "Препроцессор", vbTextCompare) <> 0 Then
+            On Error Resume Next
+            wsAny.Unprotect Password:="pilot"
+            On Error GoTo ErrHandler
+    
+            ' Первая строка - жирным
+            wsAny.Rows(1).Font.Bold = True
+    
+            ' Автоширина столбцов
+            On Error Resume Next
+            wsAny.Cells.EntireColumn.AutoFit
+            On Error GoTo ErrHandler
+    
+            ' Закрепление первой строки
+            On Error Resume Next
+            wsAny.Activate
+            wsAny.Range("A2").Select
+            ActiveWindow.FreezePanes = False
+            ActiveWindow.FreezePanes = True
+            On Error GoTo ErrHandler
+        End If
     Next wsAny
 
     ' Защита служебных листов
@@ -152,7 +174,7 @@ Public Sub RestoreUI()
         End If
     Next n
 
-    ' Активируем лист «Препроцессор»
+    ' Активируем лист "Препроцессор"
     On Error Resume Next
     ws.Activate
     On Error GoTo ErrHandler
@@ -327,7 +349,7 @@ Public Sub ShowDiscoveryReport_Click()
                     cnt = cnt + 1
                     fileName = Dir()
                 Loop
-                report = report & subName & " — файлов: " & CStr(cnt) & vbCrLf
+                report = report & subName & " - файлов: " & CStr(cnt) & vbCrLf
                 total = total + cnt
             End If
         End If
@@ -387,3 +409,7 @@ ErrHandler:
     MsgBox "Ошибка: " & Err.Description, vbExclamation
     Err.Clear
 End Sub
+
+
+
+

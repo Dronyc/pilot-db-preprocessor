@@ -50,32 +50,27 @@ Public Function GetProjectRoot() As String
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo 0
-        WriteLog "GetProjectRoot: ProjectRoot не задан"
         Exit Function
     End If
     On Error GoTo 0
 
     If nm Is Nothing Then
-        WriteLog "GetProjectRoot: ProjectRoot не задан"
         Exit Function
     End If
 
     On Error Resume Next
-    val = Trim(CStr(nm.RefersToRange.Value))
+    val = Trim(CStr(nm.RefersToRange.value))
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo 0
-        WriteLog "GetProjectRoot: ProjectRoot не задан"
         Exit Function
     End If
     On Error GoTo 0
 
     If val = "" Then
-        WriteLog "GetProjectRoot: ProjectRoot не задан"
         Exit Function
     End If
 
-    ' возвращаем путь без завершающего "\"
     GetProjectRoot = NormPath(val)
 End Function
 

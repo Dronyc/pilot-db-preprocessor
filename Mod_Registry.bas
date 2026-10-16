@@ -52,7 +52,7 @@ Private Function SortedKeys(ByVal dict As Object) As String()
 End Function
 
 ' Сохраняет массив строк в текстовый файл (перезаписывает существующий).
-Private Sub WriteTextFile(ByVal filePath As String, ByVal arr() As String)
+Private Sub WriteTextFile(ByVal filePath As String, arr() As String)
     Dim fnum As Integer
     Dim i As Long
 
