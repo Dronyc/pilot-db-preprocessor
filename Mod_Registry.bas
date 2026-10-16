@@ -206,8 +206,8 @@ Public Sub UpdateRegistrySheets()
     On Error GoTo ErrHandler
 
     If RegTypes Is Nothing Or RegCoverage Is Nothing Then
-        Mod_Util.WriteError "R003", "UpdateRegistrySheets: реестры не построены, вызовите BuildRegistries."
-        MsgBox "Ошибка R003: реестры не построены. Сначала вызовите BuildRegistries.", vbCritical, "Реестры"
+        Mod_Util.WriteError "R005", "UpdateRegistrySheets: реестры не построены, вызовите BuildRegistries."
+        MsgBox "Ошибка R005: реестры не построены. Сначала вызовите BuildRegistries.", vbCritical, "Реестры"
         Err.Clear
         Exit Sub
     End If
@@ -258,8 +258,8 @@ Public Sub UpdateRegistrySheets()
     Exit Sub
 
 ErrHandler:
-    Mod_Util.WriteError "R003", "UpdateRegistrySheets: ошибка обновления листов реестров. Ошибка: " & Err.Description
-    MsgBox "Ошибка R003: не удалось обновить листы реестров. " & vbCrLf & Err.Description, _
+    Mod_Util.WriteError "R005", "UpdateRegistrySheets: ошибка обновления листов реестров. Ошибка: " & Err.Description
+    MsgBox "Ошибка R005: не удалось обновить листы реестров. " & vbCrLf & Err.Description, _
            vbCritical, "Реестры"
     Err.Clear
 End Sub
