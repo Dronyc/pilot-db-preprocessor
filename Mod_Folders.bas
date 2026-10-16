@@ -2,42 +2,42 @@ Attribute VB_Name = "Mod_Folders"
 Option Explicit
 
 ' ============================================================================
-' РњРѕРґСѓР»СЊ СЂР°Р±РѕС‚С‹ СЃ РїР°РїРєР°РјРё РїСЂРѕРµРєС‚Р°: СЃРѕР·РґР°РЅРёРµ, РїСЂРѕРІРµСЂРєР°, РїР°РїРєРё С€Р°РіРѕРІ.
-' Р РµР°Р»РёР·Р°С†РёСЏ W4 (СЂР°Р·РґРµР»С‹ 2, 3, 4 СЃРїРµС†РёС„РёРєР°С†РёРё Spec_Dispatcher.md).
-' РљРѕРґС‹ РѕС€РёР±РѕРє РјРѕРґСѓР»СЏ:
-'   F001 вЂ” ProjectRoot РЅРµ Р·Р°РґР°РЅ;
-'   F002 вЂ” РѕС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ РїР°РїРєРё (MkDir);
-'   F005 вЂ” РЅРµСЃРѕРѕС‚РІРµС‚СЃС‚РІРёРµ РёСЃС…РѕРґРЅС‹С… С„Р°Р№Р»РѕРІ РІ CheckSourceFolders.
-' РџСѓС‚Рё СЃС‚СЂРѕСЏС‚СЃСЏ РєР°Рє РІ Mod_Util: <РєРѕСЂРµРЅСЊ>\NN_РРјСЏ_РїР°РїРєРё, РєРѕСЂРµРЅСЊ Р±РµСЂС‘С‚СЃСЏ
-' РёР· РёРјРµРЅРѕРІР°РЅРЅРѕРіРѕ РґРёР°РїР°Р·РѕРЅР° ProjectRoot Р»РёСЃС‚Р° В«РќР°СЃС‚СЂРѕР№РєРёВ».
+' Модуль работы с папками проекта: создание, проверка, папки шагов.
+' Реализация W4 (разделы 2, 3, 4 спецификации Spec_Dispatcher.md).
+' Коды ошибок модуля:
+'   F001 — ProjectRoot не задан;
+'   F002 — ошибка создания папки (MkDir);
+'   F005 — несоответствие исходных файлов в CheckSourceFolders.
+' Пути строятся как в Mod_Util: <корень>\NN_Имя_папки, корень берётся
+' из именованного диапазона ProjectRoot листа «Настройки».
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
-' РљРћРќРЎРўРђРќРўР« Р Р’РЎРџРћРњРћР“РђРўР•Р›Р¬РќР«Р• Р¤РЈРќРљР¦РР (Private)
+' КОНСТАНТЫ И ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Private)
 ' ---------------------------------------------------------------------------
 
-' РћС‚РЅРѕСЃРёС‚РµР»СЊРЅС‹Рµ РїСѓС‚Рё РїР°РїРѕРє СЃС‚СЂСѓРєС‚СѓСЂС‹ РїСЂРѕРµРєС‚Р° (СЂР°Р·РґРµР» 2 СЃРїРµС†РёС„РёРєР°С†РёРё).
-Private Const FOLDER_LOGS As String = "05_Р›РѕРіРё"                          ' СЃРѕР·РґР°С‘С‚СЃСЏ РџР•Р Р’РћР™
-Private Const FOLDER_SOURCE As String = "01_РСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ"
-Private Const FOLDER_SCHEMA As String = "01_РСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ\01_РЎС…РµРјР°"
-Private Const FOLDER_DESC As String = "01_РСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ\02_РћРїРёСЃР°РЅРёРµ"
-Private Const FOLDER_CONFIG As String = "01_РСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ\03_РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ"
-Private Const FOLDER_LAYOUT As String = "01_РСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ\04_РњР°РєРµС‚"
-Private Const FOLDER_PREP As String = "02_РџРѕРґРіРѕС‚РѕРІРєР° СЃС…РµРјС‹"
-Private Const FOLDER_RESULTS As String = "03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё"
-Private Const FOLDER_STEPS As String = "03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\01_РџРѕ С€Р°РіР°Рј"
-Private Const FOLDER_SUMMARY As String = "03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\02_РЎРІРѕРґРЅС‹Рµ"
-Private Const FOLDER_REGISTRY As String = "03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\03_Р РµРµСЃС‚СЂС‹"
-Private Const FOLDER_READY_PROMPTS As String = "03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\04_РџСЂРѕРјС‚С‹_РіРѕС‚РѕРІС‹Рµ"
-Private Const FOLDER_PROMPTS As String = "04_РџСЂРѕРјС‚С‹"
+' Относительные пути папок структуры проекта (раздел 2 спецификации).
+Private Const FOLDER_LOGS As String = "05_Логи"                          ' создаётся ПЕРВОЙ
+Private Const FOLDER_SOURCE As String = "01_Исходные данные"
+Private Const FOLDER_SCHEMA As String = "01_Исходные данные\01_Схема"
+Private Const FOLDER_DESC As String = "01_Исходные данные\02_Описание"
+Private Const FOLDER_CONFIG As String = "01_Исходные данные\03_Конфигурация"
+Private Const FOLDER_LAYOUT As String = "01_Исходные данные\04_Макет"
+Private Const FOLDER_PREP As String = "02_Подготовка схемы"
+Private Const FOLDER_RESULTS As String = "03_Результаты генерации"
+Private Const FOLDER_STEPS As String = "03_Результаты генерации\01_По шагам"
+Private Const FOLDER_SUMMARY As String = "03_Результаты генерации\02_Сводные"
+Private Const FOLDER_REGISTRY As String = "03_Результаты генерации\03_Реестры"
+Private Const FOLDER_READY_PROMPTS As String = "03_Результаты генерации\04_Промты_готовые"
+Private Const FOLDER_PROMPTS As String = "04_Промты"
 
-' РџР°РїРєР° СЃСѓС‰РµСЃС‚РІСѓРµС‚?
+' Папка существует?
 Private Function FolderExists(ByVal fullPath As String) As Boolean
     FolderExists = (Dir(fullPath, vbDirectory) <> "")
 End Function
 
-' РЎС‡РёС‚Р°РµС‚ РєРѕР»РёС‡РµСЃС‚РІРѕ С„Р°Р№Р»РѕРІ СЃ СѓРєР°Р·Р°РЅРЅС‹Рј СЂР°СЃС€РёСЂРµРЅРёРµРј РІ РїР°РїРєРµ.
-' Р Р°СЃС€РёСЂРµРЅРёРµ РїРµСЂРµРґР°С‘С‚СЃСЏ РІ РІРёРґРµ ".xlsx" Рё С‚.Рї. РЈС‡РёС‚С‹РІР°СЋС‚СЃСЏ С‚РѕР»СЊРєРѕ С„Р°Р№Р»С‹.
+' Считает количество файлов с указанным расширением в папке.
+' Расширение передаётся в виде ".xlsx" и т.п. Учитываются только файлы.
 Private Function CountFilesByExt(ByVal folderPath As String, ByVal ext As String) As Long
     Dim cnt As Long
     Dim name As String
@@ -47,7 +47,7 @@ Private Function CountFilesByExt(ByVal folderPath As String, ByVal ext As String
 
     name = Dir(folderPath & "\*" & ext)
     Do While name <> ""
-        ' Dir Р±РµР· Р°С‚СЂРёР±СѓС‚РѕРІ РІРѕР·РІСЂР°С‰Р°РµС‚ С‚РѕР»СЊРєРѕ С„Р°Р№Р»С‹ (РЅРµ РїР°РїРєРё)
+        ' Dir без атрибутов возвращает только файлы (не папки)
         cnt = cnt + 1
         name = Dir()
     Loop
@@ -55,15 +55,15 @@ Private Function CountFilesByExt(ByVal folderPath As String, ByVal ext As String
 End Function
 
 ' ---------------------------------------------------------------------------
-' РџРЈР‘Р›РР§Р•РЎРљРР• РџР РћР¦Р•Р”РЈР Р« Р Р¤РЈРќРљР¦РР
+' ПУБЛИЧЕСКИЕ ПРОЦЕДУРЫ И ФУНКЦИИ
 ' ---------------------------------------------------------------------------
 
-' РЎРѕР·РґР°С‘С‚ СЃС‚СЂСѓРєС‚СѓСЂСѓ РїР°РїРѕРє РїСЂРѕРµРєС‚Р° (СЂР°Р·РґРµР» 2 СЃРїРµС†РёС„РёРєР°С†РёРё).
-' 05_Р›РѕРіРё СЃРѕР·РґР°С‘С‚СЃСЏ РџР•Р Р’РћР™ вЂ” РѕРЅР° РЅСѓР¶РЅР° РґР»СЏ Р·Р°РїРёСЃРё Р¶СѓСЂРЅР°Р»Р°.
-' РЎСѓС‰РµСЃС‚РІСѓСЋС‰РёРµ РїР°РїРєРё РЅРµ С‚СЂРѕРіР°СЋС‚СЃСЏ. РџСЂРµРїСЂРѕС†РµСЃСЃРѕСЂ РЅРёРєРѕРіРґР° РЅРёС‡РµРіРѕ РЅРµ СѓРґР°Р»СЏРµС‚.
+' Создаёт структуру папок проекта (раздел 2 спецификации).
+' 05_Логи создаётся ПЕРВОЙ — она нужна для записи журнала.
+' Существующие папки не трогаются. Препроцессор никогда ничего не удаляет.
 Public Sub CreateProjectFolders()
     Dim root As String
-    Dim relList As Variant          ' РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅС‹Рµ РїСѓС‚Рё РїР°РїРѕРє
+    Dim relList As Variant          ' относительные пути папок
     Dim i As Long
     Dim full As String
 
@@ -71,12 +71,12 @@ Public Sub CreateProjectFolders()
 
     root = Mod_Util.GetProjectRoot()
     If root = "" Then
-        Mod_Util.WriteError "F001", "CreateProjectFolders: ProjectRoot РЅРµ Р·Р°РґР°РЅ"
-        MsgBox "РћС€РёР±РєР° F001: РЅРµ Р·Р°РґР°РЅР° РєРѕСЂРЅРµРІР°СЏ РїР°РїРєР° РїСЂРѕРµРєС‚Р°.", vbCritical, "РџР°РїРєРё РїСЂРѕРµРєС‚Р°"
+        Mod_Util.WriteError "F001", "CreateProjectFolders: ProjectRoot не задан"
+        MsgBox "Ошибка F001: не задана корневая папка проекта.", vbCritical, "Папки проекта"
         Exit Sub
     End If
 
-    ' РџРѕСЂСЏРґРѕРє РІР°Р¶РµРЅ: 05_Р›РѕРіРё вЂ” РїРµСЂРІР°СЏ (РЅСѓР¶РЅР° РґР»СЏ Р»РѕРіР°), Р·Р°С‚РµРј РѕСЃС‚Р°Р»СЊРЅС‹Рµ.
+    ' Порядок важен: 05_Логи — первая (нужна для лога), затем остальные.
     relList = Array(FOLDER_LOGS, _
                     FOLDER_SOURCE, _
                     FOLDER_SCHEMA, _
@@ -94,30 +94,30 @@ Public Sub CreateProjectFolders()
     For i = LBound(relList) To UBound(relList)
         full = root & "\" & CStr(relList(i))
         If Not FolderExists(full) Then
-            MkDir full              ' РїСЂРё РѕС€РёР±РєРµ СѓР№РґС‘Рј РІ ErrHandler (F002)
+            MkDir full              ' при ошибке уйдём в ErrHandler (F002)
         End If
     Next i
 
-    Mod_Util.WriteLog "CreateProjectFolders: СЃС‚СЂСѓРєС‚СѓСЂР° СЃРѕР·РґР°РЅР°/РїСЂРѕРІРµСЂРµРЅР°"
-    MsgBox "РЎС‚СЂСѓРєС‚СѓСЂР° РїР°РїРѕРє РїСЂРѕРµРєС‚Р° СЃРѕР·РґР°РЅР°/РїСЂРѕРІРµСЂРµРЅР°.", vbInformation, "РџР°РїРєРё РїСЂРѕРµРєС‚Р°"
+    Mod_Util.WriteLog "CreateProjectFolders: структура создана/проверена"
+    MsgBox "Структура папок проекта создана/проверена.", vbInformation, "Папки проекта"
     Exit Sub
 
 ErrHandler:
-    ' РїРёС€РµРј РѕС€РёР±РєСѓ СЃ СѓРєР°Р·Р°РЅРёРµРј РєРѕРЅРєСЂРµС‚РЅРѕР№ РїР°РїРєРё, РІ РєРѕС‚РѕСЂРѕР№ РїСЂРѕРёР·РѕС€С‘Р» СЃР±РѕР№
-    Mod_Util.WriteError "F002", "CreateProjectFolders: РѕС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ РїР°РїРєРё """ & _
-                                root & "\" & CStr(relList(i)) & """. РћС€РёР±РєР°: " & Err.Description
-    MsgBox "РћС€РёР±РєР° F002: РЅРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РїР°РїРєСѓ." & vbCrLf & Err.Description, _
-           vbCritical, "РџР°РїРєРё РїСЂРѕРµРєС‚Р°"
+    ' пишем ошибку с указанием конкретной папки, в которой произошёл сбой
+    Mod_Util.WriteError "F002", "CreateProjectFolders: ошибка создания папки """ & _
+                                root & "\" & CStr(relList(i)) & """. Ошибка: " & Err.Description
+    MsgBox "Ошибка F002: не удалось создать папку." & vbCrLf & Err.Description, _
+           vbCritical, "Папки проекта"
     Err.Clear
 End Sub
 
-' РџСЂРѕРІРµСЂСЏРµС‚ РЅР°Р»РёС‡РёРµ РёСЃС…РѕРґРЅС‹С… РїР°РїРѕРє Рё С„Р°Р№Р»РѕРІ РІ РЅРёС… (РєРЅРѕРїРєР° 2, СЂР°Р·РґРµР» 4):
-'   * 01_РЎС…РµРјР°        вЂ” СЂРѕРІРЅРѕ РѕРґРёРЅ .xlsx;
-'   * 02_РћРїРёСЃР°РЅРёРµ     вЂ” СЂРѕРІРЅРѕ РѕРґРёРЅ .docx;
-'   * 03_РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ вЂ” СЂРѕРІРЅРѕ РѕРґРёРЅ .txt;
-'   * 04_РњР°РєРµС‚        вЂ” 0 РёР»Рё 1 .xlsx.
-' Р’СЃРµ РЅРµСЃРѕРѕС‚РІРµС‚СЃС‚РІРёСЏ РїРёС€СѓС‚СЃСЏ РІ Р»РѕРі РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏРјРё (F005).
-' Р’РѕР·РІСЂР°С‰Р°РµС‚ True, РµСЃР»Рё РІСЃРµ СѓСЃР»РѕРІРёСЏ РІС‹РїРѕР»РЅРµРЅС‹, РёРЅР°С‡Рµ False.
+' Проверяет наличие исходных папок и файлов в них (кнопка 2, раздел 4):
+'   * 01_Схема        — ровно один .xlsx;
+'   * 02_Описание     — ровно один .docx;
+'   * 03_Конфигурация — ровно один .txt;
+'   * 04_Макет        — 0 или 1 .xlsx.
+' Все несоответствия пишутся в лог предупреждениями (F005).
+' Возвращает True, если все условия выполнены, иначе False.
 Public Function CheckSourceFolders() As Boolean
     Dim root As String
     Dim folders As Variant
@@ -133,13 +133,13 @@ Public Function CheckSourceFolders() As Boolean
 
     root = Mod_Util.GetProjectRoot()
     If root = "" Then
-        Mod_Util.WriteError "F001", "CheckSourceFolders: ProjectRoot РЅРµ Р·Р°РґР°РЅ"
-        MsgBox "РћС€РёР±РєР° F001: РЅРµ Р·Р°РґР°РЅР° РєРѕСЂРЅРµРІР°СЏ РїР°РїРєР° РїСЂРѕРµРєС‚Р°.", vbCritical, "РџСЂРѕРІРµСЂРєР° РёСЃС…РѕРґРЅС‹С… РґР°РЅРЅС‹С…"
+        Mod_Util.WriteError "F001", "CheckSourceFolders: ProjectRoot не задан"
+        MsgBox "Ошибка F001: не задана корневая папка проекта.", vbCritical, "Проверка исходных данных"
         CheckSourceFolders = False
         Exit Function
     End If
 
-    ' С‡РµС‚С‹СЂРµ РїСЂРѕРІРµСЂСЏРµРјС‹Рµ РїР°РїРєРё: РёРјСЏ Рё С‚СЂРµР±СѓРµРјРѕРµ СЂР°СЃС€РёСЂРµРЅРёРµ
+    ' четыре проверяемые папки: имя и требуемое расширение
     folders = Array(FOLDER_SCHEMA, FOLDER_DESC, FOLDER_CONFIG, FOLDER_LAYOUT)
     exts = Array(".xlsx", ".docx", ".txt", ".xlsx")
 
@@ -148,43 +148,43 @@ Public Function CheckSourceFolders() As Boolean
         cnt = CountFilesByExt(folderFull, CStr(exts(i)))
 
         If i = 3 Then
-            ' 04_РњР°РєРµС‚ вЂ” РґРѕРїСѓСЃРєР°РµС‚СЃСЏ 0 РёР»Рё 1 С„Р°Р№Р» .xlsx
+            ' 04_Макет — допускается 0 или 1 файл .xlsx
             If cnt > 1 Then
                 Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                           " вЂ” РЅР°Р№РґРµРЅРѕ " & cnt & " С„Р°Р№Р»РѕРІ " & CStr(exts(i)) & _
-                                           ", РѕР¶РёРґР°РµС‚СЃСЏ РЅРµ Р±РѕР»РµРµ 1"
+                                           " — найдено " & cnt & " файлов " & CStr(exts(i)) & _
+                                           ", ожидается не более 1"
                 result = False
             End If
         Else
-            ' РѕСЃС‚Р°Р»СЊРЅС‹Рµ РїР°РїРєРё вЂ” СЂРѕРІРЅРѕ РѕРґРёРЅ С„Р°Р№Р» РЅСѓР¶РЅРѕРіРѕ СЂР°СЃС€РёСЂРµРЅРёСЏ
+            ' остальные папки — ровно один файл нужного расширения
             If cnt = 0 Then
                 Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                           " вЂ” С„Р°Р№Р» " & CStr(exts(i)) & " РЅРµ РЅР°Р№РґРµРЅ"
+                                           " — файл " & CStr(exts(i)) & " не найден"
                 result = False
             ElseIf cnt > 1 Then
                 Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                           " вЂ” РЅР°Р№РґРµРЅРѕ " & cnt & " С„Р°Р№Р»РѕРІ " & CStr(exts(i)) & _
-                                           ", РѕР¶РёРґР°РµС‚СЃСЏ СЂРѕРІРЅРѕ 1"
+                                           " — найдено " & cnt & " файлов " & CStr(exts(i)) & _
+                                           ", ожидается ровно 1"
                 result = False
             End If
         End If
     Next i
 
-    Mod_Util.WriteLog "CheckSourceFolders: СЂРµР·СѓР»СЊС‚Р°С‚ " & IIf(result, "True", "False")
+    Mod_Util.WriteLog "CheckSourceFolders: результат " & IIf(result, "True", "False")
     CheckSourceFolders = result
     Exit Function
 
 ErrHandler:
-    Mod_Util.WriteError "F005", "CheckSourceFolders: РѕС€РёР±РєР° РїСЂРѕРІРµСЂРєРё. РћС€РёР±РєР°: " & Err.Description
-    MsgBox "РћС€РёР±РєР° F005: РЅРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ РїСЂРѕРІРµСЂРєСѓ РёСЃС…РѕРґРЅС‹С… РїР°РїРѕРє." & vbCrLf & _
-           Err.Description, vbCritical, "РџСЂРѕРІРµСЂРєР° РёСЃС…РѕРґРЅС‹С… РґР°РЅРЅС‹С…"
+    Mod_Util.WriteError "F005", "CheckSourceFolders: ошибка проверки. Ошибка: " & Err.Description
+    MsgBox "Ошибка F005: не удалось выполнить проверку исходных папок." & vbCrLf & _
+           Err.Description, vbCritical, "Проверка исходных данных"
     Err.Clear
     CheckSourceFolders = False
 End Function
 
-' Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСѓС‚СЊ Рє РїР°РїРєРµ СѓРєР°Р·Р°РЅРЅРѕРіРѕ С€Р°РіР°: РёС‰РµС‚ РІ
-' <РєРѕСЂРµРЅСЊ>\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\01_РџРѕ С€Р°РіР°Рј РїР°РїРєСѓ СЃ РїСЂРµС„РёРєСЃРѕРј
-' "РЁР°Рі_<stepNumber>_". Р•СЃР»Рё РєРѕСЂРµРЅСЊ РёР»Рё РїР°РїРєР° РЅРµ РЅР°Р№РґРµРЅС‹ вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ "".
+' Возвращает путь к папке указанного шага: ищет в
+' <корень>\03_Результаты генерации\01_По шагам папку с префиксом
+' "Шаг_<stepNumber>_". Если корень или папка не найдены — возвращает "".
 Public Function GetStepFolder(ByVal stepNumber As String) As String
     Dim root As String
     Dim basePath As String
@@ -197,15 +197,15 @@ Public Function GetStepFolder(ByVal stepNumber As String) As String
     GetStepFolder = ""
 
     root = Mod_Util.GetProjectRoot()
-    If root = "" Then Exit Function             ' РєРѕСЂРµРЅСЊ РЅРµ Р·Р°РґР°РЅ вЂ” РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР°
+    If root = "" Then Exit Function             ' корень не задан — пустая строка
 
     basePath = root & "\" & FOLDER_STEPS
     If Not FolderExists(basePath) Then Exit Function
 
-    prefix = "РЁР°Рі_" & stepNumber & "_"
+    prefix = "Шаг_" & stepNumber & "_"
     name = Dir(basePath & "\" & prefix & "*", vbDirectory)
     Do While name <> ""
-        ' Dir СЃ vbDirectory РјРѕР¶РµС‚ РІРµСЂРЅСѓС‚СЊ Рё С„Р°Р№Р»С‹ вЂ” РїСЂРѕРїСѓСЃРєР°РµРј С‚РѕР»СЊРєРѕ РїР°РїРєРё
+        ' Dir с vbDirectory может вернуть и файлы — пропускаем только папки
         attrs = 0
         On Error Resume Next
         attrs = GetAttr(basePath & "\" & name)
@@ -220,14 +220,14 @@ Public Function GetStepFolder(ByVal stepNumber As String) As String
     Exit Function
 
 ErrHandler:
-    Mod_Util.WriteError "F002", "GetStepFolder: РѕС€РёР±РєР° РїРѕРёСЃРєР° РїР°РїРєРё С€Р°РіР°. РћС€РёР±РєР°: " & Err.Description
+    Mod_Util.WriteError "F002", "GetStepFolder: ошибка поиска папки шага. Ошибка: " & Err.Description
     Err.Clear
     GetStepFolder = ""
 End Function
 
-' РЎРѕР·РґР°С‘С‚ РїР°РїРєСѓ РґР»СЏ С€Р°РіР° "РЁР°Рі_<stepNumber>_<stepName>" РІ
-' <РєРѕСЂРµРЅСЊ>\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\01_РџРѕ С€Р°РіР°Рј Рё РІРѕР·РІСЂР°С‰Р°РµС‚ РїРѕР»РЅС‹Р№ РїСѓС‚СЊ.
-' Р•СЃР»Рё РїР°РїРєР° СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚ вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ РµС‘ РїСѓС‚СЊ Р±РµР· РїРµСЂРµСЃРѕР·РґР°РЅРёСЏ.
+' Создаёт папку для шага "Шаг_<stepNumber>_<stepName>" в
+' <корень>\03_Результаты генерации\01_По шагам и возвращает полный путь.
+' Если папка уже существует — возвращает её путь без пересоздания.
 Public Function CreateStepFolder(ByVal stepNumber As String, ByVal stepName As String) As String
     Dim root As String
     Dim basePath As String
@@ -239,16 +239,16 @@ Public Function CreateStepFolder(ByVal stepNumber As String, ByVal stepName As S
 
     root = Mod_Util.GetProjectRoot()
     If root = "" Then
-        Mod_Util.WriteError "F001", "CreateStepFolder: ProjectRoot РЅРµ Р·Р°РґР°РЅ"
-        MsgBox "РћС€РёР±РєР° F001: РЅРµ Р·Р°РґР°РЅР° РєРѕСЂРЅРµРІР°СЏ РїР°РїРєР° РїСЂРѕРµРєС‚Р°.", vbCritical, "РџР°РїРєРё РїСЂРѕРµРєС‚Р°"
+        Mod_Util.WriteError "F001", "CreateStepFolder: ProjectRoot не задан"
+        MsgBox "Ошибка F001: не задана корневая папка проекта.", vbCritical, "Папки проекта"
         Exit Function
     End If
 
     basePath = root & "\" & FOLDER_STEPS
-    fullPath = basePath & "\РЁР°Рі_" & stepNumber & "_" & stepName
+    fullPath = basePath & "\Шаг_" & stepNumber & "_" & stepName
 
     If Not FolderExists(fullPath) Then
-        MkDir fullPath              ' РїСЂРё РѕС€РёР±РєРµ СѓР№РґС‘Рј РІ ErrHandler (F002)
+        MkDir fullPath              ' при ошибке уйдём в ErrHandler (F002)
     End If
 
     Mod_Util.WriteLog "CreateStepFolder: " & fullPath
@@ -256,10 +256,10 @@ Public Function CreateStepFolder(ByVal stepNumber As String, ByVal stepName As S
     Exit Function
 
 ErrHandler:
-    Mod_Util.WriteError "F002", "CreateStepFolder: РѕС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ РїР°РїРєРё """ & fullPath & _
-                                """. РћС€РёР±РєР°: " & Err.Description
-    MsgBox "РћС€РёР±РєР° F002: РЅРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РїР°РїРєСѓ С€Р°РіР°." & vbCrLf & Err.Description, _
-           vbCritical, "РџР°РїРєРё РїСЂРѕРµРєС‚Р°"
+    Mod_Util.WriteError "F002", "CreateStepFolder: ошибка создания папки """ & fullPath & _
+                                """. Ошибка: " & Err.Description
+    MsgBox "Ошибка F002: не удалось создать папку шага." & vbCrLf & Err.Description, _
+           vbCritical, "Папки проекта"
     Err.Clear
     CreateStepFolder = ""
 End Function

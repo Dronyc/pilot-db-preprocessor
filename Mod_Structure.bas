@@ -1,14 +1,14 @@
-п»їAttribute VB_Name = "Mod_Structure"
+Attribute VB_Name = "Mod_Structure"
 Option Explicit
 
 '=====================================================================
-' РџРѕРґРіРѕС‚РѕРІРєР° С†РІРµС‚РѕРІРѕР№ СЃС‚СЂСѓРєС‚СѓСЂС‹ Р–Р¦ РћРљРЎ Рє РѕР±СЂР°Р±РѕС‚РєРµ РР
-' (РёР»Рё РїРѕР»РЅР°СЏ Р·Р°РјРµРЅР° СЌС‚Р°РїР° РёР·РІР»РµС‡РµРЅРёСЏ: РЅР° РІС‹С…РѕРґРµ РіРѕС‚РѕРІР°СЏ РїР»РѕСЃРєР°СЏ С‚Р°Р±Р»РёС†Р°)
+' Подготовка цветовой структуры ЖЦ ОКС к обработке ИИ
+' (или полная замена этапа извлечения: на выходе готовая плоская таблица)
 '=====================================================================
 
-Private Const SRC_SHEET As String = "РЎС‚СЂСѓРєС‚СѓСЂР° Р–Р¦ РРњ РРЎРџ"  ' РёРјСЏ Р»РёСЃС‚Р° СЃРѕ СЃС‚СЂСѓРєС‚СѓСЂРѕР№
-Private Const FIRST_ROW As Long = 8                        ' СЃС‚СЂРѕРєР°, СЃ РєРѕС‚РѕСЂРѕР№ РЅР°С‡РёРЅР°РµС‚СЃСЏ СЃС‚СЂСѓРєС‚СѓСЂР° (РћР±СЉРµРєС‚)
-Private Const LAST_COL  As Long = 30                       ' РјР°РєСЃРёРјР°Р»СЊРЅС‹Р№ СЃС‚РѕР»Р±РµС† СЃРєР°РЅРёСЂРѕРІР°РЅРёСЏ
+Private Const SRC_SHEET As String = "Структура ЖЦ ИМ ИСП"  ' имя листа со структурой
+Private Const FIRST_ROW As Long = 8                        ' строка, с которой начинается структура (Объект)
+Private Const LAST_COL  As Long = 30                       ' максимальный столбец сканирования
 
 Private Type NodeRec
     Name       As String
@@ -26,24 +26,24 @@ Private NodeCount As Long
 
 Public Sub BuildFlatStructure()
     Dim ws As Worksheet
-    Dim wbSrc As Workbook          ' РєРЅРёРіР°-РёСЃС‚РѕС‡РЅРёРє СЃС…РµРјС‹ (РёР· С„РёРєСЃРёСЂРѕРІР°РЅРЅРѕР№ РїР°РїРєРё)
-    Dim srcWasOpen As Boolean      ' РёСЃС‚РѕС‡РЅРёРє СѓР¶Рµ Р±С‹Р» РѕС‚РєСЂС‹С‚ РґРѕ Р·Р°РїСѓСЃРєР°
-    Dim path As String             ' РїР°РїРєР° 01_РЎС…РµРјР°
-    Dim fileName As String         ' РµРґРёРЅСЃС‚РІРµРЅРЅС‹Р№ xlsx-С„Р°Р№Р» СЃС…РµРјС‹
-    Dim f As String                ' С‚РµРєСѓС‰РёР№ С„Р°Р№Р» РїСЂРё РїРѕРёСЃРєРµ С‡РµСЂРµР· Dir
-    Dim resultsPath As String      ' РїР°РїРєР° 02_РџРѕРґРіРѕС‚РѕРІРєР° СЃС…РµРјС‹ (СЂРµР·СѓР»СЊС‚Р°С‚С‹)
+    Dim wbSrc As Workbook          ' книга-источник схемы (из фиксированной папки)
+    Dim srcWasOpen As Boolean      ' источник уже был открыт до запуска
+    Dim path As String             ' папка 01_Схема
+    Dim fileName As String         ' единственный xlsx-файл схемы
+    Dim f As String                ' текущий файл при поиске через Dir
+    Dim resultsPath As String      ' папка 02_Подготовка схемы (результаты)
     On Error GoTo Fail
 
-    '---------- РР—РњР•РќР•РќРР• 1: РёСЃС‚РѕС‡РЅРёРє вЂ” С„РёРєСЃРёСЂРѕРІР°РЅРЅР°СЏ РїР°РїРєР° 01_РЎС…РµРјР° ----------
-    path = Mod_Util.GetProjectRoot & "\01_РСЃС…РѕРґРЅС‹Рµ РґР°РЅРЅС‹Рµ\01_РЎС…РµРјР°"
+    '---------- ИЗМЕНЕНИЕ 1: источник — фиксированная папка 01_Схема ----------
+    path = Mod_Util.GetProjectRoot & "\01_Исходные данные\01_Схема"
 
-    ' РїСЂРѕРІРµСЂРєР° СЃСѓС‰РµСЃС‚РІРѕРІР°РЅРёСЏ РїР°РїРєРё
+    ' проверка существования папки
     If Dir(path, vbDirectory) = "" Then
         Err.Clear
         GoTo NoFolder
     End If
 
-    ' СЃР±РѕСЂ СЃРїРёСЃРєР° *.xlsx (Р±РµР· СѓС‡С‘С‚Р° РІСЂРµРјРµРЅРЅС‹С… С„Р°Р№Р»РѕРІ РІРёРґР° ~$...)
+    ' сбор списка *.xlsx (без учёта временных файлов вида ~$...)
     fileName = ""
     f = Dir(path & "\*.xlsx")
     Do While f <> ""
@@ -63,7 +63,7 @@ Public Sub BuildFlatStructure()
         GoTo NoFiles
     End If
 
-    ' РѕС‚РєСЂС‹С‚РёРµ С„Р°Р№Р»Р° СЃС…РµРјС‹ (РµСЃР»Рё СѓР¶Рµ РѕС‚РєСЂС‹С‚ вЂ” РёСЃРїРѕР»СЊР·СѓРµРј РµРіРѕ)
+    ' открытие файла схемы (если уже открыт — используем его)
     srcWasOpen = False
     On Error Resume Next
     Set wbSrc = Workbooks(fileName)
@@ -74,7 +74,7 @@ Public Sub BuildFlatStructure()
         Set wbSrc = Workbooks.Open(path & "\" & fileName, ReadOnly:=True)
     End If
 
-    ' Р»РёСЃС‚-РёСЃС‚РѕС‡РЅРёРє СЃС‚СЂСѓРєС‚СѓСЂС‹ вЂ” С‚Р°Рє Р¶Рµ, РєР°Рє СЂР°РЅСЊС€Рµ СЂР°Р±РѕС‚Р°Р» СЃ SRC_SHEET
+    ' лист-источник структуры — так же, как раньше работал с SRC_SHEET
     On Error Resume Next
     Set ws = wbSrc.Worksheets(SRC_SHEET)
     On Error GoTo Fail
@@ -83,10 +83,10 @@ Public Sub BuildFlatStructure()
         GoTo OpenErr
     End If
 
-    ' РР—РњР•РќР•РќРР• 2: РїСѓС‚СЊ СЃРѕС…СЂР°РЅРµРЅРёСЏ СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ
-    resultsPath = Mod_Util.GetProjectRoot & "\02_РџРѕРґРіРѕС‚РѕРІРєР° СЃС…РµРјС‹"
+    ' ИЗМЕНЕНИЕ 2: путь сохранения результатов
+    resultsPath = Mod_Util.GetProjectRoot & "\02_Подготовка схемы"
 
-    '---------- 1. Р›РµРіРµРЅРґР°: С†РІРµС‚ -> С‚РёРї ----------
+    '---------- 1. Легенда: цвет -> тип ----------
     Dim legCells(1 To 6) As String
     Dim legNames(1 To 6) As String
     Dim legColors(1 To 6) As Long
@@ -98,7 +98,7 @@ Public Sub BuildFlatStructure()
         legColors(i) = ws.Range(legCells(i)).Interior.Color
     Next i
 
-    '---------- 2. РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ СЃС‚СЂСѓРєС‚СѓСЂС‹ ----------
+    '---------- 2. Сканирование структуры ----------
     ReDim Nodes(1 To 20000)
     NodeCount = 0
     Dim lastAtLevel(1 To LAST_COL) As Long
@@ -121,7 +121,7 @@ Public Sub BuildFlatStructure()
                     colr = ws.Cells(r, c).Interior.Color
                     Dim tName As String
                     tName = ColorToType(colr, legColors, legNames)
-                    If tName <> "" Then                      ' С†РІРµС‚ РёР· Р»РµРіРµРЅРґС‹ => СЌС‚Рѕ СѓР·РµР» СЃС‚СЂСѓРєС‚СѓСЂС‹
+                    If tName <> "" Then                      ' цвет из легенды => это узел структуры
                         NodeCount = NodeCount + 1
                         With Nodes(NodeCount)
                             .Name = Trim(CStr(v))
@@ -137,14 +137,14 @@ Public Sub BuildFlatStructure()
                                 .ParentIdx = lastAtLevel(c - 1)
                             End If
                         End With
-                        ' СЃРїРµС†-РїСЂР°РІРёР»Рѕ: РєРѕСЂРµРЅСЊ
-                        If Nodes(NodeCount).Name = "РћР±СЉРµРєС‚" Then
-                            Nodes(NodeCount).NodeType = "РџР°РїРєР°"
+                        ' спец-правило: корень
+                        If Nodes(NodeCount).Name = "Объект" Then
+                            Nodes(NodeCount).NodeType = "Папка"
                             Nodes(NodeCount).ParentIdx = 0
                         End If
                         lastAtLevel(c) = NodeCount
                         Dim k As Long
-                        For k = c + 1 To LAST_COL            ' СЃР±СЂРѕСЃ Р±РѕР»РµРµ РіР»СѓР±РѕРєРёС… СѓСЂРѕРІРЅРµР№
+                        For k = c + 1 To LAST_COL            ' сброс более глубоких уровней
                             lastAtLevel(k) = 0
                         Next k
                     End If
@@ -153,7 +153,7 @@ Public Sub BuildFlatStructure()
         Next c
     Next r
 
-    '---------- 3. РђРіСЂРµРіР°С†РёСЏ РґРµС‚РµР№ ----------
+    '---------- 3. Агрегация детей ----------
     For i = 1 To NodeCount
         If Nodes(i).ParentIdx > 0 Then
             Dim p As Long
@@ -166,13 +166,13 @@ Public Sub BuildFlatStructure()
         End If
     Next i
 
-    '---------- 4. Р’С‹РІРѕРґ Р»РёСЃС‚РѕРІ ----------
+    '---------- 4. Вывод листов ----------
     WriteFlatTable
     WriteTraceability
     WriteLog
 
-    ' РР—РњР•РќР•РќРР• 2: СЂРµР·СѓР»СЊС‚Р°С‚С‹ С„РѕСЂРјРёСЂСѓСЋС‚СЃСЏ РєР°Рє Р»РёСЃС‚С‹ С‚РµРєСѓС‰РµР№ РєРЅРёРіРё (СЃС‚СЂСѓРєС‚СѓСЂР°
-    ' Р»РёСЃС‚РѕРІ Рё РєРѕР»РѕРЅРєРё РЅРµ РјРµРЅСЏР»РёСЃСЊ); СЃРѕС…СЂР°РЅСЏРµРј РєРѕРїРёСЋ РєРЅРёРіРё РІ resultsPath.
+    ' ИЗМЕНЕНИЕ 2: результаты формируются как листы текущей книги (структура
+    ' листов и колонки не менялись); сохраняем копию книги в resultsPath.
     If Dir(resultsPath, vbDirectory) = "" Then MkDir resultsPath
     Dim saveName As String
     saveName = resultsPath & "\" & Format$(Now, "yyyy-mm-dd hhnnss") & ".xlsm"
@@ -182,49 +182,49 @@ Public Sub BuildFlatStructure()
     saveErr = Err.Number
     On Error GoTo 0
     If saveErr <> 0 Then
-        Mod_Util.WriteError "S005", "РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ: " & Error$(saveErr)
-        MsgBox "РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ.", vbExclamation
+        Mod_Util.WriteError "S005", "Ошибка сохранения результатов: " & Error$(saveErr)
+        MsgBox "Ошибка сохранения результатов.", vbExclamation
     End If
 
-    '---------- 5. Р¤РёРЅР°Р» ----------
-    Mod_Util.WriteLog "BuildFlatStructure: СѓР·Р»РѕРІ " & NodeCount
-    Mod_Util.WriteLog "РџР°РїРєР° СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ: " & resultsPath   ' РїСѓС‚СЊ Р±СѓРґСѓС‰РµРіРѕ СЃРѕС…СЂР°РЅРµРЅРёСЏ
-    MsgBox "Р“РѕС‚РѕРІРѕ. РЈР·Р»РѕРІ: " & NodeCount, vbInformation
+    '---------- 5. Финал ----------
+    Mod_Util.WriteLog "BuildFlatStructure: узлов " & NodeCount
+    Mod_Util.WriteLog "Папка результатов: " & resultsPath   ' путь будущего сохранения
+    MsgBox "Готово. Узлов: " & NodeCount, vbInformation
 
-    ' Р·Р°РєСЂС‹С‚СЊ РёСЃС‚РѕС‡РЅРёРє, РµСЃР»Рё РѕС‚РєСЂС‹РІР°Р»Рё РµРіРѕ СЃР°РјРё
+    ' закрыть источник, если открывали его сами
     If Not srcWasOpen And Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
     Exit Sub
 
-'---------- РћР±СЂР°Р±РѕС‚РєР° РѕС€РёР±РѕРє (РёР·РјРµРЅРµРЅРёСЏ 1 Рё 2) ----------
-NoFolder:                                   ' РїР°РїРєР° 01_РЎС…РµРјР° РЅРµ РЅР°Р№РґРµРЅР°
-    Mod_Util.WriteError "S003", "РџР°РїРєР° 01_РЎС…РµРјР° РЅРµ РЅР°Р№РґРµРЅР°: " & path
-    MsgBox "РџР°РїРєР° 01_РЎС…РµРјР° РЅРµ РЅР°Р№РґРµРЅР°: " & path, vbExclamation
+'---------- Обработка ошибок (изменения 1 и 2) ----------
+NoFolder:                                   ' папка 01_Схема не найдена
+    Mod_Util.WriteError "S003", "Папка 01_Схема не найдена: " & path
+    MsgBox "Папка 01_Схема не найдена: " & path, vbExclamation
     Exit Sub
 
-NoFiles:                                    ' РІ РїР°РїРєРµ РЅРµС‚ xlsx-С„Р°Р№Р»Р°
-    Mod_Util.WriteError "S001", "Р’ РїР°РїРєРµ 01_РЎС…РµРјР° РЅРµС‚ xlsx-С„Р°Р№Р»Р°"
-    MsgBox "Р’ РїР°РїРєРµ 01_РЎС…РµРјР° РЅРµС‚ xlsx-С„Р°Р№Р»Р°", vbExclamation
+NoFiles:                                    ' в папке нет xlsx-файла
+    Mod_Util.WriteError "S001", "В папке 01_Схема нет xlsx-файла"
+    MsgBox "В папке 01_Схема нет xlsx-файла", vbExclamation
     Exit Sub
 
-ManyFiles:                                  ' РІ РїР°РїРєРµ Р±РѕР»СЊС€Рµ РѕРґРЅРѕРіРѕ xlsx
-    Mod_Util.WriteError "S002", "Р’ РїР°РїРєРµ 01_РЎС…РµРјР° Р±РѕР»СЊС€Рµ РѕРґРЅРѕРіРѕ xlsx"
-    MsgBox "Р’ РїР°РїРєРµ 01_РЎС…РµРјР° Р±РѕР»СЊС€Рµ РѕРґРЅРѕРіРѕ xlsx. РћСЃС‚Р°РІСЊС‚Рµ РѕРґРёРЅ.", vbExclamation
+ManyFiles:                                  ' в папке больше одного xlsx
+    Mod_Util.WriteError "S002", "В папке 01_Схема больше одного xlsx"
+    MsgBox "В папке 01_Схема больше одного xlsx. Оставьте один.", vbExclamation
     Exit Sub
 
-OpenErr:                                    ' РѕС€РёР±РєР° РѕС‚РєСЂС‹С‚РёСЏ С„Р°Р№Р»Р° СЃС…РµРјС‹
-    Mod_Util.WriteError "S004", "РћС€РёР±РєР° РѕС‚РєСЂС‹С‚РёСЏ С„Р°Р№Р»Р° СЃС…РµРјС‹: " & Err.Description
-    MsgBox "РћС€РёР±РєР° РѕС‚РєСЂС‹С‚РёСЏ С„Р°Р№Р»Р° СЃС…РµРјС‹.", vbExclamation
+OpenErr:                                    ' ошибка открытия файла схемы
+    Mod_Util.WriteError "S004", "Ошибка открытия файла схемы: " & Err.Description
+    MsgBox "Ошибка открытия файла схемы.", vbExclamation
     Exit Sub
 
-Fail:                                       ' РїСЂРѕС‡РёРµ РѕС€РёР±РєРё (РЅР°РїСЂРёРјРµСЂ, СЃРѕР·РґР°РЅРёРµ РїР°РїРєРё СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ)
+Fail:                                       ' прочие ошибки (например, создание папки результатов)
     Dim errDesc As String
     errDesc = Err.Description
     Err.Clear
-    Mod_Util.WriteError "S004", "РћС€РёР±РєР° РѕС‚РєСЂС‹С‚РёСЏ С„Р°Р№Р»Р° СЃС…РµРјС‹: " & errDesc
-    MsgBox "РћС€РёР±РєР° РѕС‚РєСЂС‹С‚РёСЏ С„Р°Р№Р»Р° СЃС…РµРјС‹.", vbExclamation
+    Mod_Util.WriteError "S004", "Ошибка открытия файла схемы: " & errDesc
+    MsgBox "Ошибка открытия файла схемы.", vbExclamation
 End Sub
 
-'---------------- Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅС‹Рµ С„СѓРЅРєС†РёРё ----------------
+'---------------- Вспомогательные функции ----------------
 
 Private Function ColorToType(ByVal colr As Long, legColors() As Long, legNames() As String) As String
     Dim i As Long
@@ -234,7 +234,7 @@ Private Function ColorToType(ByVal colr As Long, legColors() As Long, legNames()
             Exit Function
         End If
     Next i
-    ColorToType = ""          ' С†РІРµС‚ РЅРµ РёР· Р»РµРіРµРЅРґС‹ => СЃР»СѓР¶РµР±РЅР°СЏ СЏС‡РµР№РєР°
+    ColorToType = ""          ' цвет не из легенды => служебная ячейка
 End Function
 
 Private Function LeadCode(ByVal s As String) As String
@@ -275,16 +275,16 @@ Private Sub GetSheet(ByVal nm As String, ByRef out As Worksheet)
     out.Name = nm
 End Sub
 
-'---------------- Р›РёСЃС‚ 1: С†РµР»РµРІР°СЏ РїР»РѕСЃРєР°СЏ С‚Р°Р±Р»РёС†Р° ----------------
+'---------------- Лист 1: целевая плоская таблица ----------------
 Private Sub WriteFlatTable()
     Dim ws As Worksheet
-    GetSheet "РџР»РѕСЃРєР°СЏ_С‚Р°Р±Р»РёС†Р°", ws
-    ws.Range("A1:D1").Value = Array("РћС‚РѕР±СЂР°Р¶Р°РµРјРѕРµ РёРјСЏ", "РўРёРї", "Р’С…РѕРґРёС‚ РІ", "РЎРѕСЃС‚РѕРёС‚ РёР·")
+    GetSheet "Плоская_таблица", ws
+    ws.Range("A1:D1").Value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из")
     Dim i As Long, r As Long
     r = 2
     For i = 1 To NodeCount
         Dim parentCell As String
-        If Nodes(i).Name = "РћР±СЉРµРєС‚" Then
+        If Nodes(i).Name = "Объект" Then
             parentCell = "projectfolder"
         Else
             parentCell = ParentName(Nodes(i).ParentIdx)
@@ -298,11 +298,11 @@ Private Sub WriteFlatTable()
     ws.Columns("A:D").AutoFit
 End Sub
 
-'---------------- Р›РёСЃС‚ 2: С‚СЂР°СЃСЃРёСЂРѕРІРєР° ----------------
+'---------------- Лист 2: трассировка ----------------
 Private Sub WriteTraceability()
     Dim ws As Worksheet
-    GetSheet "РўСЂР°СЃСЃРёСЂРѕРІРєР°", ws
-    ws.Range("A1:H1").Value = Array("в„–", "РЎС‚СЂРѕРєР°", "РЎС‚РѕР»Р±РµС†", "РЈСЂРѕРІРµРЅСЊ", "РћС‚РѕР±СЂР°Р¶Р°РµРјРѕРµ РёРјСЏ", "РўРёРї", "Р¦РІРµС‚ RGB", "Р РѕРґРёС‚РµР»СЊ")
+    GetSheet "Трассировка", ws
+    ws.Range("A1:H1").Value = Array("№", "Строка", "Столбец", "Уровень", "Отображаемое имя", "Тип", "Цвет RGB", "Родитель")
     Dim i As Long
     For i = 1 To NodeCount
         ws.Cells(i + 1, 1).Value = i
@@ -317,13 +317,13 @@ Private Sub WriteTraceability()
     ws.Columns("A:H").AutoFit
 End Sub
 
-'---------------- Р›РёСЃС‚ 3: Р¶СѓСЂРЅР°Р» Р°РЅРѕРјР°Р»РёР№ ----------------
+'---------------- Лист 3: журнал аномалий ----------------
 Private Sub WriteLog()
-    ' РР—РњР•РќР•РќРР• 3: Р»РѕРіРёСЂРѕРІР°РЅРёРµ вЂ” С‡РµСЂРµР· Mod_Util (С‚РµРєСЃС‚ СЃРѕРѕР±С‰РµРЅРёСЏ СЃ РёС‚РѕРіР°РјРё).
-    Mod_Util.WriteLog "Mod_Structure: СѓР·Р»РѕРІ " & NodeCount
+    ' ИЗМЕНЕНИЕ 3: логирование — через Mod_Util (текст сообщения с итогами).
+    Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
     Dim ws As Worksheet
-    GetSheet "Р–СѓСЂРЅР°Р»", ws
-    ws.Range("A1:D1").Value = Array("РљРѕРґ РїСЂРѕР±Р»РµРјС‹", "Р­Р»РµРјРµРЅС‚", "Р РѕРґРёС‚РµР»СЊ", "РћРїРёСЃР°РЅРёРµ")
+    GetSheet "Журнал", ws
+    ws.Range("A1:D1").Value = Array("Код проблемы", "Элемент", "Родитель", "Описание")
     Dim r As Long
     r = 2
     Dim i As Long
@@ -332,21 +332,21 @@ Private Sub WriteLog()
         nm = Nodes(i).Name
         pn = ParentName(Nodes(i).ParentIdx)
 
-        ' СЃРёСЂРѕС‚Р° (РЅРµ РєРѕСЂРµРЅСЊ Рё Р±РµР· СЂРѕРґРёС‚РµР»СЏ)
-        If Nodes(i).ParentIdx = 0 And nm <> "РћР±СЉРµРєС‚" Then
+        ' сирота (не корень и без родителя)
+        If Nodes(i).ParentIdx = 0 And nm <> "Объект" Then
             ws.Cells(r, 1).Value = "ORPHAN": ws.Cells(r, 2).Value = nm
-            ws.Cells(r, 4).Value = "РќРµ РЅР°Р№РґРµРЅ СЂРѕРґРёС‚РµР»СЊ СѓСЂРѕРІРЅСЏ N-1"
+            ws.Cells(r, 4).Value = "Не найден родитель уровня N-1"
             r = r + 1
         End If
 
-        ' ECM-РґРѕРєСѓРјРµРЅС‚ РЅРµ РґРѕР»Р¶РµРЅ РёРјРµС‚СЊ РґРµС‚РµР№
-        If Nodes(i).NodeType = "ECM-РґРѕРєСѓРјРµРЅС‚" And Len(Nodes(i).Children) > 0 Then
+        ' ECM-документ не должен иметь детей
+        If Nodes(i).NodeType = "ECM-документ" And Len(Nodes(i).Children) > 0 Then
             ws.Cells(r, 1).Value = "LEAF_HAS_CHILDREN": ws.Cells(r, 2).Value = nm
-            ws.Cells(r, 4).Value = "ECM-РґРѕРєСѓРјРµРЅС‚ СЃ РґРѕС‡РµСЂРЅРёРјРё СЌР»РµРјРµРЅС‚Р°РјРё: " & Nodes(i).Children
+            ws.Cells(r, 4).Value = "ECM-документ с дочерними элементами: " & Nodes(i).Children
             r = r + 1
         End If
 
-        ' РїСЂРѕРІРµСЂРєРё РєРѕРґРѕРІ
+        ' проверки кодов
         Dim cc As String, pc As String
         cc = LeadCode(nm)
         pc = LeadCode(pn)
@@ -354,13 +354,13 @@ Private Sub WriteLog()
             If Left(cc, Len(pc) + 1) <> pc & "." Then
                 ws.Cells(r, 1).Value = "CODE_PARENT_MISMATCH": ws.Cells(r, 2).Value = nm
                 ws.Cells(r, 3).Value = pn
-                ws.Cells(r, 4).Value = "РљРѕРґ СЂРµР±РµРЅРєР° РЅРµ РїСЂРѕРґРѕР»Р¶Р°РµС‚ РєРѕРґ СЂРѕРґРёС‚РµР»СЏ"
+                ws.Cells(r, 4).Value = "Код ребенка не продолжает код родителя"
                 r = r + 1
             End If
             If CodeDepth(cc) <> CodeDepth(pc) + 1 Then
                 ws.Cells(r, 1).Value = "CODE_DEPTH_JUMP": ws.Cells(r, 2).Value = nm
                 ws.Cells(r, 3).Value = pn
-                ws.Cells(r, 4).Value = "Р“Р»СѓР±РёРЅР° РєРѕРґР° СЂРµР±РµРЅРєР° РЅРµ СЂР°РІРЅР° РіР»СѓР±РёРЅРµ СЂРѕРґРёС‚РµР»СЏ + 1"
+                ws.Cells(r, 4).Value = "Глубина кода ребенка не равна глубине родителя + 1"
                 r = r + 1
             End If
         End If
