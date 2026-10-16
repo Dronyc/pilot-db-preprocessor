@@ -15,7 +15,6 @@ Option Explicit
 ' ---------------------------------------------------------------------------
 
 ' Имена именованных диапазонов листа «Настройки» (раздел 5 спецификации).
-Private Const NAME_PROJECT_ROOT As String = "ProjectRoot"
 Private Const NAME_CHECK_MODE As String = "CheckMode"
 Private Const NAME_AUTO_OPEN_RESULTS As String = "AutoOpenResults"
 Private Const NAME_PROMPT_GEN_VERSION As String = "PromptGenVersion"
@@ -40,38 +39,13 @@ End Function
 ' на листе «Настройки». Если диапазон не найден или значение пустое —
 ' пишет в лог "GetProjectRoot: ProjectRoot не задан" и возвращает "".
 Public Function GetProjectRoot() As String
-    Dim nm As Name
-    Dim val As String
-
-    GetProjectRoot = ""
-
-    On Error Resume Next
-    Set nm = ThisWorkbook.Names(NAME_PROJECT_ROOT)
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        Exit Function
+    ' Корень проекта — всегда папка, где лежит файл .xlsm.
+    ' Если книга не сохранена (ThisWorkbook.Path = "") — возвращаем "".
+    If ThisWorkbook.Path <> "" Then
+        GetProjectRoot = NormPath(ThisWorkbook.Path)
+    Else
+        GetProjectRoot = ""
     End If
-    On Error GoTo 0
-
-    If nm Is Nothing Then
-        Exit Function
-    End If
-
-    On Error Resume Next
-    val = Trim(CStr(nm.RefersToRange.value))
-    If Err.Number <> 0 Then
-        Err.Clear
-        On Error GoTo 0
-        Exit Function
-    End If
-    On Error GoTo 0
-
-    If val = "" Then
-        Exit Function
-    End If
-
-    GetProjectRoot = NormPath(val)
 End Function
 
 ' Возвращает путь к папке логов: <корень>\05_Логи.
@@ -246,16 +220,15 @@ Public Sub EnsureSettingsSheet()
 
     ' 2. Подписи (колонка A), имена диапазонов и значения по умолчанию —
     '    пять полей раздела 5 спецификации
-    labels = Array("Корневая папка проекта", _
-                   "Режим проверки", _
-                   "Автооткрытие папки результатов", _
-                   "Версия промта-генератора", _
-                   "Версия промта-исправления")
-    namesArr = Array(NAME_PROJECT_ROOT, NAME_CHECK_MODE, NAME_AUTO_OPEN_RESULTS, _
-                     NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION)
-    defaults = Array("", "Черновик", "да", "7.13", "1.0")
+    labels = Array("Режим проверки", _
+               "Автооткрытие папки результатов", _
+               "Версия промта-генератора", _
+               "Версия промта-исправления")
+    namesArr = Array(NAME_CHECK_MODE, NAME_AUTO_OPEN_RESULTS, _
+                    NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION)
+    defaults = Array("Черновик", "да", "7.13", "1.0")
 
-    For i = 0 To 4
+    For i = 0 To 3
         rowIdx = i + 2
         ws.Cells(rowIdx, 1).Value = CStr(labels(i))
         ' значение по умолчанию ставим только если ячейка пуста
@@ -285,7 +258,7 @@ Public Sub EnsureSettingsSheet()
 
     ' 4. Именованные диапазоны — создавать, если их ещё нет
     '    (существующие имена не трогаем, чтобы не переопределить ссылку)
-    For i = 0 To 4
+    For i = 0 To 3
         On Error Resume Next
         Dim nmChk As Name
         Set nmChk = wb.Names(namesArr(i))
@@ -301,7 +274,7 @@ Public Sub EnsureSettingsSheet()
 
     ' 5. Защита листа от случайной правки: разблокированы только B2:B6
     ws.Cells.Locked = True
-    ws.Range("B2:B6").Locked = False
+    ws.Range("B2:B5").Locked = False
     ws.Protect Password:=SHEET_PASSWORD
 
     WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён"
@@ -310,58 +283,6 @@ Public Sub EnsureSettingsSheet()
 ErrHandler:
     WriteError "U003", "EnsureSettingsSheet: ошибка подготовки листа 'Настройки'. Ошибка: " & Err.Description
     MsgBox "Ошибка U003: не удалось подготовить лист 'Настройки'." & vbCrLf & Err.Description, _
-           vbCritical, "Настройки"
-    Err.Clear
-End Sub
-
-' Открывает диалог выбора папки проекта; если пользователь выбрал папку —
-' записывает путь в ячейку с именем ProjectRoot и пишет в лог
-' "SelectProjectFolder: выбран путь <...>". Если отменил — ничего не делает.
-Public Sub SelectProjectFolder()
-    Dim dlg As FileDialog
-    Dim chosenPath As String
-    Dim nm As Name
-    Dim ws As Worksheet
-
-    On Error GoTo ErrHandler
-
-    ' убедимся, что лист и именованный диапазон существуют
-    EnsureSettingsSheet
-
-    Set dlg = Application.FileDialog(msoFileDialogFolderPicker)
-    dlg.Title = "Выберите корневую папку проекта"
-    dlg.AllowMultiSelect = False
-
-    If dlg.Show <> -1 Then Exit Sub     ' пользователь отменил — ничего не делаем
-
-    chosenPath = NormPath(CStr(dlg.SelectedItems(1)))
-    If chosenPath = "" Then Exit Sub
-
-    On Error Resume Next
-    Set nm = ThisWorkbook.Names(NAME_PROJECT_ROOT)
-    If Err.Number <> 0 Then Err.Clear
-    On Error GoTo ErrHandler
-
-    If nm Is Nothing Then
-        WriteError "U004", "SelectProjectFolder: именованный диапазон ProjectRoot не найден."
-        MsgBox "Ошибка U004: не найден диапазон ProjectRoot. " & _
-               "Сначала выполните EnsureSettingsSheet.", vbCritical, "Настройки"
-        Err.Clear
-        Exit Sub
-    End If
-
-    ' запись в ячейку на защищённом листе — через Unprotect/Protect
-    Set ws = nm.RefersToRange.Worksheet
-    ws.Unprotect Password:=SHEET_PASSWORD
-    nm.RefersToRange.Value = chosenPath
-    ws.Protect Password:=SHEET_PASSWORD
-
-    WriteLog "SelectProjectFolder: выбран путь " & chosenPath
-    Exit Sub
-
-ErrHandler:
-    WriteError "U004", "SelectProjectFolder: ошибка выбора папки проекта. Ошибка: " & Err.Description
-    MsgBox "Ошибка U004: не удалось выбрать корневую папку проекта." & vbCrLf & Err.Description, _
            vbCritical, "Настройки"
     Err.Clear
 End Sub

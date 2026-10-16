@@ -5,11 +5,11 @@ Option Explicit
 ' Модуль работы с папками проекта: создание, проверка, папки шагов.
 ' Реализация W4 (разделы 2, 3, 4 спецификации Spec_Dispatcher.md).
 ' Коды ошибок модуля:
-'   F001 — ProjectRoot не задан;
-'   F002 — ошибка создания папки (MkDir);
-'   F005 — несоответствие исходных файлов в CheckSourceFolders.
-' Пути строятся как в Mod_Util: <корень>\NN_Имя_папки, корень берётся
-' из именованного диапазона ProjectRoot листа «Настройки».
+'   F001 - папка проекта не определена (книга .xlsm не сохранена);
+'   F002 - ошибка создания папки (MkDir);
+'   F005 - несоответствие исходных файлов в CheckSourceFolders.
+' Пути строятся от корня проекта — папки, где лежит .xlsm
+' (ThisWorkbook.Path). Никаких настроек и диалогов выбора.
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
@@ -40,16 +40,16 @@ End Function
 ' Расширение передаётся в виде ".xlsx" и т.п. Учитываются только файлы.
 Private Function CountFilesByExt(ByVal folderPath As String, ByVal ext As String) As Long
     Dim cnt As Long
-    Dim name As String
+    Dim Name As String
 
     CountFilesByExt = 0
     If Not FolderExists(folderPath) Then Exit Function
 
-    name = Dir(folderPath & "\*" & ext)
-    Do While name <> ""
+    Name = Dir(folderPath & "\*" & ext)
+    Do While Name <> ""
         ' Dir без атрибутов возвращает только файлы (не папки)
         cnt = cnt + 1
-        name = Dir()
+        Name = Dir()
     Loop
     CountFilesByExt = cnt
 End Function
@@ -59,7 +59,7 @@ End Function
 ' ---------------------------------------------------------------------------
 
 ' Создаёт структуру папок проекта (раздел 2 спецификации).
-' 05_Логи создаётся ПЕРВОЙ — она нужна для записи журнала.
+' 05_Логи создаётся ПЕРВОЙ - она нужна для записи журнала.
 ' Существующие папки не трогаются. Препроцессор никогда ничего не удаляет.
 Public Sub CreateProjectFolders()
     Dim root As String
@@ -71,12 +71,14 @@ Public Sub CreateProjectFolders()
 
     root = Mod_Util.GetProjectRoot()
     If root = "" Then
-        Mod_Util.WriteError "F001", "CreateProjectFolders: ProjectRoot не задан"
-        MsgBox "Ошибка F001: не задана корневая папка проекта.", vbCritical, "Папки проекта"
+        Mod_Util.WriteError "F001", "CreateProjectFolders: не удалось определить папку проекта (книга не сохранена?)"
+        MsgBox "Ошибка F001: не удалось определить папку проекта. Сохраните файл .xlsm и повторите.", _
+               vbCritical, "Папки проекта"
         Exit Sub
     End If
 
-    ' Порядок важен: 05_Логи — первая (нужна для лога), затем остальные.
+
+    ' Порядок важен: 05_Логи - первая (нужна для лога), затем остальные.
     relList = Array(FOLDER_LOGS, _
                     FOLDER_SOURCE, _
                     FOLDER_SCHEMA, _
@@ -112,10 +114,10 @@ ErrHandler:
 End Sub
 
 ' Проверяет наличие исходных папок и файлов в них (кнопка 2, раздел 4):
-'   * 01_Схема        — ровно один .xlsx;
-'   * 02_Описание     — ровно один .docx;
-'   * 03_Конфигурация — ровно один .txt;
-'   * 04_Макет        — 0 или 1 .xlsx.
+'   * 01_Схема        - ровно один .xlsx;
+'   * 02_Описание     - ровно один .docx;
+'   * 03_Конфигурация - ровно один .txt;
+'   * 04_Макет        - 0 или 1 .xlsx.
 ' Все несоответствия пишутся в лог предупреждениями (F005).
 ' Возвращает True, если все условия выполнены, иначе False.
 Public Function CheckSourceFolders() As Boolean
@@ -133,8 +135,10 @@ Public Function CheckSourceFolders() As Boolean
 
     root = Mod_Util.GetProjectRoot()
     If root = "" Then
-        Mod_Util.WriteError "F001", "CheckSourceFolders: ProjectRoot не задан"
-        MsgBox "Ошибка F001: не задана корневая папка проекта.", vbCritical, "Проверка исходных данных"
+        Mod_Util.WriteError "F001", "CheckSourceFolders: папка проекта не определена (книга .xlsm не сохранена?)"
+        MsgBox "Ошибка F001: не удалось определить папку проекта." & vbCrLf & _
+           "Сохраните файл .xlsm и повторите.", _
+           vbCritical, "Проверка исходных данных"
         CheckSourceFolders = False
         Exit Function
     End If
@@ -148,22 +152,22 @@ Public Function CheckSourceFolders() As Boolean
         cnt = CountFilesByExt(folderFull, CStr(exts(i)))
 
         If i = 3 Then
-            ' 04_Макет — допускается 0 или 1 файл .xlsx
+            ' 04_Макет - допускается 0 или 1 файл .xlsx
             If cnt > 1 Then
                 Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                           " — найдено " & cnt & " файлов " & CStr(exts(i)) & _
+                                           " - найдено " & cnt & " файлов " & CStr(exts(i)) & _
                                            ", ожидается не более 1"
                 result = False
             End If
         Else
-            ' остальные папки — ровно один файл нужного расширения
+            ' остальные папки - ровно один файл нужного расширения
             If cnt = 0 Then
                 Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                           " — файл " & CStr(exts(i)) & " не найден"
+                                           " - файл " & CStr(exts(i)) & " не найден"
                 result = False
             ElseIf cnt > 1 Then
                 Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                           " — найдено " & cnt & " файлов " & CStr(exts(i)) & _
+                                           " - найдено " & cnt & " файлов " & CStr(exts(i)) & _
                                            ", ожидается ровно 1"
                 result = False
             End If
@@ -184,11 +188,11 @@ End Function
 
 ' Возвращает путь к папке указанного шага: ищет в
 ' <корень>\03_Результаты генерации\01_По шагам папку с префиксом
-' "Шаг_<stepNumber>_". Если корень или папка не найдены — возвращает "".
+' "Шаг_<stepNumber>_". Если корень или папка не найдены - возвращает "".
 Public Function GetStepFolder(ByVal stepNumber As String) As String
     Dim root As String
     Dim basePath As String
-    Dim name As String
+    Dim Name As String
     Dim prefix As String
     Dim attrs As Long
 
@@ -197,25 +201,25 @@ Public Function GetStepFolder(ByVal stepNumber As String) As String
     GetStepFolder = ""
 
     root = Mod_Util.GetProjectRoot()
-    If root = "" Then Exit Function             ' корень не задан — пустая строка
+    If root = "" Then Exit Function             ' корень не задан - пустая строка
 
     basePath = root & "\" & FOLDER_STEPS
     If Not FolderExists(basePath) Then Exit Function
 
     prefix = "Шаг_" & stepNumber & "_"
-    name = Dir(basePath & "\" & prefix & "*", vbDirectory)
-    Do While name <> ""
-        ' Dir с vbDirectory может вернуть и файлы — пропускаем только папки
+    Name = Dir(basePath & "\" & prefix & "*", vbDirectory)
+    Do While Name <> ""
+        ' Dir с vbDirectory может вернуть и файлы - пропускаем только папки
         attrs = 0
         On Error Resume Next
-        attrs = GetAttr(basePath & "\" & name)
+        attrs = GetAttr(basePath & "\" & Name)
         If Err.Number <> 0 Then Err.Clear
         On Error GoTo ErrHandler
         If (attrs And vbDirectory) = vbDirectory Then
-            GetStepFolder = basePath & "\" & name
+            GetStepFolder = basePath & "\" & Name
             Exit Function
         End If
-        name = Dir()
+        Name = Dir()
     Loop
     Exit Function
 
@@ -227,7 +231,7 @@ End Function
 
 ' Создаёт папку для шага "Шаг_<stepNumber>_<stepName>" в
 ' <корень>\03_Результаты генерации\01_По шагам и возвращает полный путь.
-' Если папка уже существует — возвращает её путь без пересоздания.
+' Если папка уже существует - возвращает её путь без пересоздания.
 Public Function CreateStepFolder(ByVal stepNumber As String, ByVal stepName As String) As String
     Dim root As String
     Dim basePath As String
@@ -239,8 +243,10 @@ Public Function CreateStepFolder(ByVal stepNumber As String, ByVal stepName As S
 
     root = Mod_Util.GetProjectRoot()
     If root = "" Then
-        Mod_Util.WriteError "F001", "CreateStepFolder: ProjectRoot не задан"
-        MsgBox "Ошибка F001: не задана корневая папка проекта.", vbCritical, "Папки проекта"
+        Mod_Util.WriteError "F001", "CreateStepFolder: папка проекта не определена (книга .xlsm не сохранена?)"
+        MsgBox "Ошибка F001: не удалось определить папку проекта." & vbCrLf & _
+               "Сохраните файл .xlsm и повторите.", _
+               vbCritical, "Папки проекта"
         Exit Function
     End If
 
@@ -263,3 +269,5 @@ ErrHandler:
     Err.Clear
     CreateStepFolder = ""
 End Function
+
+
