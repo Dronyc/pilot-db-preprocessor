@@ -26,6 +26,7 @@ Private NodeCount As Long
 Public Sub BuildFlatStructure()
     Dim ws As Worksheet
     Dim wbSrc As Workbook          ' книга-источник схемы (из фиксированной папки)
+    Dim wbOut As Workbook          ' новая книга для результатов (сохраняется в .xlsx)
     Dim srcWasOpen As Boolean      ' источник уже был открыт до запуска
     Dim path As String             ' папка 01_Схема
     Dim fileName As String         ' единственный xlsx-файл схемы
@@ -86,6 +87,9 @@ Public Sub BuildFlatStructure()
 
     ' ИЗМЕНЕНИЕ 2: путь сохранения результатов
     resultsPath = Mod_Util.GetProjectRoot & "\02_Подготовка схемы"
+
+    ' новая книга для результатов (не засоряем книгу инструмента листами)
+    Set wbOut = Workbooks.Add
 
     '---------- 1. Легенда: цвет -> тип ----------
     Dim legCells(1 To 6) As String
@@ -167,29 +171,33 @@ Public Sub BuildFlatStructure()
         End If
     Next i
 
-    '---------- 4. Вывод листов ----------
-    WriteFlatTable
-    WriteTraceability
-    WriteLog
+    '---------- 4. Вывод листов в новую книгу wbOut ----------
+    WriteFlatTable wbOut
+    WriteTraceability wbOut
+    WriteLog wbOut
 
-    ' ИЗМЕНЕНИЕ 2: результаты формируются как листы текущей книги (структура
-    ' листов и колонки не менялись); сохраняем копию книги в resultsPath.
-    'If Dir(resultsPath, vbDirectory) = "" Then MkDir resultsPath
-    'Dim saveName As String
-    'saveName = resultsPath & "\" & Format$(Now, "yyyy-mm-dd hhnnss") & ".xlsm"
-    'On Error Resume Next
-    'ThisWorkbook.SaveCopyAs saveName
-    'Dim saveErr As Long
-    'saveErr = Err.Number
-    'On Error GoTo 0
-    'If saveErr <> 0 Then
-    '    Mod_Util.WriteError "S005", "Ошибка сохранения результатов: " & Error$(saveErr)
-    '    MsgBox "Ошибка сохранения результатов.", vbExclamation
-    'End If
+    ' ИЗМЕНЕНИЕ 2: результаты сохраняются в отдельный файл .xlsx
+    ' в папке 02_Подготовка схемы (листам Препроцессора больше не засоряются).
+    If Dir(resultsPath, vbDirectory) = "" Then MkDir resultsPath   ' создание папки с проверкой прав
+    Dim saveName As String
+    saveName = resultsPath & "\Плоская_таблица_" & Format$(Now, "yyyy-mm-dd_hhnnss") & ".xlsx"
+    On Error Resume Next
+    Err.Clear
+    wbOut.SaveAs fileName:=saveName, FileFormat:=xlOpenXMLWorkbook
+    Dim saveErr As Long
+    saveErr = Err.Number
+    On Error GoTo Fail
+    If saveErr <> 0 Then
+        Mod_Util.WriteError "S005", "Ошибка сохранения результатов: " & Error$(saveErr)
+        MsgBox "Ошибка сохранения результатов.", vbExclamation
+        wbOut.Close SaveChanges:=False
+        Exit Sub
+    End If
+    wbOut.Close SaveChanges:=False
 
     '---------- 5. Финал ----------
     Mod_Util.WriteLog "BuildFlatStructure: узлов " & NodeCount
-    Mod_Util.WriteLog "Папка результатов: " & resultsPath   ' путь будущего сохранения
+    Mod_Util.WriteLog "BuildFlatStructure: результаты сохранены в " & saveName
     MsgBox "Готово. Узлов: " & NodeCount, vbInformation
 
     ' закрыть источник, если открывали его сами
@@ -271,18 +279,30 @@ Private Function ParentName(ByVal idx As Long) As String
     End If
 End Function
 
-Private Sub GetSheet(ByVal nm As String, ByRef out As Worksheet)
+' Возвращает лист с именем nm в книге wb: если листа нет - создаёт его
+' в конце книги; если есть - очищает через Cells.Clear (без удаления,
+' чтобы Excel не показывал предупреждений об удалении листов).
+Private Sub GetSheet(ByVal wb As Workbook, ByVal nm As String,
+                     ByRef out As Worksheet)
+    Dim ws As Worksheet
     On Error Resume Next
-    ThisWorkbook.Worksheets(nm).Delete
-    On Error GoTo 0
-    Set out = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-    out.Name = nm
+    Set ws = wb.Worksheets(nm)
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
+        ws.Name = nm
+    Else
+        On Error GoTo 0
+        ws.Cells.Clear              ' очистка вместо удаления листа
+    End If
+    Set out = ws
 End Sub
 
 '---------------- Лист 1: целевая плоская таблица ----------------
-Private Sub WriteFlatTable()
+Private Sub WriteFlatTable(ByVal wbOut As Workbook)
     Dim ws As Worksheet
-    GetSheet "Плоская_таблица", ws
+    GetSheet wbOut, "Плоская_таблица", ws
     ws.Range("A1:D1").value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из")
     Dim i As Long, r As Long
     r = 2
@@ -303,9 +323,9 @@ Private Sub WriteFlatTable()
 End Sub
 
 '---------------- Лист 2: трассировка ----------------
-Private Sub WriteTraceability()
+Private Sub WriteTraceability(ByVal wbOut As Workbook)
     Dim ws As Worksheet
-    GetSheet "Трассировка", ws
+    GetSheet wbOut, "Трассировка", ws
     ws.Range("A1:H1").value = Array("№", "Строка", "Столбец", "Уровень", "Отображаемое имя", "Тип", "Цвет RGB", "Родитель")
     Dim i As Long
     For i = 1 To NodeCount
@@ -321,13 +341,16 @@ Private Sub WriteTraceability()
     ws.Columns("A:H").AutoFit
 End Sub
 
-'---------------- Лист 3: журнал аномалий ----------------
-Private Sub WriteLog()
+'---------------- Лист 3: аномалии схемы ----------------
+Private Sub WriteLog(ByVal wbOut As Workbook)
     ' ИЗМЕНЕНИЕ 3: логирование - через Mod_Util (текст сообщения с итогами).
     Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
     Dim ws As Worksheet
-    GetSheet "Аномалии схемы", ws
-    ws.Range("A1:D1").value = Array("Код проблемы", "Элемент", "Родитель", "Описание")
+    GetSheet wbOut, "Аномалии схемы", ws
+    ' Колонки: A - Код проблемы, B - Строка, C - Столбец, D - Уровень,
+    '          E - Тип, F - Элемент, G - Родитель, H - Описание
+    ws.Range("A1:H1").value = Array("Код проблемы", "Строка", "Столбец", _
+                                    "Уровень", "Тип", "Элемент", "Родитель", "Описание")
     Dim r As Long
     r = 2
     Dim i As Long
@@ -338,8 +361,13 @@ Private Sub WriteLog()
 
         ' сирота (не корень и без родителя)
         If Nodes(i).ParentIdx = 0 And nm <> "Объект" Then
-            ws.Cells(r, 1).value = "ORPHAN": ws.Cells(r, 2).value = nm
-            ws.Cells(r, 4).value = "Не найден родитель уровня N-1"
+            ws.Cells(r, 1).value = "ORPHAN"
+            ws.Cells(r, 2).value = Nodes(i).RowIdx
+            ws.Cells(r, 3).value = Nodes(i).ColIdx
+            ws.Cells(r, 4).value = Nodes(i).Level
+            ws.Cells(r, 5).value = Nodes(i).NodeType
+            ws.Cells(r, 6).value = nm
+            ws.Cells(r, 8).value = "Не найден родитель уровня N-1"
             r = r + 1
         End If
 
@@ -349,20 +377,30 @@ Private Sub WriteLog()
         pc = LeadCode(pn)
         If cc <> "" And pc <> "" Then
             If Left(cc, Len(pc) + 1) <> pc & "." Then
-                ws.Cells(r, 1).value = "CODE_PARENT_MISMATCH": ws.Cells(r, 2).value = nm
-                ws.Cells(r, 3).value = pn
-                ws.Cells(r, 4).value = "Код ребенка не продолжает код родителя"
+                ws.Cells(r, 1).value = "CODE_PARENT_MISMATCH"
+                ws.Cells(r, 2).value = Nodes(i).RowIdx
+                ws.Cells(r, 3).value = Nodes(i).ColIdx
+                ws.Cells(r, 4).value = Nodes(i).Level
+                ws.Cells(r, 5).value = Nodes(i).NodeType
+                ws.Cells(r, 6).value = nm
+                ws.Cells(r, 7).value = pn
+                ws.Cells(r, 8).value = "Код ребенка не продолжает код родителя"
                 r = r + 1
             End If
             If CodeDepth(cc) <> CodeDepth(pc) + 1 Then
-                ws.Cells(r, 1).value = "CODE_DEPTH_JUMP": ws.Cells(r, 2).value = nm
-                ws.Cells(r, 3).value = pn
-                ws.Cells(r, 4).value = "Глубина кода ребенка не равна глубине родителя + 1"
+                ws.Cells(r, 1).value = "CODE_DEPTH_JUMP"
+                ws.Cells(r, 2).value = Nodes(i).RowIdx
+                ws.Cells(r, 3).value = Nodes(i).ColIdx
+                ws.Cells(r, 4).value = Nodes(i).Level
+                ws.Cells(r, 5).value = Nodes(i).NodeType
+                ws.Cells(r, 6).value = nm
+                ws.Cells(r, 7).value = pn
+                ws.Cells(r, 8).value = "Глубина кода ребенка не равна глубине родителя + 1"
                 r = r + 1
             End If
         End If
     Next i
-    ws.Columns("A:D").AutoFit
+    ws.Columns("A:H").AutoFit
 End Sub
 
 
