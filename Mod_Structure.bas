@@ -91,6 +91,12 @@ Public Sub BuildFlatStructure()
     ' новая книга для результатов (не засоряем книгу инструмента листами)
     Set wbOut = Workbooks.Add
 
+    ' ЧАСТЬ A: скрыть окно wbOut на время работы
+    Application.ScreenUpdating = False
+    On Error Resume Next
+    wbOut.Windows(1).Visible = False
+    On Error GoTo Fail
+
     '---------- 1. Легенда: цвет -> тип ----------
     Dim legCells(1 To 6) As String
     Dim legNames(1 To 6) As String
@@ -176,6 +182,19 @@ Public Sub BuildFlatStructure()
     WriteTraceability wbOut
     WriteLog wbOut
 
+    ' ЧАСТЬ B: удалить пустой лист Лист1, созданный Workbooks.Add
+    Dim wsEmpty As Worksheet
+    On Error Resume Next
+    Set wsEmpty = wbOut.Worksheets("Лист1")
+    If wsEmpty Is Nothing Then Set wsEmpty = wbOut.Worksheets("Sheet1")
+    On Error GoTo Fail
+    If Not wsEmpty Is Nothing Then
+        Application.DisplayAlerts = False
+        wsEmpty.Delete
+        Application.DisplayAlerts = True
+        Set wsEmpty = Nothing
+    End If
+
     ' ИЗМЕНЕНИЕ 2: результаты сохраняются в отдельный файл .xlsx
     ' в папке 02_Подготовка схемы (листам Препроцессора больше не засоряются).
     If Dir(resultsPath, vbDirectory) = "" Then MkDir resultsPath   ' создание папки с проверкой прав
@@ -190,10 +209,20 @@ Public Sub BuildFlatStructure()
     If saveErr <> 0 Then
         Mod_Util.WriteError "S005", "Ошибка сохранения результатов: " & Error$(saveErr)
         MsgBox "Ошибка сохранения результатов.", vbExclamation
+        ' ЧАСТЬ A: показать окно перед закрытием
+        On Error Resume Next
+        wbOut.Windows(1).Visible = True
+        On Error GoTo Fail
         wbOut.Close SaveChanges:=False
+        Application.ScreenUpdating = True   ' ЧАСТЬ A: восстановить обновление экрана
         Exit Sub
     End If
+    ' ЧАСТЬ A: показать окно перед закрытием
+    On Error Resume Next
+    wbOut.Windows(1).Visible = True
+    On Error GoTo Fail
     wbOut.Close SaveChanges:=False
+    Application.ScreenUpdating = True   ' ЧАСТЬ A: восстановить обновление экрана
 
     '---------- 5. Финал ----------
     Mod_Util.WriteLog "BuildFlatStructure: узлов " & NodeCount
@@ -282,8 +311,7 @@ End Function
 ' Возвращает лист с именем nm в книге wb: если листа нет - создаёт его
 ' в конце книги; если есть - очищает через Cells.Clear (без удаления,
 ' чтобы Excel не показывал предупреждений об удалении листов).
-Private Sub GetSheet(ByVal wb As Workbook, ByVal nm As String,
-                     ByRef out As Worksheet)
+Private Sub GetSheet(ByVal wb As Workbook, ByVal nm As String, ByRef out As Worksheet)
     Dim ws As Worksheet
     On Error Resume Next
     Set ws = wb.Worksheets(nm)
@@ -319,6 +347,7 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         ws.Cells(r, 4).value = Nodes(i).Children
         r = r + 1
     Next i
+    ws.Range("A1:D1").AutoFilter     ' ЧАСТЬ C: автофильтр на плоской таблице
     ws.Columns("A:D").AutoFit
 End Sub
 
@@ -338,6 +367,7 @@ Private Sub WriteTraceability(ByVal wbOut As Workbook)
         ws.Cells(i + 1, 7).value = HexRGB(Nodes(i).ColorCode)
         ws.Cells(i + 1, 8).value = ParentName(Nodes(i).ParentIdx)
     Next i
+    ws.Range("A1:H1").AutoFilter     ' ЧАСТЬ C: автофильтр на трассировке
     ws.Columns("A:H").AutoFit
 End Sub
 
@@ -400,6 +430,7 @@ Private Sub WriteLog(ByVal wbOut As Workbook)
             End If
         End If
     Next i
+    ws.Range("A1:H1").AutoFilter     ' ЧАСТЬ C: автофильтр на листе аномалий
     ws.Columns("A:H").AutoFit
 End Sub
 
