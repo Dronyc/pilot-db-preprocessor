@@ -73,6 +73,14 @@ Public Sub BuildFlatStructure()
     Else
         Set wbSrc = Workbooks.Open(path & "\" & fileName, ReadOnly:=True)
     End If
+    
+    ' === ПРАВКА B: скрыть окно исходной книги, если открывали сами ===
+    If Not srcWasOpen Then
+        On Error Resume Next
+        wbSrc.Windows(1).Visible = False
+        On Error GoTo Fail
+    End If
+    ' === КОНЕЦ ПРАВКИ B ===
 
     ' лист-источник структуры - так же, как раньше работал с SRC_SHEET
     On Error Resume Next
@@ -197,40 +205,72 @@ Public Sub BuildFlatStructure()
 
     ' ИЗМЕНЕНИЕ 2: результаты сохраняются в отдельный файл .xlsx
     ' в папке 02_Подготовка схемы (листам Препроцессора больше не засоряются).
-    If Dir(resultsPath, vbDirectory) = "" Then MkDir resultsPath   ' создание папки с проверкой прав
+    ' 1. Убедиться, что папка есть
+    If Dir(resultsPath, vbDirectory) = "" Then MkDir resultsPath
+    
     Dim saveName As String
     saveName = resultsPath & "\Плоская_таблица_" & Format$(Now, "yyyy-mm-dd_hhnnss") & ".xlsx"
+    
+    ' 2. Показать окно ДО SaveAs (важно — так SaveAs записывает всё корректно)
+    On Error Resume Next
+    wbOut.Windows(1).Visible = True
+    On Error GoTo Fail
+    
+    ' 3. Дать Excel время на отрисовку
+    DoEvents
+    
+    ' 4. Показать пользователю, что идёт сохранение (в строке состояния)
+    Application.StatusBar = "Сохранение результатов: " & saveName
+    
+    ' 5. Само сохранение
     On Error Resume Next
     Err.Clear
     wbOut.SaveAs fileName:=saveName, FileFormat:=xlOpenXMLWorkbook
     Dim saveErr As Long
     saveErr = Err.Number
     On Error GoTo Fail
+    
+    ' 6. Дать Excel время на запись файла
+    Application.Wait Now + TimeValue("00:00:02")
+    DoEvents
+    
+    ' 7. Сбросить строку состояния
+    Application.StatusBar = False
+    
+    ' 8. Обработка ошибки сохранения
     If saveErr <> 0 Then
         Mod_Util.WriteError "S005", "Ошибка сохранения результатов: " & Error$(saveErr)
         MsgBox "Ошибка сохранения результатов.", vbExclamation
-        ' ЧАСТЬ A: показать окно перед закрытием
+    
+        ' Закрыть книгу без сохранения
         On Error Resume Next
-        wbOut.Windows(1).Visible = True
-        On Error GoTo Fail
         wbOut.Close SaveChanges:=False
-        Application.ScreenUpdating = True   ' ЧАСТЬ A: восстановить обновление экрана
+        On Error GoTo Fail
+        Application.ScreenUpdating = True
+        Application.DisplayAlerts = True
         Exit Sub
     End If
-    ' ЧАСТЬ A: показать окно перед закрытием
-    On Error Resume Next
-    wbOut.Windows(1).Visible = True
-    On Error GoTo Fail
+    
+    ' 9. Закрыть книгу (сохранить уже не надо — только что сохранили)
     wbOut.Close SaveChanges:=False
-    Application.ScreenUpdating = True   ' ЧАСТЬ A: восстановить обновление экрана
+    
+    ' 10. Восстановить экран
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
 
     '---------- 5. Финал ----------
     Mod_Util.WriteLog "BuildFlatStructure: узлов " & NodeCount
     Mod_Util.WriteLog "BuildFlatStructure: результаты сохранены в " & saveName
     MsgBox "Готово. Узлов: " & NodeCount, vbInformation
 
-    ' закрыть источник, если открывали его сами
-    If Not srcWasOpen And Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
+    ' === ПРАВКА B: закрыть источник, если открывали его сами ===
+    If Not srcWasOpen And Not wbSrc Is Nothing Then
+        On Error Resume Next
+        wbSrc.Windows(1).Visible = True    ' вернуть видимость перед закрытием
+        On Error GoTo Fail
+        wbSrc.Close SaveChanges:=False
+    End If
+    ' === КОНЕЦ ПРАВКИ B ===
     Exit Sub
 
 '---------- Обработка ошибок (изменения 1 и 2) ----------
@@ -347,7 +387,29 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         ws.Cells(r, 4).value = Nodes(i).Children
         r = r + 1
     Next i
-    ws.Range("A1:D1").AutoFilter     ' ЧАСТЬ C: автофильтр на плоской таблице
+    
+    ' Создаём Умную таблицу
+    Dim loTable As ListObject
+    Dim lastRowData As Long
+    lastRowData = r - 1    ' r — это следующая свободная строка после цикла
+    
+    If lastRowData >= 2 Then    ' таблица не пустая
+        ' Удалить старую таблицу, если есть (при повторном запуске)
+        On Error Resume Next
+        If ws.ListObjects.Count > 0 Then
+            ws.ListObjects(1).Delete
+        End If
+        On Error GoTo Fail
+    
+        ' Создать новую таблицу
+        Set loTable = ws.ListObjects.Add( _
+            SourceType:=xlSrcRange, _
+            Source:=ws.Range("A1:D" & lastRowData), _
+            XlListObjectHasHeaders:=xlYes)
+        loTable.Name = "tblFlatStructure"
+        loTable.TableStyle = "TableStyleMedium2"
+    End If
+    
     ws.Columns("A:D").AutoFit
 End Sub
 
@@ -367,7 +429,25 @@ Private Sub WriteTraceability(ByVal wbOut As Workbook)
         ws.Cells(i + 1, 7).value = HexRGB(Nodes(i).ColorCode)
         ws.Cells(i + 1, 8).value = ParentName(Nodes(i).ParentIdx)
     Next i
-    ws.Range("A1:H1").AutoFilter     ' ЧАСТЬ C: автофильтр на трассировке
+    
+    ' Создаём Умную таблицу
+    Dim loTrace As ListObject
+    Dim lastRowTrace As Long
+    lastRowTrace = NodeCount + 1
+    
+    If lastRowTrace >= 2 Then
+        On Error Resume Next
+        If ws.ListObjects.Count > 0 Then ws.ListObjects(1).Delete
+        On Error GoTo Fail
+    
+        Set loTrace = ws.ListObjects.Add( _
+            SourceType:=xlSrcRange, _
+            Source:=ws.Range("A1:H" & lastRowTrace), _
+            XlListObjectHasHeaders:=xlYes)
+        loTrace.Name = "tblTraceability"
+        loTrace.TableStyle = "TableStyleMedium4"
+    End If
+    
     ws.Columns("A:H").AutoFit
 End Sub
 
@@ -430,7 +510,25 @@ Private Sub WriteLog(ByVal wbOut As Workbook)
             End If
         End If
     Next i
-    ws.Range("A1:H1").AutoFilter     ' ЧАСТЬ C: автофильтр на листе аномалий
+    
+    ' Создаём Умную таблицу
+    Dim loLog As ListObject
+    Dim lastRowLog As Long
+    lastRowLog = r - 1
+    
+    If lastRowLog >= 2 Then
+        On Error Resume Next
+        If ws.ListObjects.Count > 0 Then ws.ListObjects(1).Delete
+        On Error GoTo Fail
+    
+        Set loLog = ws.ListObjects.Add( _
+            SourceType:=xlSrcRange, _
+            Source:=ws.Range("A1:H" & lastRowLog), _
+            XlListObjectHasHeaders:=xlYes)
+        loLog.Name = "tblAnomalies"
+        loLog.TableStyle = "TableStyleMedium6"
+    End If
+    
     ws.Columns("A:H").AutoFit
 End Sub
 
