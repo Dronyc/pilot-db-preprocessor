@@ -185,6 +185,10 @@ Public Sub BuildFlatStructure()
         End If
     Next i
 
+    ' ЧАСТЬ B: обработка ярлыков - перенос связей к целевым объектам
+    ' и пометка строк ярлыков как удаляемых (ДО вывода плоской таблицы)
+    Call ProcessShortcuts
+
     '---------- 4. Вывод листов в новую книгу wbOut ----------
     WriteFlatTable wbOut
     WriteTraceability wbOut
@@ -348,6 +352,76 @@ Private Function ParentName(ByVal idx As Long) As String
     End If
 End Function
 
+'---------------- Обработка ярлыков ----------------
+' В схеме узлы с типом "Ярлык" ссылаются на другие узлы (по совпадению
+' поля Name), но в плоской таблице их быть не должно.
+' Процедура переносит связи от ярлыков к их целевым объектам и помечает
+' строки ярлыков как удаляемые (NodeType = "УДАЛЕН"), чтобы WriteFlatTable
+' исключил их из итоговой таблицы.
+' Шаги:
+'   1. Пройти по массиву Nodes от 1 до NodeCount.
+'   2. Найти узлы с NodeType = "Ярлык".
+'   3. Для каждого ярлыка найти целевой узел (то же Name, но не "Ярлык");
+'      если цель не найдена - пропустить (ошибка схемы, обработается в WriteLog).
+'   4. Если у ярлыка есть родитель: дописать родителя ярлыка в Children
+'      целевого узла и имя ярлыка в Children родителя ярлыка (без дублей).
+'   5. Пометить узел ярлыка как удаляемый (NodeType = "УДАЛЕН").
+Private Sub ProcessShortcuts()
+    Dim i As Long, j As Long
+    On Error GoTo ErrHandler
+
+    For i = 1 To NodeCount
+        If Nodes(i).NodeType = "Ярлык" Then
+            '--- поиск целевого узла: Name совпадает, но это не Ярлык ---
+            Dim targetIdx As Long
+            targetIdx = 0
+            For j = 1 To NodeCount
+                If j <> i Then
+                    If Nodes(j).Name = Nodes(i).Name And Nodes(j).NodeType <> "Ярлык" Then
+                        targetIdx = j
+                        Exit For
+                    End If
+                End If
+            Next j
+            ' цель не найдена - пропускаем (это ошибка схемы,WriteLog её зафиксирует)
+            If targetIdx <> 0 Then
+                '--- родитель ярлыка ---
+                Dim parentIdx As Long
+                Dim sParent As String
+                parentIdx = Nodes(i).ParentIdx
+                sParent = ParentName(parentIdx)
+                If Len(sParent) > 0 Then
+                    ' дописать родителя ярлыка в Children целевого узла (если ещё нет)
+                    If InStr(1, ";" & Nodes(targetIdx).Children & ";", ";" & sParent & ";") = 0 Then
+                        If Len(Nodes(targetIdx).Children) = 0 Then
+                            Nodes(targetIdx).Children = sParent
+                        Else
+                            Nodes(targetIdx).Children = Nodes(targetIdx).Children & "; " & sParent
+                        End If
+                    End If
+                    ' дописать имя ярлыка в Children родителя ярлыка (если ещё нет)
+                    If InStr(1, ";" & Nodes(parentIdx).Children & ";", ";" & Nodes(i).Name & ";") = 0 Then
+                        If Len(Nodes(parentIdx).Children) = 0 Then
+                            Nodes(parentIdx).Children = Nodes(i).Name
+                        Else
+                            Nodes(parentIdx).Children = Nodes(parentIdx).Children & "; " & Nodes(i).Name
+                        End If
+                    End If
+                End If
+                '--- пометить ярлык как удаляемый ---
+                Nodes(i).NodeType = "УДАЛЕН"
+            End If
+        End If
+    Next i
+    Exit Sub
+
+ErrHandler:                                ' защита от внештатных ситуаций
+    Dim errDescPS As String
+    errDescPS = Err.Description
+    Err.Clear
+    Mod_Util.WriteError "S006", "ProcessShortcuts: " & errDescPS
+End Sub
+
 ' Возвращает лист с именем nm в книге wb: если листа нет - создаёт его
 ' в конце книги; если есть - очищает через Cells.Clear (без удаления,
 ' чтобы Excel не показывал предупреждений об удалении листов).
@@ -412,6 +486,9 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
     Dim i As Long, r As Long
     r = 2
     For i = 1 To NodeCount
+        ' ЧАСТЬ C: исключаем ярлыки (помеченные ProcessShortcuts) из вывода;
+        ' счётчик строк r увеличивается только для валидных узлов
+        If Nodes(i).NodeType = "УДАЛЕН" Then GoTo NextNode
         Dim parentCell As String
         If Nodes(i).Name = "Объект" Then
             parentCell = "projectfolder"
@@ -423,6 +500,7 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         ws.Cells(r, 3).value = parentCell
         ws.Cells(r, 4).value = Nodes(i).Children
         r = r + 1
+NextNode:
     Next i
     
     ' Создаём Умную таблицу (вместо автофильтра Range.AutoFilter)
