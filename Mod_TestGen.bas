@@ -2,8 +2,8 @@ Attribute VB_Name = "Mod_TestGen"
 Option Explicit
 
 ' ============================================================
-' ÃÅÍÅÐÀÒÎÐ ÒÅÑÒÎÂÎÃÎ ÔÀÉËÀ (ÒÅÑÒÎÂÛÉ ÏÎËÈÃÎÍ)
-' Ñîçäà¸ò Ñõåìó ñ 4 òèïàìè îøèáîê äëÿ ïðîâåðêè âàëèäàòîðà.
+' ГЕНЕРАТОР ТЕСТОВОГО ФАЙЛА (ТЕСТОВЫЙ ПОЛИГОН)
+' Создаёт Схему с 4 типами ошибок для проверки валидатора.
 ' ============================================================
 Public Sub GenerateTestSchema()
     Dim wb As Workbook
@@ -15,118 +15,91 @@ Public Sub GenerateTestSchema()
     
     Set wb = Workbooks.Add
     Set ws = wb.Sheets(1)
-    ws.Name = "Ñòðóêòóðà"
+    ws.Name = "Структура"
     
-    ' --- 1. Ëåãåíäà (A1:C3) ---
-    ' Çàäà¸ì áàçîâûå öâåòà, êàê â ðåàëüíîé ñõåìå (èëè ëþáûå äðóãèå)
-    ' Ïðîåêò (æ¸ëòûé)
-    ws.Range("B1").value = "Ïðîåêò"
-    ws.Range("C1").Interior.Color = RGB(255, 230, 153)
-    ' ECM-äîêóìåíò (çåë¸íûé)
-    ws.Range("B2").value = "ECM-äîêóìåíò"
-    ws.Range("C2").Interior.Color = RGB(198, 224, 180)
-    ' Ïàïêà (æ¸ëòûé, êàê ïðîåêò, èëè äðóãîé)
-    ws.Range("B3").value = "Ïàïêà"
-    ws.Range("C3").Interior.Color = RGB(255, 230, 153)
-    ' ßðëûê (ñåðûé)
-    ' Äîáàâèì â B4:C4, òàê êàê â Mod_Structure LAST_COL = 30 è èùåò òîëüêî 6 ÿ÷ååê,
-    ' íî äëÿ òåñòà íàì õâàòèò è ýòèõ. Â ðåàëüíîé ñõåìå ÿðëûê ìîæåò áûòü â ëåãåíäå.
-    ' ×òîáû Mod_Structure åãî óâèäåë, íóæíî ïðîïèñàòü â B1:C3.
-    ' Ñäåëàåì ßðëûê âìåñòî Ïàïêè â C3? Íåò, ëó÷øå ðàñøèðèì ëåãåíäó.
-    ' Â êîäå Mod_Structure ÷èòàþòñÿ ÿ÷åéêè: B1,C1, B2,C2, B3,C3.
-    ' Ïî óìîë÷àíèþ òàì 6 òèïîâ. Ñäåëàåì òàê:
-    ' B1: Ïðîåêò, C1: Ïàïêà
-    ' B2: ECM-äîêóìåíò, C2: ßðëûê
-    ' B3: Äîêóìåíò, C3: Ïàïêà ÖÈÌ
+    ' --- 1. Легенда (A1:B6) ---
+    ' ВАЖНО: В Mod_Structure названия берутся из колонки B (B1, B2, B3),
+    ' а цвета — из колонки C (C1, C2, C3).
+    ' Но в реальной схеме часто бывает до 6 типов.
+    ' Мы заполним B1:B6 названиями, а C1:C6 - цветами.
     
-    ' Ïåðåïèøåì ëåãåíäó ïîä 6 òèïîâ:
-    ' 1: Ïðîåêò (ðîçîâûé)
-    ws.Range("B1").value = "Ïðîåêò"
-    ws.Range("C1").Interior.Color = RGB(248, 203, 173)
-    ' 2: Ïàïêà (æ¸ëòûé)
-    ws.Range("B2").value = "Ïàïêà"
-    ws.Range("C2").Interior.Color = RGB(255, 230, 153)
-    ' 3: ECM-äîêóìåíò (çåë¸íûé)
-    ws.Range("B3").value = "ECM-äîêóìåíò"
-    ws.Range("C3").Interior.Color = RGB(198, 224, 180)
-    ' 4: Äîêóìåíò (ñèíèé)
-    ws.Range("B4").value = "Äîêóìåíò"
-    ws.Range("C4").Interior.Color = RGB(180, 198, 231)
-    ' 5: Ïàïêà ÖÈÌ (ôèîëåòîâûé)
-    ws.Range("B5").value = "Ïàïêà ÖÈÌ"
-    ws.Range("C5").Interior.Color = RGB(220, 197, 237)
-    ' 6: ßðëûê (ñåðûé)
-    ws.Range("B6").value = "ßðëûê"
-    ws.Range("C6").Interior.Color = RGB(219, 219, 219)
+    ' Задаём названия (B) и цвета (C)
+    ws.Range("B1").value = "Проект":       ws.Range("C1").Interior.Color = RGB(248, 203, 173) ' розовый
+    ws.Range("B2").value = "Папка":        ws.Range("C2").Interior.Color = RGB(255, 230, 153) ' жёлтый
+    ws.Range("B3").value = "ECM-документ": ws.Range("C3").Interior.Color = RGB(198, 224, 180) ' зелёный
+    ws.Range("B4").value = "Документ":     ws.Range("C4").Interior.Color = RGB(180, 198, 231) ' синий
+    ws.Range("B5").value = "Папка ЦИМ":    ws.Range("C5").Interior.Color = RGB(220, 197, 237) ' фиолетовый
+    ws.Range("B6").value = "Ярлык":        ws.Range("C6").Interior.Color = RGB(219, 219, 219) ' серый
     
-    ' --- 2. Äàííûå (ñ ñòðîêè 8) ---
+    ' --- 2. Данные (с строки 8) ---
     Dim r As Long
     r = 8
     
-    ' 1. Êîðåíü (áåç îøèáîê)
-    ws.Cells(r, 1).value = "Îáúåêò"
-    ws.Cells(r, 1).Interior.Color = ws.Range("C1").Interior.Color ' Ïðîåêò
+    ' Строка 8: Корень (без ошибок). Уровень 1 (Столбец A)
+    ws.Cells(r, 1).value = "Объект"
+    ws.Cells(r, 1).Interior.Color = ws.Range("C1").Interior.Color ' Проект
     r = r + 1
     
-    ' 2. Íîðìàëüíàÿ ïàïêà
-    ws.Cells(r, 2).value = "1 Íîðìàëüíàÿ ïàïêà"
-    ws.Cells(r, 2).Interior.Color = ws.Range("C2").Interior.Color ' Ïàïêà
+    ' Строка 9: Нормальная папка. Уровень 2 (Столбец B)
+    ws.Cells(r, 2).value = "1 Нормальная папка"
+    ws.Cells(r, 2).Interior.Color = ws.Range("C2").Interior.Color ' Папка
     r = r + 1
     
-    ' 3. Íîðìàëüíûé ECM-äîêóìåíò
-    ws.Cells(r, 3).value = "1.1 Êîððåêòíûé äîêóìåíò"
+    ' Строка 10: Нормальный ECM-документ. Уровень 3 (Столбец C)
+    ws.Cells(r, 3).value = "1.1 Корректный документ"
     ws.Cells(r, 3).Interior.Color = ws.Range("C3").Interior.Color ' ECM
     r = r + 1
     
-    ' 4. ÎØÈÁÊÀ CODE_PARENT_MISMATCH (êîä ðåáåíêà íå ïðîäîëæàåò ðîäèòåëÿ)
-    ws.Cells(r, 2).value = "2 Ïàïêà ñ îøèáêîé êîäà"
+    ' --- ОШИБКА 1: CODE_PARENT_MISMATCH ---
+    ' Код ребенка "3.1" не продолжает код родителя "2"
+    ws.Cells(r, 2).value = "2 Папка с ошибкой кода"
     ws.Cells(r, 2).Interior.Color = ws.Range("C2").Interior.Color
     r = r + 1
-    ws.Cells(r, 3).value = "3.1 Íåâåðíûé êîä"
+    ws.Cells(r, 3).value = "3.1 Неверный код"
     ws.Cells(r, 3).Interior.Color = ws.Range("C3").Interior.Color
     r = r + 1
     
-    ' 5. ÎØÈÁÊÀ CODE_DEPTH_JUMP (ñêà÷îê ãëóáèíû)
-    ws.Cells(r, 2).value = "3 Ïàïêà äëÿ ñêà÷êà"
+    ' --- ОШИБКА 2: CODE_DEPTH_JUMP ---
+    ' Родитель на 2 уровне, ребенок сразу на 4-м.
+    ws.Cells(r, 2).value = "3 Папка для скачка"
     ws.Cells(r, 2).Interior.Color = ws.Range("C2").Interior.Color
     r = r + 1
-    ws.Cells(r, 3).value = "3.1 Ïðîìåæóòî÷íàÿ"
-    ws.Cells(r, 3).Interior.Color = ws.Range("C2").Interior.Color
-    r = r + 1
-    ' Ïðîïóñêàåì óðîâåíü C (4) è ïèøåì ñðàçó íà D (5)
-    ws.Cells(r, 4).value = "3.1.1.1 Ñêà÷îê"
+    ' Пропускаем уровень 3 (Столбец C) и пишем на 4 (Столбец D)
+    ws.Cells(r, 4).value = "3.1.1.1 Скачок"
     ws.Cells(r, 4).Interior.Color = ws.Range("C3").Interior.Color
     r = r + 1
     
-    ' 6. ÎØÈÁÊÀ ORPHAN (ñèðîòà, íåò ðîäèòåëÿ)
-    ' Ïèøåì ñðàçó íà 3 óðîâåíü, ïðîïóñòèâ 2
-    ws.Cells(r, 3).value = "4.1 Ñèðîòà"
+    ' --- ОШИБКА 3: ORPHAN (Сирота) ---
+    ' Важно: чтобы алгоритм не нашел родителя, столбец B (уровень 2)
+    ' в этой строке должен быть ПУСТ. Также нужно очистить "память"
+    ' предыдущего уровня. Для этого вставим пустую строку или
+    ' просто оставим B пустым.
+    ws.Cells(r, 2).value = "" ' Пусто в уровне 2
+    ws.Cells(r, 3).value = "4.1 Сирота"
     ws.Cells(r, 3).Interior.Color = ws.Range("C3").Interior.Color
     r = r + 1
     
-    ' 7. ÎØÈÁÊÀ SHORTCUT_NO_TARGET (ÿðëûê áåç öåëè)
-    ws.Cells(r, 2).value = "4 Ïàïêà äëÿ ÿðëûêà"
+    ' --- ОШИБКА 4: SHORTCUT_NO_TARGET (Ярлык без цели) ---
+    ws.Cells(r, 2).value = "4 Папка для ярлыка"
     ws.Cells(r, 2).Interior.Color = ws.Range("C2").Interior.Color
     r = r + 1
-    ws.Cells(r, 3).value = "Íåñóùåñòâóþùèé äîêóìåíò"
-    ws.Cells(r, 3).Interior.Color = ws.Range("C6").Interior.Color ' ßðëûê
+    ws.Cells(r, 3).value = "Несуществующий документ"
+    ws.Cells(r, 3).Interior.Color = ws.Range("C6").Interior.Color ' Ярлык
     
-    ' --- 3. Ñîõðàíåíèå ---
-    savePath = Mod_Util.GetProjectRoot & "\01_Èñõîäíûå äàííûå\01_Ñõåìà\Òåñò_Îøèáîê.xlsx"
+    ' --- 3. Сохранение ---
+    savePath = Mod_Util.GetProjectRoot & "\01_Исходные данные\01_Схема\Тест_Ошибок.xlsx"
     
-    ' Óäàëèòü ñòàðûé ôàéë, åñëè åñòü
     On Error Resume Next
     Kill savePath
     On Error GoTo 0
     
-    ' Ñîõðàíÿåì
     wb.SaveAs fileName:=savePath, FileFormat:=xlOpenXMLWorkbook
     wb.Close SaveChanges:=False
     
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
     
-    MsgBox "Òåñòîâûé ôàéë ñîçäàí:" & vbCrLf & savePath & vbCrLf & vbCrLf & _
-           "Â í¸ì 4 îøèáêè: CODE_PARENT_MISMATCH, CODE_DEPTH_JUMP, ORPHAN, SHORTCUT_NO_TARGET.", vbInformation
+    MsgBox "Тестовый файл создан:" & vbCrLf & savePath & vbCrLf & vbCrLf & _
+           "В нём 4 ошибки: CODE_PARENT_MISMATCH, CODE_DEPTH_JUMP, ORPHAN, SHORTCUT_NO_TARGET.", vbInformation
 End Sub
 
