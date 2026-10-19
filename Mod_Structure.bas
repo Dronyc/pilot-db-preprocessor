@@ -367,6 +367,43 @@ Private Sub GetSheet(ByVal wb As Workbook, ByVal nm As String, ByRef out As Work
     Set out = ws
 End Sub
 
+'---------------- Вспомогательная процедура: Умная таблица ----------------
+' Создаёт на листе ws Умную таблицу (ListObject) поверх диапазона rng.
+' При повторном запуске старая таблица с таким же именем сначала удаляется,
+' чтобы не было конфликта имён. Автофильтры (Range.AutoFilter) больше не
+' используются: фильтры Умной таблицы не уезжают при прокрутке,
+' а оформление задаётся через TableStyle.
+Private Sub CreateSmartTable(ByVal ws As Worksheet, _
+                              ByVal rng As Range, _
+                              ByVal tableName As String, _
+                              ByVal styleName As String)
+    Dim lo As ListObject
+    Dim newLo As ListObject
+
+    On Error Resume Next
+
+    ' Удалить старую таблицу с таким же именем (при повторном запуске)
+    For Each lo In ws.ListObjects
+        If lo.Name = tableName Then
+            lo.Delete
+            Exit For
+        End If
+    Next lo
+
+    ' Создать новую таблицу
+    Set newLo = ws.ListObjects.Add( _
+        SourceType:=xlSrcRange, _
+        Source:=rng, _
+        XlListObjectHasHeaders:=xlYes)
+
+    If Not newLo Is Nothing Then
+        newLo.Name = tableName
+        newLo.TableStyle = styleName
+    End If
+
+    On Error GoTo 0
+End Sub
+
 '---------------- Лист 1: целевая плоская таблица ----------------
 Private Sub WriteFlatTable(ByVal wbOut As Workbook)
     Dim ws As Worksheet
@@ -388,26 +425,13 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         r = r + 1
     Next i
     
-    ' Создаём Умную таблицу
-    Dim loTable As ListObject
+    ' Создаём Умную таблицу (вместо автофильтра Range.AutoFilter)
     Dim lastRowData As Long
-    lastRowData = r - 1    ' r — это следующая свободная строка после цикла
+    lastRowData = r - 1    ' r — следующая свободная строка после цикла заполнения
     
-    If lastRowData >= 2 Then    ' таблица не пустая
-        ' Удалить старую таблицу, если есть (при повторном запуске)
-        On Error Resume Next
-        If ws.ListObjects.Count > 0 Then
-            ws.ListObjects(1).Delete
-        End If
-        On Error GoTo Fail
-    
-        ' Создать новую таблицу
-        Set loTable = ws.ListObjects.Add( _
-            SourceType:=xlSrcRange, _
-            Source:=ws.Range("A1:D" & lastRowData), _
-            XlListObjectHasHeaders:=xlYes)
-        loTable.Name = "tblFlatStructure"
-        loTable.TableStyle = "TableStyleMedium2"
+    If lastRowData >= 2 Then
+        Call CreateSmartTable(ws, ws.Range("A1:D" & lastRowData), _
+                              "tblFlatStructure", "TableStyleMedium2")
     End If
     
     ws.Columns("A:D").AutoFit
@@ -430,22 +454,13 @@ Private Sub WriteTraceability(ByVal wbOut As Workbook)
         ws.Cells(i + 1, 8).value = ParentName(Nodes(i).ParentIdx)
     Next i
     
-    ' Создаём Умную таблицу
-    Dim loTrace As ListObject
+    ' Создаём Умную таблицу (вместо автофильтра Range.AutoFilter)
     Dim lastRowTrace As Long
     lastRowTrace = NodeCount + 1
     
     If lastRowTrace >= 2 Then
-        On Error Resume Next
-        If ws.ListObjects.Count > 0 Then ws.ListObjects(1).Delete
-        On Error GoTo Fail
-    
-        Set loTrace = ws.ListObjects.Add( _
-            SourceType:=xlSrcRange, _
-            Source:=ws.Range("A1:H" & lastRowTrace), _
-            XlListObjectHasHeaders:=xlYes)
-        loTrace.Name = "tblTraceability"
-        loTrace.TableStyle = "TableStyleMedium4"
+        Call CreateSmartTable(ws, ws.Range("A1:H" & lastRowTrace), _
+                              "tblTraceability", "TableStyleMedium4")
     End If
     
     ws.Columns("A:H").AutoFit
@@ -511,22 +526,13 @@ Private Sub WriteLog(ByVal wbOut As Workbook)
         End If
     Next i
     
-    ' Создаём Умную таблицу
-    Dim loLog As ListObject
+    ' Создаём Умную таблицу (вместо автофильтра Range.AutoFilter)
     Dim lastRowLog As Long
-    lastRowLog = r - 1
+    lastRowLog = r - 1    ' r — следующая свободная строка после цикла заполнения
     
     If lastRowLog >= 2 Then
-        On Error Resume Next
-        If ws.ListObjects.Count > 0 Then ws.ListObjects(1).Delete
-        On Error GoTo Fail
-    
-        Set loLog = ws.ListObjects.Add( _
-            SourceType:=xlSrcRange, _
-            Source:=ws.Range("A1:H" & lastRowLog), _
-            XlListObjectHasHeaders:=xlYes)
-        loLog.Name = "tblAnomalies"
-        loLog.TableStyle = "TableStyleMedium6"
+        Call CreateSmartTable(ws, ws.Range("A1:H" & lastRowLog), _
+                              "tblAnomalies", "TableStyleMedium6")
     End If
     
     ws.Columns("A:H").AutoFit
