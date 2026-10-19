@@ -15,13 +15,17 @@ Private Type NodeRec
     Level      As Long
     RowIdx     As Long
     ColIdx     As Long
-    ParentIdx  As Long
+    parentIdx  As Long
     ColorCode  As Long
     Children   As String
 End Type
 
 Private Nodes() As NodeRec
 Private NodeCount As Long
+
+' Словарь проблемных узлов: имя узла -> "E" (ошибка) / "W" (предупреждение)
+' Заполняется в ProcessShortcuts и WriteLog. Используется в WriteFlatTable для подсветки.
+Private problemsDict As Object
 
 Public Sub BuildFlatStructure()
     Dim ws As Worksheet
@@ -151,15 +155,15 @@ Public Sub BuildFlatStructure()
                             .ColorCode = colr
                             .Children = ""
                             If c = 1 Then
-                                .ParentIdx = 0
+                                .parentIdx = 0
                             Else
-                                .ParentIdx = lastAtLevel(c - 1)
+                                .parentIdx = lastAtLevel(c - 1)
                             End If
                         End With
                         ' спец-правило: корень
                         If Nodes(NodeCount).Name = "Объект" Then
                             Nodes(NodeCount).NodeType = "Папка"
-                            Nodes(NodeCount).ParentIdx = 0
+                            Nodes(NodeCount).parentIdx = 0
                         End If
                         lastAtLevel(c) = NodeCount
                         Dim k As Long
@@ -174,9 +178,9 @@ Public Sub BuildFlatStructure()
 
     '---------- 3. Агрегация детей ----------
     For i = 1 To NodeCount
-        If Nodes(i).ParentIdx > 0 Then
+        If Nodes(i).parentIdx > 0 Then
             Dim p As Long
-            p = Nodes(i).ParentIdx
+            p = Nodes(i).parentIdx
             If Len(Nodes(p).Children) = 0 Then
                 Nodes(p).Children = Nodes(i).Name
             Else
@@ -184,15 +188,20 @@ Public Sub BuildFlatStructure()
             End If
         End If
     Next i
+    
+    ' Инициализация словаря проблем (для подсветки в WriteFlatTable)
+    Set problemsDict = CreateObject("Scripting.Dictionary")
 
     ' ЧАСТЬ B: обработка ярлыков - перенос связей к целевым объектам
     ' и пометка строк ярлыков как удаляемых (ДО вывода плоской таблицы)
     Call ProcessShortcuts
 
     '---------- 4. Вывод листов в новую книгу wbOut ----------
+    ' ВАЖНО: WriteLog вызывается ПЕРЕД WriteFlatTable, чтобы собрать все ошибки
+    ' в problemsDict до того, как WriteFlatTable начнет красить строки.
+    WriteLog wbOut
     WriteFlatTable wbOut
     WriteTraceability wbOut
-    WriteLog wbOut
 
     ' ЧАСТЬ B: удалить пустой лист Лист1, созданный Workbooks.Add
     Dim wsEmpty As Worksheet
@@ -383,15 +392,23 @@ Private Sub ProcessShortcuts()
                     End If
                 End If
             Next j
-            ' цель не найдена - пропускаем (это ошибка схемы,WriteLog её зафиксирует)
-            If targetIdx <> 0 Then
-                '--- родитель ярлыка ---
+            
+            ' цель НЕ найдена -> фиксируем ошибку
+            If targetIdx = 0 Then
+                Nodes(i).NodeType = "ОШИБКА_ЯРЛЫКА"
+                ' Зафиксировать в словаре проблем
+                If Not problemsDict.Exists(Nodes(i).Name) Then
+                    problemsDict.Add Nodes(i).Name, "E"   ' E = ошибка
+                End If
+            Else
+                '--- цель найдена: переносим связи ---
                 Dim parentIdx As Long
                 Dim sParent As String
-                parentIdx = Nodes(i).ParentIdx
+                parentIdx = Nodes(i).parentIdx
                 sParent = ParentName(parentIdx)
+                
                 If Len(sParent) > 0 Then
-                    ' дописать родителя ярлыка в Children целевого узла (если ещё нет)
+                    ' 1. Дописать родителя ярлыка в Children целевого узла
                     If InStr(1, ";" & Nodes(targetIdx).Children & ";", ";" & sParent & ";") = 0 Then
                         If Len(Nodes(targetIdx).Children) = 0 Then
                             Nodes(targetIdx).Children = sParent
@@ -399,7 +416,8 @@ Private Sub ProcessShortcuts()
                             Nodes(targetIdx).Children = Nodes(targetIdx).Children & "; " & sParent
                         End If
                     End If
-                    ' дописать имя ярлыка в Children родителя ярлыка (если ещё нет)
+                    
+                    ' 2. Дописать имя ярлыка в Children родителя ярлыка
                     If InStr(1, ";" & Nodes(parentIdx).Children & ";", ";" & Nodes(i).Name & ";") = 0 Then
                         If Len(Nodes(parentIdx).Children) = 0 Then
                             Nodes(parentIdx).Children = Nodes(i).Name
@@ -408,20 +426,19 @@ Private Sub ProcessShortcuts()
                         End If
                     End If
                 End If
-                '--- пометить ярлык как удаляемый ---
+                ' успешно обработанный ярлык - на удаление
                 Nodes(i).NodeType = "УДАЛЕН"
             End If
         End If
     Next i
     Exit Sub
 
-ErrHandler:                                ' защита от внештатных ситуаций
+ErrHandler:
     Dim errDescPS As String
     errDescPS = Err.Description
     Err.Clear
     Mod_Util.WriteError "S006", "ProcessShortcuts: " & errDescPS
 End Sub
-
 ' Возвращает лист с именем nm в книге wb: если листа нет - создаёт его
 ' в конце книги; если есть - очищает через Cells.Clear (без удаления,
 ' чтобы Excel не показывал предупреждений об удалении листов).
@@ -484,28 +501,54 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
     GetSheet wbOut, "Плоская_таблица", ws
     ws.Range("A1:D1").value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из")
     Dim i As Long, r As Long
+    Dim hasError As Boolean
+    Dim isShortcut As Boolean
+    
     r = 2
     For i = 1 To NodeCount
-        ' ЧАСТЬ C: исключаем ярлыки (помеченные ProcessShortcuts) из вывода;
-        ' счётчик строк r увеличивается только для валидных узлов
+        ' Пропускаем успешно обработанные ярлыки
         If Nodes(i).NodeType = "УДАЛЕН" Then GoTo NextNode
+        
+        hasError = False
+        isShortcut = False
+        
+        ' Если это ярлык без цели - это ошибка
+        If Nodes(i).NodeType = "ОШИБКА_ЯРЛЫКА" Then
+            hasError = True
+            isShortcut = True
+        End If
+        
+        ' Проверяем словарь проблем (добавлено в WriteLog и ProcessShortcuts)
+        If problemsDict.Exists(Nodes(i).Name) Then
+            hasError = True
+        End If
+        
         Dim parentCell As String
         If Nodes(i).Name = "Объект" Then
             parentCell = "projectfolder"
         Else
-            parentCell = ParentName(Nodes(i).ParentIdx)
+            parentCell = ParentName(Nodes(i).parentIdx)
         End If
+        
         ws.Cells(r, 1).value = Nodes(i).Name
-        ws.Cells(r, 2).value = Nodes(i).NodeType
+        ' Возвращаем пользователю исходное имя типа, а не служебное
+        ws.Cells(r, 2).value = IIf(isShortcut, "Ярлык", Nodes(i).NodeType)
         ws.Cells(r, 3).value = parentCell
         ws.Cells(r, 4).value = Nodes(i).Children
+        
+        ' Подсветка проблемной строки
+        If hasError Then
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, 4)).Interior.Color = RGB(255, 199, 206)
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, 4)).Font.Color = RGB(156, 0, 6)
+        End If
+        
         r = r + 1
 NextNode:
     Next i
     
-    ' Создаём Умную таблицу (вместо автофильтра Range.AutoFilter)
+    ' Создаём Умную таблицу
     Dim lastRowData As Long
-    lastRowData = r - 1    ' r — следующая свободная строка после цикла заполнения
+    lastRowData = r - 1
     
     If lastRowData >= 2 Then
         Call CreateSmartTable(ws, ws.Range("A1:D" & lastRowData), _
@@ -514,7 +557,6 @@ NextNode:
     
     ws.Columns("A:D").AutoFit
 End Sub
-
 '---------------- Лист 2: трассировка ----------------
 Private Sub WriteTraceability(ByVal wbOut As Workbook)
     Dim ws As Worksheet
@@ -529,7 +571,7 @@ Private Sub WriteTraceability(ByVal wbOut As Workbook)
         ws.Cells(i + 1, 5).value = Nodes(i).Name
         ws.Cells(i + 1, 6).value = Nodes(i).NodeType
         ws.Cells(i + 1, 7).value = HexRGB(Nodes(i).ColorCode)
-        ws.Cells(i + 1, 8).value = ParentName(Nodes(i).ParentIdx)
+        ws.Cells(i + 1, 8).value = ParentName(Nodes(i).parentIdx)
     Next i
     
     ' Создаём Умную таблицу (вместо автофильтра Range.AutoFilter)
@@ -546,24 +588,38 @@ End Sub
 
 '---------------- Лист 3: аномалии схемы ----------------
 Private Sub WriteLog(ByVal wbOut As Workbook)
-    ' ИЗМЕНЕНИЕ 3: логирование - через Mod_Util (текст сообщения с итогами).
     Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
     Dim ws As Worksheet
     GetSheet wbOut, "Аномалии схемы", ws
-    ' Колонки: A - Код проблемы, B - Строка, C - Столбец, D - Уровень,
-    '          E - Тип, F - Элемент, G - Родитель, H - Описание
     ws.Range("A1:H1").value = Array("Код проблемы", "Строка", "Столбец", _
                                     "Уровень", "Тип", "Элемент", "Родитель", "Описание")
     Dim r As Long
     r = 2
     Dim i As Long
     For i = 1 To NodeCount
+        ' Пропускаем успешно обработанные ярлыки, чтобы не засорять журнал
+        If Nodes(i).NodeType = "УДАЛЕН" Then GoTo NextNodeLog
+        
         Dim nm As String, pn As String
         nm = Nodes(i).Name
-        pn = ParentName(Nodes(i).ParentIdx)
+        pn = ParentName(Nodes(i).parentIdx)
 
-        ' сирота (не корень и без родителя)
-        If Nodes(i).ParentIdx = 0 And nm <> "Объект" Then
+        ' Ошибка: ярлык без цели
+        If Nodes(i).NodeType = "ОШИБКА_ЯРЛЫКА" Then
+            ws.Cells(r, 1).value = "SHORTCUT_NO_TARGET"
+            ws.Cells(r, 2).value = Nodes(i).RowIdx
+            ws.Cells(r, 3).value = Nodes(i).ColIdx
+            ws.Cells(r, 4).value = Nodes(i).Level
+            ws.Cells(r, 5).value = "Ярлык"
+            ws.Cells(r, 6).value = nm
+            ws.Cells(r, 8).value = "Не найден исходный тип (цель) для ярлыка"
+            r = r + 1
+            If Not problemsDict.Exists(nm) Then problemsDict.Add nm, "E"
+            GoTo NextNodeLog
+        End If
+
+        ' сирота
+        If Nodes(i).parentIdx = 0 And nm <> "Объект" Then
             ws.Cells(r, 1).value = "ORPHAN"
             ws.Cells(r, 2).value = Nodes(i).RowIdx
             ws.Cells(r, 3).value = Nodes(i).ColIdx
@@ -572,6 +628,7 @@ Private Sub WriteLog(ByVal wbOut As Workbook)
             ws.Cells(r, 6).value = nm
             ws.Cells(r, 8).value = "Не найден родитель уровня N-1"
             r = r + 1
+            If Not problemsDict.Exists(nm) Then problemsDict.Add nm, "E"
         End If
 
         ' проверки кодов
@@ -589,6 +646,7 @@ Private Sub WriteLog(ByVal wbOut As Workbook)
                 ws.Cells(r, 7).value = pn
                 ws.Cells(r, 8).value = "Код ребенка не продолжает код родителя"
                 r = r + 1
+                If Not problemsDict.Exists(nm) Then problemsDict.Add nm, "E"
             End If
             If CodeDepth(cc) <> CodeDepth(pc) + 1 Then
                 ws.Cells(r, 1).value = "CODE_DEPTH_JUMP"
@@ -600,13 +658,14 @@ Private Sub WriteLog(ByVal wbOut As Workbook)
                 ws.Cells(r, 7).value = pn
                 ws.Cells(r, 8).value = "Глубина кода ребенка не равна глубине родителя + 1"
                 r = r + 1
+                If Not problemsDict.Exists(nm) Then problemsDict.Add nm, "E"
             End If
         End If
+NextNodeLog:
     Next i
     
-    ' Создаём Умную таблицу (вместо автофильтра Range.AutoFilter)
     Dim lastRowLog As Long
-    lastRowLog = r - 1    ' r — следующая свободная строка после цикла заполнения
+    lastRowLog = r - 1
     
     If lastRowLog >= 2 Then
         Call CreateSmartTable(ws, ws.Range("A1:H" & lastRowLog), _
