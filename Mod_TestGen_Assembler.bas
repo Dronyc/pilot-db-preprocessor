@@ -227,6 +227,9 @@ Public Sub GenerateTestAssemblerSteps()
     ' Входит в: родитель корректный.
 
     wb.SaveAs fileName:=stepPath & "\step_00_types.xlsx", FileFormat:=xlOpenXMLWorkbook
+    ' Логируем фактический путь сохранения (W-ASSEMBLER-TEST-FIX-2):
+    ' видно в журнале, куда реально сохранился тестовый файл.
+    Mod_Util.WriteLog "Сгенерирован: " & stepPath & "\step_00_types.xlsx"
     ' Сохраняем созданную книгу с типами в папку шага.
     ' Имя файла исправлено: было types_step_00.xlsx, стало step_00_types.xlsx —
     ' теперь файл попадает под маску *_types.xlsx, которую ищет Mod_Assembler.
@@ -390,6 +393,8 @@ Public Sub GenerateTestAssemblerSteps()
     ' Доп. параметры.
 
     wb.SaveAs fileName:=stepPath & "\step_00_attributes.xlsx", FileFormat:=xlOpenXMLWorkbook
+    ' Логируем фактический путь сохранения (W-ASSEMBLER-TEST-FIX-2).
+    Mod_Util.WriteLog "Сгенерирован: " & stepPath & "\step_00_attributes.xlsx"
     ' Сохраняем файл атрибутов в папку шага.
     ' Имя файла исправлено: было attributes_step_00.xlsx, стало step_00_attributes.xlsx.
 
@@ -479,6 +484,8 @@ Public Sub GenerateTestAssemblerSteps()
     ' Эта строка — эталон корректного документа второго шага.
 
     wb.SaveAs fileName:=stepPath2 & "\step_01_types.xlsx", FileFormat:=xlOpenXMLWorkbook
+    ' Логируем фактический путь сохранения (W-ASSEMBLER-TEST-FIX-2).
+    Mod_Util.WriteLog "Сгенерирован: " & stepPath2 & "\step_01_types.xlsx"
     ' Сохраняем книгу с типами Шага 1 во вторую папку.
     ' Имя файла соответствует маске *_types.xlsx, поэтому Mod_Assembler
     ' подхватит его при загрузке всех папок шагов.
@@ -559,6 +566,8 @@ Public Sub GenerateTestAssemblerSteps()
     ' Эта строка также полностью корректна.
 
     wb.SaveAs fileName:=stepPath2 & "\step_01_attributes.xlsx", FileFormat:=xlOpenXMLWorkbook
+    ' Логируем фактический путь сохранения (W-ASSEMBLER-TEST-FIX-2).
+    Mod_Util.WriteLog "Сгенерирован: " & stepPath2 & "\step_01_attributes.xlsx"
     ' Сохраняем файл атрибутов Шага 1 во вторую папку.
     ' Имя файла соответствует ожидаемой схеме имён шаговых файлов.
 

@@ -135,9 +135,18 @@ Private Sub LoadAllTypes()
     ' ФАЗА 1: ЗАГРУЗКА ВСЕХ ТИПОВ
     ' ============================================================
     colInfos.Add "=== ФАЗА 1: Загрузка типов ==="
+
+    ' Логирование поиска файлов шагов (W-ASSEMBLER-TEST-FIX-2): видно в логе,
+    ' в какой именно папке Mod_Assembler ищет файлы и что он нашёл.
+    Mod_Util.WriteLog "Mod_Assembler: поиск файлов шагов в папке: " & sourceFolderPath
+
     fName = Dir(sourceFolderPath & "*_types.xlsx")
+    If fName = "" Then
+        Mod_Util.WriteLog "[WARN] Файлы шагов не найдены по маске *_types.xlsx"
+    End If
     Do While fName <> ""
         colInfos.Add "Файл типов: " & fName
+        Mod_Util.WriteLog "Найден файл шага: " & fName
 
         On Error Resume Next
         Set wbSrc = Workbooks.Open(sourceFolderPath & fName, ReadOnly:=True, UpdateLinks:=0)
@@ -203,9 +212,17 @@ Private Sub LoadAllAttributes()
     ' ФАЗА 2: ЗАГРУЗКА ВСЕХ АТРИБУТОВ
     ' ============================================================
     colInfos.Add "=== ФАЗА 2: Загрузка атрибутов ==="
+
+    ' Логирование поиска файлов шагов (W-ASSEMBLER-TEST-FIX-2): маска атрибутов.
+    Mod_Util.WriteLog "Mod_Assembler: поиск файлов шагов в папке: " & sourceFolderPath
+
     fName = Dir(sourceFolderPath & "*_attributes.xlsx")
+    If fName = "" Then
+        Mod_Util.WriteLog "[WARN] Файлы шагов не найдены по маске *_attributes.xlsx"
+    End If
     Do While fName <> ""
         colInfos.Add "Файл атрибутов: " & fName
+        Mod_Util.WriteLog "Найден файл шага: " & fName
 
         On Error Resume Next
         Set wbSrc = Workbooks.Open(sourceFolderPath & fName, ReadOnly:=True, UpdateLinks:=0)
@@ -294,8 +311,19 @@ Private Sub BuildReports()
 
     ' Реестры (W4/OPT-08): строим словари, пишем файлы, обновляем служебные листы
     Call Mod_Registry.BuildRegistries
-    Call Mod_Registry.WriteRegistryFiles
-    Call Mod_Registry.UpdateRegistrySheets
+
+    ' Сквозная защита от пустых данных (W-ASSEMBLER-TEST-FIX-2):
+    ' если BuildRegistries не нашёл ни одного типа (например, файлы шагов
+    ' отсутствуют), реестры НЕ пишутся и листы НЕ обновляются — иначе
+    ' WriteRegistryFiles/UpdateRegistrySheets падают с "Subscript out of
+    ' range" / R005 на пустых структурах.
+    If Not Mod_Registry.RegistryHasData() Then
+        Mod_Util.WriteLog "Сборка реестров пропущена: нет данных (0 типов)"
+        MsgBox "Сборка реестров пропущена: нет данных (0 типов).", vbExclamation, "Реестры"
+    Else
+        Call Mod_Registry.WriteRegistryFiles
+        Call Mod_Registry.UpdateRegistrySheets
+    End If
 
     wsTypes.UsedRange.Columns.AutoFit
     wsAttrs.UsedRange.Columns.AutoFit

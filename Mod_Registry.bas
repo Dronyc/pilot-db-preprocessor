@@ -13,6 +13,15 @@ Option Explicit
 Private RegTypes As Object      ' системные имена типов (множество)
 Private RegCoverage As Object   ' системные имена типов с покрытием (множество)
 
+' Признак того, что реестры построены и содержат данные (W-ASSEMBLER-TEST-FIX-2).
+' False — если BuildRegistries ещё не вызывался или сделал Exit Sub при 0 типов.
+' Используется главной точкой входа (Mod_Assembler.BuildReports) для сквозной
+' защиты: при отсутствии данных WriteRegistryFiles/UpdateRegistrySheets не
+' вызываются, ошибка R005 / "Subscript out of range" исключается.
+Public Function RegistryHasData() As Boolean
+    RegistryHasData = (Not (RegTypes Is Nothing)) And (RegTypes.Count > 0)
+End Function
+
 ' Возвращает отсортированный по алфавиту массив ключей словаря.
 ' Пузырьковая сортировка достаточна для имён реестров и не требует
 ' дополнительных зависимостей.
@@ -158,6 +167,15 @@ Public Sub WriteRegistryFiles()
         Exit Sub
     End If
 
+    ' 1b. Сквозная защита от пустых данных (W-ASSEMBLER-TEST-FIX-2):
+    ' BuildRegistries может сделать Exit Sub при 0 типов — в этом случае
+    ' словари созданы, но пусты. Запись пустых реестров прерывается здесь,
+    ' чтобы не допустить ошибок на дальнейших этапах.
+    If RegTypes.Count = 0 Then
+        Mod_Util.WriteLog "WriteRegistryFiles: сборка реестров пропущена: нет данных (0 типов)"
+        Exit Sub
+    End If
+
     ' 2. Папка реестров: корень проекта + подпуть (по разделу 2 спецификации)
     path = Mod_Util.GetProjectRoot & "\03_Результаты генерации\03_Реестры"
 
@@ -222,6 +240,14 @@ Public Sub UpdateRegistrySheets()
         Mod_Util.WriteError "R005", "UpdateRegistrySheets: реестры не построены, вызовите BuildRegistries."
         MsgBox "Ошибка R005: реестры не построены. Сначала вызовите BuildRegistries.", vbCritical, "Реестры"
         Err.Clear
+        Exit Sub
+    End If
+
+    ' Сквозная защита от пустых данных (W-ASSEMBLER-TEST-FIX-2):
+    ' при 0 типов листы реестров не обновляются — это исключает ошибки
+    ' на пустых структурах (Subscript out of range).
+    If RegTypes.Count = 0 Then
+        Mod_Util.WriteLog "UpdateRegistrySheets: сборка реестров пропущена: нет данных (0 типов)"
         Exit Sub
     End If
 
