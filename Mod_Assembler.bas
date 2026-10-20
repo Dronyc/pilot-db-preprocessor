@@ -118,9 +118,54 @@ ErrHandler:
 End Sub
 
 ' ============================================================
+' РЕКУРСИВНЫЙ СБОР ФАЙЛОВ ШАГОВ ПО МАСКЕ (W-ASSEMBLER-NESTED-SEARCH)
+' Генератор создаёт файлы *_types.xlsx / *_attributes.xlsx в подпапках
+' папки "01_По шагам" (Шаг_00_..., Шаг_01_...), поэтому простого Dir()
+' в корне недостаточно. Обход: сначала файлы в текущей папке, затем —
+' во всех её подпапках (рекурсивно). Результат складывается в colFiles
+' в виде ПОЛНЫХ путей к файлам.
+' ============================================================
+Private Sub CollectStepFiles(ByVal folderPath As String, _
+                             ByVal mask As String, _
+                             ByVal colFiles As Collection)
+    Dim fName As String
+    Dim subFolder As Variant
+    Dim fso As Object
+    Dim colSub As Object
+
+    On Error Resume Next
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    On Error GoTo 0
+
+    ' a) Ищем файлы в текущей папке.
+    fName = Dir(folderPath & mask)
+    Do While fName <> ""
+        colFiles.Add folderPath & fName
+        fName = Dir()
+    Loop
+
+    ' b) Ищем во всех её подпапках (рекурсивно).
+    If Not fso Is Nothing Then
+        If fso.FolderExists(folderPath) Then
+            Set colSub = New Collection
+            For Each subFolder In fso.GetFolder(folderPath).SubFolders
+                colSub.Add CStr(subFolder.Path) & "\"
+            Next subFolder
+            For Each subFolder In colSub
+                CollectStepFiles CStr(subFolder), mask, colFiles
+            Next subFolder
+        End If
+    Else
+        Mod_Util.WriteLog "[WARN] Не удалось создать FileSystemObject: выполняется поиск только в корне папки."
+    End If
+End Sub
+
+' ============================================================
 ' ЭТАП 2: ЗАГРУЗКА ВСЕХ ФАЙЛОВ *_types.xlsx (OPT-10)
 ' ============================================================
 Private Sub LoadAllTypes()
+    Dim f As Variant
+    Dim fullPath As String
     Dim fName As String
     Dim wbSrc As Workbook
     Dim wsSrc As Worksheet
@@ -128,6 +173,7 @@ Private Sub LoadAllTypes()
     Dim lastRow As Long
     Dim j As Long
     Dim sysName As String
+    Dim colFound As Collection
 
     On Error GoTo ErrHandler
 
@@ -138,22 +184,25 @@ Private Sub LoadAllTypes()
 
     ' Логирование поиска файлов шагов (W-ASSEMBLER-TEST-FIX-2): видно в логе,
     ' в какой именно папке Mod_Assembler ищет файлы и что он нашёл.
-    Mod_Util.WriteLog "Mod_Assembler: поиск файлов шагов в папке: " & sourceFolderPath
+    ' Поиск рекурсивный: корень "01_По шагам" и все подпапки Шага (W-ASSEMBLER-NESTED-SEARCH).
+    Mod_Util.WriteLog "Mod_Assembler: поиск файлов шагов (рекурсивно, включая подпапки) в папке: " & sourceFolderPath
 
-    fName = Dir(sourceFolderPath & "*_types.xlsx")
-    If fName = "" Then
-        Mod_Util.WriteLog "[WARN] Файлы шагов не найдены по маске *_types.xlsx"
+    Set colFound = New Collection
+    Call CollectStepFiles(sourceFolderPath, "*_types.xlsx", colFound)
+    If colFound.Count = 0 Then
+        Mod_Util.WriteLog "[WARN] Файлы шагов не найдены по маске *_types.xlsx (ни в корне, ни в подпапках)"
     End If
-    Do While fName <> ""
+    For Each f In colFound
+        fullPath = CStr(f)
+        fName = Mid(fullPath, Len(sourceFolderPath) + 1)
         colInfos.Add "Файл типов: " & fName
-        Mod_Util.WriteLog "Найден файл шага: " & fName
+        Mod_Util.WriteLog "Найден файл шага: " & fullPath
 
         On Error Resume Next
-        Set wbSrc = Workbooks.Open(sourceFolderPath & fName, ReadOnly:=True, UpdateLinks:=0)
+        Set wbSrc = Workbooks.Open(fullPath, ReadOnly:=True, UpdateLinks:=0)
         If Err.Number <> 0 Then
-            AddError "T005", "Не удалось открыть файл: " & fName & ". Ошибка: " & Err.Description
+            AddError "T005", "Не удалось открыть файл: " & fullPath & ". Ошибка: " & Err.Description
             On Error GoTo 0
-            fName = Dir()
             GoTo NextTypeFile
         End If
         On Error GoTo 0
@@ -184,8 +233,7 @@ NextTypeRow:
 
         wbSrc.Close SaveChanges:=False
 NextTypeFile:
-        fName = Dir()
-    Loop
+    Next f
 
     colInfos.Add "Всего типов загружено: " & (rTypes - 2)
     Exit Sub
@@ -198,6 +246,8 @@ End Sub
 ' ЭТАП 3: ЗАГРУЗКА ВСЕХ ФАЙЛОВ *_attributes.xlsx (OPT-10)
 ' ============================================================
 Private Sub LoadAllAttributes()
+    Dim f As Variant
+    Dim fullPath As String
     Dim fName As String
     Dim wbSrc As Workbook
     Dim wsSrc As Worksheet
@@ -205,6 +255,7 @@ Private Sub LoadAllAttributes()
     Dim lastRow As Long
     Dim sysName As String
     Dim attrName As String
+    Dim colFound As Collection
 
     On Error GoTo ErrHandler
 
@@ -214,22 +265,25 @@ Private Sub LoadAllAttributes()
     colInfos.Add "=== ФАЗА 2: Загрузка атрибутов ==="
 
     ' Логирование поиска файлов шагов (W-ASSEMBLER-TEST-FIX-2): маска атрибутов.
-    Mod_Util.WriteLog "Mod_Assembler: поиск файлов шагов в папке: " & sourceFolderPath
+    ' Поиск рекурсивный: корень "01_По шагам" и все подпапки Шага (W-ASSEMBLER-NESTED-SEARCH).
+    Mod_Util.WriteLog "Mod_Assembler: поиск файлов шагов (рекурсивно, включая подпапки) в папке: " & sourceFolderPath
 
-    fName = Dir(sourceFolderPath & "*_attributes.xlsx")
-    If fName = "" Then
-        Mod_Util.WriteLog "[WARN] Файлы шагов не найдены по маске *_attributes.xlsx"
+    Set colFound = New Collection
+    Call CollectStepFiles(sourceFolderPath, "*_attributes.xlsx", colFound)
+    If colFound.Count = 0 Then
+        Mod_Util.WriteLog "[WARN] Файлы шагов не найдены по маске *_attributes.xlsx (ни в корне, ни в подпапках)"
     End If
-    Do While fName <> ""
+    For Each f In colFound
+        fullPath = CStr(f)
+        fName = Mid(fullPath, Len(sourceFolderPath) + 1)
         colInfos.Add "Файл атрибутов: " & fName
-        Mod_Util.WriteLog "Найден файл шага: " & fName
+        Mod_Util.WriteLog "Найден файл шага: " & fullPath
 
         On Error Resume Next
-        Set wbSrc = Workbooks.Open(sourceFolderPath & fName, ReadOnly:=True, UpdateLinks:=0)
+        Set wbSrc = Workbooks.Open(fullPath, ReadOnly:=True, UpdateLinks:=0)
         If Err.Number <> 0 Then
-            AddError "A017", "Не удалось открыть файл: " & fName & ". Ошибка: " & Err.Description
+            AddError "A017", "Не удалось открыть файл: " & fullPath & ". Ошибка: " & Err.Description
             On Error GoTo 0
-            fName = Dir()
             GoTo NextAttrFile
         End If
         On Error GoTo 0
@@ -256,8 +310,7 @@ NextAttrRow:
 
         wbSrc.Close SaveChanges:=False
 NextAttrFile:
-        fName = Dir()
-    Loop
+    Next f
 
     colInfos.Add "Всего атрибутов загружено (после дедупликации): " & (rAttrs - 2)
     Exit Sub
