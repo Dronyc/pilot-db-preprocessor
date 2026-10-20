@@ -46,6 +46,10 @@ Private outputFile As String        ' путь итогового файла
 Sub ValidateAndAssemble(Optional softMode As Boolean = False)
     On Error GoTo ErrHandler
 
+    ' Логирование старта сборки: видно в логе, когда именно началась сборка
+    ' и в каком режиме она шла (черновик / строгая проверка).
+    Mod_Util.WriteLog "Старт операции: Сборка типов и атрибутов (режим: " & IIf(softMode, "черновик", "строгая") & ")"
+
     Call InitSession(softMode)
     Call LoadAllTypes
     Call LoadAllAttributes
