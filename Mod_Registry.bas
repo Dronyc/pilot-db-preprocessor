@@ -74,9 +74,19 @@ Public Sub BuildRegistries()
 
     On Error GoTo ErrHandler
 
+    ' Логирование старта операции (видно в логе, когда началось построение)
+    Mod_Util.WriteLog "Старт операции: Построение реестров"
+
     ' Очистка модульных словарей перед заполнением (гарантия повторного запуска)
     Set RegTypes = CreateObject("Scripting.Dictionary")
     Set RegCoverage = CreateObject("Scripting.Dictionary")
+
+    ' Защита от пустых реестров: если данных нет — выходим сразу,
+    ' чтобы не ловить "Subscript out of range" на дальнейших этапах.
+    If RegTypes.Count = 0 And RegCoverage.Count = 0 Then
+        Mod_Util.WriteLog "BuildRegistries: нет данных для реестров (0 типов)"
+        Exit Sub
+    End If
 
     ' Поиск листа «Типы» в книге сводной (активная книга сборки)
     On Error Resume Next
@@ -136,6 +146,9 @@ Public Sub WriteRegistryFiles()
     Dim arrC() As String
 
     On Error GoTo ErrHandler
+
+    ' Логирование старта операции (видно в логе, когда началась запись реестров)
+    Mod_Util.WriteLog "Старт операции: Запись реестров на диск"
 
     ' 1. Проверка «реестры не построены» ? код R005
     If RegTypes Is Nothing Or RegCoverage Is Nothing Then
