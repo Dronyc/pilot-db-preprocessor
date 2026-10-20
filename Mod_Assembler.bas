@@ -44,6 +44,14 @@ Private outputFile As String        ' путь итогового файла
 ' softMode:=False — финальный прогон по склеенной таблице (полный контроль)
 ' ============================================================
 Sub ValidateAndAssemble(Optional softMode As Boolean = False)
+    ' W-AV-REFACTOR, п.5 (Guard Pattern): сохраняем исходные значения флагов
+    ' Application, чтобы восстановить ТОЧНО их (а не принудительно True),
+    ' и обязательно проходим через метку CleanExit при любом выходе.
+    Dim oldScreenUpdating As Boolean
+    Dim oldDisplayAlerts As Boolean
+    oldScreenUpdating = Application.ScreenUpdating
+    oldDisplayAlerts = Application.DisplayAlerts
+
     On Error GoTo ErrHandler
 
     ' Логирование старта сборки: видно в логе, когда именно началась сборка
@@ -57,14 +65,16 @@ Sub ValidateAndAssemble(Optional softMode As Boolean = False)
     Call BuildReports
     Call SaveResult
 
-    Exit Sub
+    GoTo CleanExit
 ErrHandler:
     ' Исключение этапа сборки: фиксируем и показываем пользователю
     Mod_Util.WriteError "F005", "ValidateAndAssemble: ошибка выполнения этапа: " & Err.Description
-    Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
     MsgBox "Ошибка при сборке: " & Err.Description, vbCritical, "Валидация прервана"
     Err.Clear
+CleanExit:
+    ' Guard Pattern: единая точка восстановления состояния Excel
+    Application.ScreenUpdating = oldScreenUpdating
+    Application.DisplayAlerts = oldDisplayAlerts
 End Sub
 
 ' ============================================================
@@ -124,40 +134,62 @@ End Sub
 ' в корне недостаточно. Обход: сначала файлы в текущей папке, затем —
 ' во всех её подпапках (рекурсивно). Результат складывается в colFiles
 ' в виде ПОЛНЫХ путей к файлам.
+' W-AV-REFACTOR, п.1: Scripting.FileSystemObject полностью удалён —
+' рекурсивный обход реализован нативными средствами VBA: Dir() с
+' атрибутом vbDirectory для перечисления подпапок и GetAttr() для
+' проверки, что элемент является папкой. Это снимает ложные срабатывания
+' антивирусов на CreateObject("Scripting.FileSystemObject").
 ' ============================================================
 Private Sub CollectStepFiles(ByVal folderPath As String, _
                              ByVal mask As String, _
                              ByVal colFiles As Collection)
     Dim fName As String
-    Dim subFolder As Variant
-    Dim fso As Object
-    Dim colSub As Object
+    Dim subName As String
+    Dim attr As Long
+    ' Кол-во подпапок ограничиваем заранее: повторный вызов Dir() внутри
+    ' цикла по подпапкам перезапускает поиск файлов, поэтому список
+    ' подпапок сначала собирается в массив.
+    Dim subFolders() As String
+    Dim subCount As Long
+    Dim i As Long
 
-    On Error Resume Next
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    On Error GoTo 0
-
-    ' a) Ищем файлы в текущей папке.
+    ' a) Ищем файлы в текущей папке (нативный Dir по маске).
     fName = Dir(folderPath & mask)
     Do While fName <> ""
         colFiles.Add folderPath & fName
         fName = Dir()
     Loop
 
-    ' b) Ищем во всех её подпапках (рекурсивно).
-    If Not fso Is Nothing Then
-        If fso.FolderExists(folderPath) Then
-            Set colSub = New Collection
-            For Each subFolder In fso.GetFolder(folderPath).SubFolders
-                colSub.Add CStr(subFolder.Path) & "\"
-            Next subFolder
-            For Each subFolder In colSub
-                CollectStepFiles CStr(subFolder), mask, colFiles
-            Next subFolder
+    ' b) Собираем список подпапок нативным Dir(folderPath & "*", vbDirectory).
+    ReDim subFolders(1 To 255)
+    subCount = 0
+    subName = Dir(folderPath & "*", vbDirectory)
+    Do While subName <> ""
+        ' Обязательно пропускаем "." и ".." (иначе бесконечная рекурсия).
+        If subName <> "." And subName <> ".." Then
+            On Error Resume Next
+            attr = GetAttr(folderPath & subName)
+            On Error GoTo 0
+            ' Учитываем только элементы, являющиеся папками (атрибут vbDirectory).
+            If Err.Number = 0 Then
+                If (attr And vbDirectory) = vbDirectory Then
+                    subCount = subCount + 1
+                    If subCount > UBound(subFolders) Then
+                        ReDim Preserve subFolders(1 To subCount + 255)
+                    End If
+                    subFolders(subCount) = subName & "\"
+                End If
+            Else
+                Err.Clear
+            End If
         End If
-    Else
-        Mod_Util.WriteLog "[WARN] Не удалось создать FileSystemObject: выполняется поиск только в корне папки."
-    End If
+        subName = Dir()
+    Loop
+
+    ' c) Рекурсивный спуск в каждую подпапку.
+    For i = 1 To subCount
+        CollectStepFiles folderPath & subFolders(i), mask, colFiles
+    Next i
 End Sub
 
 ' ============================================================
@@ -199,7 +231,10 @@ Private Sub LoadAllTypes()
         Mod_Util.WriteLog "Найден файл шага: " & fullPath
 
         On Error Resume Next
-        Set wbSrc = Workbooks.Open(fullPath, ReadOnly:=True, UpdateLinks:=0)
+        ' W-AV-REFACTOR, п.1: AddToMru:=False — не засоряем список последних
+        ' файлов Excel; массовое добавление в MRU воспринимается AV как
+        ' подозрительное сканирование.
+        Set wbSrc = Workbooks.Open(fullPath, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
         If Err.Number <> 0 Then
             AddError "T005", "Не удалось открыть файл: " & fullPath & ". Ошибка: " & Err.Description
             On Error GoTo 0
@@ -280,7 +315,9 @@ Private Sub LoadAllAttributes()
         Mod_Util.WriteLog "Найден файл шага: " & fullPath
 
         On Error Resume Next
-        Set wbSrc = Workbooks.Open(fullPath, ReadOnly:=True, UpdateLinks:=0)
+        ' W-AV-REFACTOR, п.1: AddToMru:=False — не засоряем список последних
+        ' файлов Excel (см. LoadAllTypes).
+        Set wbSrc = Workbooks.Open(fullPath, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
         If Err.Number <> 0 Then
             AddError "A017", "Не удалось открыть файл: " & fullPath & ". Ошибка: " & Err.Description
             On Error GoTo 0
@@ -348,9 +385,21 @@ End Sub
 ' ============================================================
 ' ЭТАП 5: ОТЧЁТЫ (OPT-10, OPT-08)
 ' Реестры (BuildRegistrySheet) из сборки убраны — их формирует Mod_Registry (W6)
+' W-AV-REFACTOR, п.5: Guard Pattern — флаги Application сохраняются в начале
+' и восстанавливаются в единой точке CleanExit.
 ' ============================================================
 Private Sub BuildReports()
+    Dim oldScreenUpdating As Boolean
+    Dim oldDisplayAlerts As Boolean
+    oldScreenUpdating = Application.ScreenUpdating
+    oldDisplayAlerts = Application.DisplayAlerts
+
     On Error GoTo ErrHandler
+
+    ' На время формирования отчётов скрываем интерфейс (ускорение и
+    ' защита от случайных кликов); исходные значения уже сохранены выше.
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
 
     ' ============================================================
     ' ФАЗА 5: ФОРМИРОВАНИЕ ОТЧЁТА
@@ -390,22 +439,42 @@ Private Sub BuildReports()
     wsAttrs.Rows(1).Font.Bold = True
     wsReport.Rows(1).Font.Bold = True
     wsLog.Rows(1).Font.Bold = True
-    Exit Sub
+    GoTo CleanExit
 ErrHandler:
     AddError "R002", "BuildReports: ошибка формирования отчётов. Ошибка: " & Err.Description
     Err.Clear
+CleanExit:
+    ' Guard Pattern: восстановление состояния Excel перед показом результата
+    Application.ScreenUpdating = oldScreenUpdating
+    Application.DisplayAlerts = oldDisplayAlerts
 End Sub
 
 ' ============================================================
 ' ЭТАП 6: СОХРАНЕНИЕ ИТОГОВОГО ФАЙЛА И ИТОГОВОЕ СООБЩЕНИЕ (OPT-10)
+' W-AV-REFACTOR, п.1/п.4/п.5: прямой Kill outputFile заменён на безопасную
+' Mod_Util.DeleteFileIfExists; Guard Pattern — флаги Application
+' сохраняются в начале и восстанавливаются в CleanExit.
 ' ============================================================
 Private Sub SaveResult()
+    Dim oldScreenUpdating As Boolean
+    Dim oldDisplayAlerts As Boolean
+    oldScreenUpdating = Application.ScreenUpdating
+    oldDisplayAlerts = Application.DisplayAlerts
+
     On Error GoTo ErrHandler
 
+    ' Сохраняем старые значения и отключаем интерфейс на время записи файла
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
     outputFile = Mod_Util.GetProjectRoot & "\03_Результаты генерации\02_Сводные\zhc_okks_gost_FINAL.xlsx"
-    On Error Resume Next
-    Kill outputFile
-    On Error GoTo 0
+    ' Безопасное удаление существующего файла через DeleteFileIfExists
+    ' вместо прямого вызова Kill (снижает эвристический скор антивирусов).
+    If Len(Dir(outputFile)) > 0 Then
+        If Not Mod_Util.DeleteFileIfExists(outputFile) Then
+            AddWarning "F004", "Не удалось удалить существующий файл перед перезаписью: " & outputFile
+        End If
+    End If
 
     On Error Resume Next
     wbOut.SaveAs fileName:=outputFile, FileFormat:=xlOpenXMLWorkbook
@@ -416,9 +485,6 @@ Private Sub SaveResult()
         colInfos.Add "Файл сохранён: " & outputFile
     End If
     On Error GoTo 0
-
-    Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
 
     Dim msg As String
     msg = "=== РЕЗУЛЬТАТЫ ВАЛИДАЦИИ ===" & vbCrLf
@@ -445,12 +511,14 @@ Private Sub SaveResult()
         msg = msg & vbCrLf & vbCrLf & "[PASS] Критических ошибок не обнаружено. Файл готов к импорту."
         MsgBox msg, vbInformation, "Валидация завершена"
     End If
-    Exit Sub
+    GoTo CleanExit
 ErrHandler:
     AddError "F004", "SaveResult: ошибка сохранения итогового файла. Ошибка: " & Err.Description
-    Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
     Err.Clear
+CleanExit:
+    ' Guard Pattern: восстановление состояния Excel
+    Application.ScreenUpdating = oldScreenUpdating
+    Application.DisplayAlerts = oldDisplayAlerts
 End Sub
 
 ' ============================================================

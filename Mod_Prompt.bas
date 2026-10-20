@@ -239,7 +239,10 @@ Private Function GetSchemaFragment() As String
     End If
 
     On Error Resume Next
-    Set wb = Workbooks.Open(prepPath & "\" & newest, ReadOnly:=True, UpdateLinks:=0)
+    ' W-AV-REFACTOR, п.1: AddToMru:=False — файлы шагов не попадают в список
+    ' последних файлов Excel (массовое добавление в MRU воспринимается AV как
+    ' подозрительное сканирование).
+    Set wb = Workbooks.Open(prepPath & "\" & newest, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo 0
@@ -659,7 +662,8 @@ Public Sub MakeFixPrompt()
 
     Set wb = Nothing
     On Error Resume Next
-    Set wb = Workbooks.Open(finalFile, ReadOnly:=True, UpdateLinks:=0)
+    ' W-AV-REFACTOR, п.1: AddToMru:=False — см. комментарий выше (Mod_Assembler).
+    Set wb = Workbooks.Open(finalFile, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
     On Error GoTo ErrHandler
     If wb Is Nothing Then
         Mod_Util.WriteError "P003", "MakeFixPrompt: не удалось открыть сводную: " & finalFile

@@ -75,7 +75,9 @@ Public Sub BuildFlatStructure()
     If Not wbSrc Is Nothing Then
         srcWasOpen = True
     Else
-        Set wbSrc = Workbooks.Open(path & "\" & fileName, ReadOnly:=True)
+        ' W-AV-REFACTOR, п.1: AddToMru:=False — файл схемы не попадает в список
+        ' последних файлов Excel (снижение эвристического скора AV).
+        Set wbSrc = Workbooks.Open(path & "\" & fileName, ReadOnly:=True, AddToMru:=False)
     End If
     
     ' === ПРАВКА B: скрыть окно исходной книги, если открывали сами ===
