@@ -175,11 +175,46 @@ End Function
 
 ' Открывает указанную папку в проводнике Windows.
 ' Если путь пустой или папки нет - молча выходит.
+' W-AV-REFACTOR, п.2: использование Application.FollowHyperlink вместо Shell
+' для предотвращения ложных срабатываний AV (запуск процессов через Shell —
+' типичный эвристический признак "опасного" макроса). FollowHyperlink —
+' нативное средство Excel: UI не ломается, фокус корректно передаётся
+' окну Проводника.
 Public Sub OpenFolderInExplorer(ByVal path As String)
     If path = "" Then Exit Sub
     If Dir(path, vbDirectory) = "" Then Exit Sub
-    Shell "explorer.exe """ & path & """", vbNormalFocus
+    On Error Resume Next
+    Application.FollowHyperlink path
+    ' Если переход по гиперссылке невозможен (например, сетевой путь
+    ' недоступен) — молча выходим: ошибка не должна прерывать UI.
+    If Err.Number <> 0 Then
+        WriteError "U005", "OpenFolderInExplorer: не удалось открыть папку " & path & _
+                           ". Ошибка: " & Err.Description
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Sub
+
+' ---------------------------------------------------------------------------
+' W-AV-REFACTOR, п.4: безопасное удаление файла.
+' Единая точка удаления файлов проекта: проверяет существование через Dir(),
+' выполняет Kill под защитой обработки ошибок и возвращает результат.
+' Прямые вызовы Kill из других модулей заменены на эту функцию, чтобы
+' снизить эвристический скор антивирусов на "массовое удаление файлов".
+' Возвращает True, если файла уже нет или он успешно удалён;
+' False — если удалить не удалось (файл занят, нет прав и т.п.).
+' ---------------------------------------------------------------------------
+Public Function DeleteFileIfExists(ByVal filePath As String) As Boolean
+    DeleteFileIfExists = True
+    If Len(Dir(filePath)) = 0 Then Exit Function
+    On Error Resume Next
+    Kill filePath
+    If Err.Number <> 0 Then
+        DeleteFileIfExists = False
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function
 
 ' Создаёт лист "Настройки" (если его нет), заполняет поля, выпадающие
 ' списки и именованные диапазоны по разделу 5 спецификации Spec_Dispatcher.md:

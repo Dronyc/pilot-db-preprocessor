@@ -9,7 +9,15 @@ Public Sub GenerateTestSchema()
     Dim wb As Workbook
     Dim ws As Worksheet
     Dim savePath As String
-    
+    ' W-AV-REFACTOR, п.5 (Guard Pattern): сохраняем исходные флаги Application
+    ' и восстанавливаем их в единой точке CleanExit.
+    Dim oldScreenUpdating As Boolean
+    Dim oldDisplayAlerts As Boolean
+    oldScreenUpdating = Application.ScreenUpdating
+    oldDisplayAlerts = Application.DisplayAlerts
+
+    On Error GoTo ErrHandler
+
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
     
@@ -88,17 +96,28 @@ Public Sub GenerateTestSchema()
     
     ' --- 3. Сохранение ---
     savePath = Mod_Util.GetProjectRoot & "\01_Исходные данные\01_Схема\Тест_Ошибок.xlsx"
-    
-    On Error Resume Next
-    Kill savePath
-    On Error GoTo 0
-    
+
+    ' W-AV-REFACTOR, п.3/п.4: безопасное удаление существующего файла через
+    ' Mod_Util.DeleteFileIfExists вместо прямого вызова Kill
+    ' (предотвращение ложных срабатываний AV).
+    If Not Mod_Util.DeleteFileIfExists(savePath) Then
+        Mod_Util.WriteWarning "T001", "GenerateTestSchema: не удалось удалить существующий файл перед перезаписью: " & savePath
+    End If
+
     wb.SaveAs fileName:=savePath, FileFormat:=xlOpenXMLWorkbook
     wb.Close SaveChanges:=False
-    
-    Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
-    
+
+    GoTo CleanExit
+ErrHandler:
+    ' W-AV-REFACTOR, п.5: запись в лог и восстановление состояния через CleanExit
+    Mod_Util.WriteError "T001", "GenerateTestSchema: ошибка генерации тестовой схемы. Ошибка: " & Err.Description
+    MsgBox "Ошибка при создании тестового файла: " & Err.Description, vbCritical, "Генерация теста"
+    Err.Clear
+CleanExit:
+    ' Guard Pattern: восстановление флагов Application к исходным значениям
+    Application.ScreenUpdating = oldScreenUpdating
+    Application.DisplayAlerts = oldDisplayAlerts
+
     MsgBox "Тестовый файл создан:" & vbCrLf & savePath & vbCrLf & vbCrLf & _
            "В нём 4 ошибки: CODE_PARENT_MISMATCH, CODE_DEPTH_JUMP, ORPHAN, SHORTCUT_NO_TARGET.", vbInformation
 End Sub

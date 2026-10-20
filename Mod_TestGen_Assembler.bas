@@ -32,6 +32,15 @@ Public Sub GenerateTestAssemblerSteps()
     Dim ws As Worksheet
     ' Переменная для листа внутри новой книги.
 
+    ' W-AV-REFACTOR, п.5 (Guard Pattern): сохраняем исходные флаги Application
+    ' и восстанавливаем их в единой точке CleanExit при любом выходе.
+    Dim oldScreenUpdating As Boolean
+    Dim oldDisplayAlerts As Boolean
+    oldScreenUpdating = Application.ScreenUpdating
+    oldDisplayAlerts = Application.DisplayAlerts
+
+    On Error GoTo ErrHandler
+
     Application.ScreenUpdating = False
     ' Отключаем обновление экрана. Так книга создаётся быстрее,
     ' и пользователь не видит мигания окон.
@@ -47,7 +56,9 @@ Public Sub GenerateTestAssemblerSteps()
         ' Проверка: если корень не задан (пустая строка) — работать некуда.
         MsgBox "Не задан корень проекта (ProjectRoot).", vbCritical
         ' Показываем сообщение об ошибке.
-        Exit Sub
+        GoTo CleanExit
+        ' W-AV-REFACTOR, п.5: выход через Guard Pattern (CleanExit),
+        ' флаги Application здесь ещё не менялись — восстановление безопасно.
         ' Выходим из процедуры, ничего не создаём.
     End If
     ' Конец проверки корня.
@@ -574,10 +585,18 @@ Public Sub GenerateTestAssemblerSteps()
     wb.Close SaveChanges:=False
     ' Закрываем книгу. SaveChanges:=False — мы уже всё сохранили.
 
-    Application.ScreenUpdating = True
+    GoTo CleanExit
+    ' W-AV-REFACTOR, п.5: обработчик ошибок — запись в лог и восстановление
+    ' состояния Excel через метку CleanExit (Resume-стиль через GoTo).
+ErrHandler:
+    Mod_Util.WriteError "TG01", "GenerateTestAssemblerSteps: ошибка генерации тестовых шагов. Ошибка: " & Err.Description
+    MsgBox "Ошибка при создании тестовых данных: " & Err.Description, vbCritical, "Генерация теста"
+    Err.Clear
+CleanExit:
+    ' Guard Pattern: восстановление флагов Application к сохранённым исходным значениям
+    Application.ScreenUpdating = oldScreenUpdating
     ' Включаем обновление экрана обратно (было отключено в начале).
-
-    Application.DisplayAlerts = True
+    Application.DisplayAlerts = oldDisplayAlerts
     ' Включаем системные предупреждения обратно.
 
     MsgBox "Тестовые данные для Mod_Assembler созданы!" & vbCrLf & _
