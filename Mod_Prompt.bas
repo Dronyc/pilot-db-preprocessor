@@ -9,7 +9,9 @@ Option Explicit
 ' P003 — ошибка формирования промта исправления,
 ' P004 — формирование Промта №0 (декомпозиция) при отсутствии Шаги.txt
 '      (W-PROMPT-GEN-STEP-00),
-' P005 — ошибка сохранения текстового файла в UTF-8 (W-UTF8-EXPORT).
+' P005 — ошибка сохранения текстового файла в UTF-8 (W-UTF8-EXPORT),
+' P006 — предупреждение: ошибка/пустой результат чтения текстового файла
+'      с автоопределением кодировки (W-UTF8-READ).
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
@@ -68,34 +70,124 @@ Private Sub EnsureFolder(ByVal folderPath As String)
     Next i
 End Sub
 
-' Читает текстовый файл целиком в строку (через Line Input).
+' ---------------------------------------------------------------------------
+' БЕЗОПАСНОЕ ЧТЕНИЕ ТЕКСТОВЫХ ФАЙЛОВ (W-UTF8-READ)
+' ---------------------------------------------------------------------------
+
+' Читает текстовый файл целиком в строку с автоопределением кодировки.
+' Встроенный Open ... For Input читает в ANSI (Windows-1251), из-за чего
+' файлы шаблонов / Шаги.txt / Реестры, сохранённые в UTF-8, превращаются
+' в «кракозябры». Поэтому сначала используется ADODB.Stream с
+' Charset = "utf-8"; если чтение через UTF-8 не удалось или дало пустой
+' результат — fallback на Charset = "windows-1251" (ANSI), затем — на
+' стандартное Open ... For Input. При любой ошибке чтения — запись [WARN]
+' в лог (код P006) и возврат пустой строки (без прерывания вызывающего).
 ' Если файла нет — возвращает пустую строку (вызывающий сам решает,
 ' считать ли это ошибкой).
-Private Function ReadTextFile(ByVal filePath As String) As String
-    Dim fnum As Integer
-    Dim s As String
+Private Function SafeReadText(ByVal filePath As String) As String
     Dim res As String
+
+    SafeReadText = ""
 
     ' W-PROMPT-PATHS-REFACTOR: vbNormal — строгая проверка существования
     ' именно файла (а не папки с таким же именем).
-    If Len(Dir(filePath, vbNormal)) = 0 Then
-        ReadTextFile = ""
-        Exit Function
+    If Len(Dir(filePath, vbNormal)) = 0 Then Exit Function
+
+    On Error Resume Next
+
+    ' --- Попытка 1: UTF-8 через ADODB.Stream -------------------------------
+    Err.Clear
+    Dim stream As Object
+    Set stream = CreateObject("ADODB.Stream")
+    stream.Type = 2                 ' adTypeText
+    stream.Charset = "utf-8"
+    stream.Open
+    stream.LoadFromFile filePath
+    res = stream.ReadText(-1)       ' adReadAll
+    stream.Close
+    Set stream = Nothing
+    If Err.Number <> 0 Then
+        ' поток мог остаться открытым — закрыть его, игнорируя ошибки
+        If Not stream Is Nothing Then
+            Err.Clear
+            stream.Close
+            Set stream = Nothing
+        End If
+        res = ""
+    End If
+    Err.Clear
+
+    ' --- Fallback 1: Windows-1251 (ANSI) -----------------------------------
+    If res = "" Then
+        Set stream = CreateObject("ADODB.Stream")
+        stream.Type = 2             ' adTypeText
+        stream.Charset = "windows-1251"
+        stream.Open
+        stream.LoadFromFile filePath
+        res = stream.ReadText(-1)   ' adReadAll
+        stream.Close
+        Set stream = Nothing
+        If Err.Number <> 0 Then
+            If Not stream Is Nothing Then
+                Err.Clear
+                stream.Close
+                Set stream = Nothing
+            End If
+            res = ""
+        End If
+        Err.Clear
     End If
 
-    fnum = FreeFile
-    Open filePath For Input As #fnum
-    Do While Not EOF(fnum)
-        Line Input #fnum, s
-        res = res & s & vbCrLf
-    Loop
-    Close #fnum
-
-    ' убрать финальный перевод строки
-    If Len(res) >= 2 Then
-        If Right(res, 2) = vbCrLf Then res = Left(res, Len(res) - 2)
+    ' --- Fallback 2: стандартное чтение Open ... For Input (ANSI) ----------
+    If res = "" Then
+        Dim fnum As Integer
+        Dim s As String
+        fnum = FreeFile
+        Open filePath For Input Access Read As #fnum
+        Do While Not EOF(fnum)
+            Line Input #fnum, s
+            res = res & s & vbCrLf
+        Loop
+        Close #fnum
+        If Err.Number <> 0 Then
+            If fnum <> 0 Then Close #fnum
+            res = ""
+        End If
+        ' убрать финальный перевод строки
+        If Len(res) >= 2 Then
+            If Right(res, 2) = vbCrLf Then res = Left(res, Len(res) - 2)
+        End If
+        Err.Clear
     End If
-    ReadTextFile = res
+
+    On Error GoTo 0
+
+    ' Файл существует, но ни один из способов чтения не вернул текст либо
+    ' произошла ошибка — фиксируем предупреждение в журнале ([WARN] P006)
+    ' и возвращаем пустую строку.
+    If res = "" Then
+        Mod_Util.WriteWarning "P006", "SafeReadText: файл пуст или не может " & _
+            "быть прочитан: " & filePath
+    End If
+
+    SafeReadText = res
+End Function
+
+' Приводит текст к единым разделителям строк vbCrLf (W-UTF8-READ):
+' ADODB.Stream сохраняет исходные переводы строки файла — CRLF, LF или CR.
+Private Function NormalizeLineEndings(ByVal text As String) As String
+    Dim res As String
+    res = Replace(text, vbCrLf, vbLf)     ' CRLF -> LF
+    res = Replace(res, vbCr, vbLf)        ' одиночный CR -> LF
+    NormalizeLineEndings = Replace(res, vbLf, vbCrLf)  ' LF -> CRLF
+End Function
+
+' Читает текстовый файл целиком в строку (W-UTF8-READ: делегирует
+' SafeReadText с автоопределением UTF-8 / Windows-1251).
+' Если файла нет или чтение не удалось — возвращает пустую строку
+' (вызывающий сам решает, считать ли это ошибкой).
+Private Function ReadTextFile(ByVal filePath As String) As String
+    ReadTextFile = SafeReadText(filePath)
 End Function
 
 ' Сохраняет строку в текстовый файл в кодировке UTF-8 (W-UTF8-EXPORT).
@@ -356,11 +448,17 @@ End Function
 
 ' Читает список шагов (<корень>\04_Промты\Шаги.txt) и возвращает его
 ' коллекцией. Каждая запись — строка вида "NN|Имя_папки".
+' W-UTF8-READ: файл читается целиком через SafeReadText (автоопределение
+' UTF-8 / Windows-1251), затем разбивается на строки Split(text, vbCrLf);
+' пустые строки пропускаются, формат строки — "NN = Имя_папки".
 ' При отсутствии файла: ошибка P001, MsgBox, пустая коллекция.
+' При ошибке чтения: [WARN] P006 в лог, пустая коллекция без прерывания.
 Public Function ReadStepList() As Collection
     Dim col As Collection
     Dim root As String
-    Dim fnum As Integer
+    Dim text As String
+    Dim lines() As String
+    Dim i As Long
     Dim s As String
     Dim posEq As Long
     Dim nn As String
@@ -385,12 +483,26 @@ Public Function ReadStepList() As Collection
         Exit Function
     End If
 
-    ' формат строки: "NN = Имя_папки"
-    fnum = FreeFile
-    Open filePath For Input As #fnum
-    Do While Not EOF(fnum)
-        Line Input #fnum, s
-        s = Trim(s)
+    ' W-UTF8-READ: чтение всего файла с автоопределением кодировки
+    text = SafeReadText(filePath)
+    If text = "" Then
+        ' SafeReadText уже записал [WARN] в лог — здесь только предупреждаем
+        ' пользователя и возвращаем пустую коллекцию (без прерывания).
+        MsgBox "Предупреждение P006: не удалось прочитать файл Шаги.txt " & _
+               "(ошибки кодировки отсутствуют, но файл пуст или недоступен)." & _
+               vbCrLf & filePath, vbExclamation, "Промты"
+        Set ReadStepList = col
+        Exit Function
+    End If
+
+    ' Разбить текст на строки; формат строки: "NN = Имя_папки"
+    ' (W-UTF8-READ: ADODB.Stream сохраняет переводы строки файла как есть,
+    ' поэтому сначала нормализуем CRLF/LF/CR к vbCrLf).
+    lines = Split(NormalizeLineEndings(text), vbCrLf)
+
+    For i = LBound(lines) To UBound(lines)
+        s = Trim$(lines(i))
+        ' пропуск пустых строк
         If s <> "" Then
             posEq = InStr(s, "=")
             If posEq > 0 Then
@@ -399,16 +511,16 @@ Public Function ReadStepList() As Collection
                 If nn <> "" And nm <> "" Then col.Add nn & "|" & nm
             End If
         End If
-    Loop
-    Close #fnum
+    Next i
 
     Set ReadStepList = col
     Exit Function
 
 ErrHandler:
-    Mod_Util.WriteError "P001", "ReadStepList: ошибка чтения Шаги.txt. Ошибка: " & Err.Description
-    MsgBox "Ошибка P001: не удалось прочитать файл Шаги.txt." & vbCrLf & Err.Description, _
-           vbCritical, "Промты"
+    ' Любая ошибка чтения — [WARN] в лог, пустая коллекция без прерывания.
+    Mod_Util.WriteWarning "P006", "ReadStepList: ошибка чтения Шаги.txt. Ошибка: " & Err.Description
+    MsgBox "Предупреждение P006: не удалось прочитать файл Шаги.txt." & vbCrLf & Err.Description, _
+           vbExclamation, "Промты"
     Err.Clear
     Set ReadStepList = col
 End Function
