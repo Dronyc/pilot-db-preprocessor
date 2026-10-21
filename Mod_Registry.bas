@@ -90,13 +90,6 @@ Public Sub BuildRegistries()
     Set RegTypes = CreateObject("Scripting.Dictionary")
     Set RegCoverage = CreateObject("Scripting.Dictionary")
 
-    ' Защита от пустых реестров: если данных нет — выходим сразу,
-    ' чтобы не ловить "Subscript out of range" на дальнейших этапах.
-    If RegTypes.Count = 0 And RegCoverage.Count = 0 Then
-        Mod_Util.WriteLog "BuildRegistries: нет данных для реестров (0 типов)"
-        Exit Sub
-    End If
-
     ' Поиск листа «Типы» в книге сводной (активная книга сборки)
     On Error Resume Next
     Set wsT = ActiveWorkbook.Worksheets("Типы")
@@ -119,6 +112,17 @@ Public Sub BuildRegistries()
         Exit Sub
     End If
 
+    ' Защита от пустых листов: если на листах «Типы» и «Атрибуты» нет данных
+    ' (только строки заголовков), реестры строить не из чего — выходим сразу,
+    ' чтобы не писать пустые файлы и не ловить ошибки на дальнейших этапах.
+    Dim lastRowT As Long, lastRowA As Long
+    lastRowT = wsT.Cells(wsT.Rows.Count, 1).End(xlUp).Row
+    lastRowA = wsA.Cells(wsA.Rows.Count, 1).End(xlUp).Row
+    If lastRowT <= 1 And lastRowA <= 1 Then
+        Mod_Util.WriteLog "BuildRegistries: нет данных для реестров (0 типов)"
+        Exit Sub
+    End If
+
     ' Реестр типов: обход листа «Типы» со 2-й строки, колонка 1
     lastRow = wsT.Cells(wsT.Rows.Count, 1).End(xlUp).Row
     For r = 2 To lastRow
@@ -136,6 +140,13 @@ Public Sub BuildRegistries()
             If Not RegCoverage.Exists(nm) Then RegCoverage.Add nm, True
         End If
     Next r
+
+    ' Проверка после заполнения: если циклы не добавили ни одного типа,
+    ' реестры считать непостроенными — выходим до записи на диск.
+    If RegTypes.Count = 0 Then
+        Mod_Util.WriteLog "BuildRegistries: нет данных для реестров (0 типов)"
+        Exit Sub
+    End If
 
     Mod_Util.WriteLog "BuildRegistries: типов " & RegTypes.Count & ", покрытий " & RegCoverage.Count
     Exit Sub
