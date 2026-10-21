@@ -186,7 +186,9 @@ End Function
 ' SafeReadText с автоопределением UTF-8 / Windows-1251).
 ' Если файла нет или чтение не удалось — возвращает пустую строку
 ' (вызывающий сам решает, считать ли это ошибкой).
-Private Function ReadTextFile(ByVal filePath As String) As String
+' W-DOCS-README-UPDATE: Public — функция используется Mod_Docs.UpdateReadme
+' для чтения шаблонов промтов при включении их текстов в Readme.
+Public Function ReadTextFile(ByVal filePath As String) As String
     ReadTextFile = SafeReadText(filePath)
 End Function
 
