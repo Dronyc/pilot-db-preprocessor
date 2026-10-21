@@ -325,52 +325,208 @@ End Sub
 ' ------------------------------------------------------------
 ' 9. Показать, что нашёл Препроцессор
 ' ------------------------------------------------------------
+' W-UI-DISCOVERY-FIX: вспомогательные функции для безопасного построения
+' отчёта об обнаружении. Раньше ошибка "Invalid procedure call or argument"
+' (Err.Number = 5) возникала из-за:
+'   * обращения к несуществующей папке/файлу (Dir/GetAttr/FileDateTime),
+'   * обращения к листу, отсутствующему в книге,
+'   * работы с пустым диапазоном (LastRow <= 1).
+' Все эти операции теперь выполняются только после явных проверок.
+
+' Возвращает True, если папка существует на диске.
+Private Function FolderExists(ByVal folderPath As String) As Boolean
+    Dim attr As Long
+    If Len(folderPath) = 0 Then Exit Function
+    On Error Resume Next
+    attr = GetAttr(folderPath)
+    On Error GoTo 0
+    If Err.Number <> 0 Then
+        Err.Clear
+        Exit Function
+    End If
+    FolderExists = ((attr And vbDirectory) = vbDirectory)
+End Function
+
+' Ищет самый свежий .xlsx в папке (пропуская временные файлы ~$...).
+' Возвращает полное имя файла или "" , если подходящих файлов нет.
+Private Function NewestXlsxFile(ByVal folderPath As String) As String
+    Dim fName As String
+    Dim best As String
+    Dim bestDate As Date
+    Dim tmpDate As Date
+
+    NewestXlsxFile = ""
+    If Not FolderExists(folderPath) Then Exit Function
+    fName = Dir(folderPath & "\*.xlsx")
+    Do While Len(fName) > 0
+        If Left(fName, 2) <> "~$" Then
+            On Error Resume Next
+            tmpDate = FileDateTime(folderPath & "\" & fName)
+            If Err.Number = 0 Then
+                If best = "" Then
+                    best = fName
+                    bestDate = tmpDate
+                ElseIf tmpDate > bestDate Then
+                    best = fName
+                    bestDate = tmpDate
+                End If
+            Else
+                Err.Clear
+            End If
+            On Error GoTo 0
+        End If
+        fName = Dir()
+    Loop
+    NewestXlsxFile = best
+End Function
+
+' Проверяет наличие листа с указанным именем в книге.
+Private Function SheetExistsInBook(ByVal wb As Workbook, _
+                                   ByVal sheetName As String) As Boolean
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = wb.Worksheets(sheetName)
+    On Error GoTo 0
+    If Err.Number <> 0 Then
+        Err.Clear
+        SheetExistsInBook = False
+    Else
+        SheetExistsInBook = (Not ws Is Nothing)
+    End If
+End Function
+
+' Возвращает номер последней непустой строки на листе (по столбцу 1).
+' Для пустого диапазона возвращает 0 (а не 1 по умолчанию у xlUp).
+Private Function LastUsedRowOfSheet(ByVal ws As Worksheet) As Long
+    Dim lr As Long
+    On Error Resume Next
+    lr = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    On Error GoTo 0
+    If Err.Number <> 0 Then
+        Err.Clear
+        LastUsedRowOfSheet = 0
+    ElseIf lr < 1 Then
+        LastUsedRowOfSheet = 0
+    Else
+        ' Пустой лист: xlUp указывает на строку 1, но ячейка A1 пуста.
+        If Len(Trim(CStr(ws.Cells(lr, 1).Value))) = 0 Then
+            LastUsedRowOfSheet = 0
+        Else
+            LastUsedRowOfSheet = lr
+        End If
+    End If
+End Function
+
 Public Sub ShowDiscoveryReport_Click()
+    Const MSG_NO_REPORT As String = _
+        "Отчет об обнаружении не найден. Сначала выполните анализ схемы."
+
     Dim root As String
-    Dim subName As String
+    Dim prepPath As String
+    Dim reportFile As String
+    Dim reportWb As Workbook
+    Dim wsRep As Worksheet
+    Dim lastRow As Long
+    Dim r As Long
     Dim report As String
-    Dim cnt As Long
-    Dim total As Long
-    Dim folderPath As String
-    Dim fileName As String
+    Dim lineText As String
+    Dim wasOpen As Boolean
 
     On Error GoTo ErrHandler
 
-    root = Mod_Util.GetStepsFolder()
+    root = Mod_Util.GetProjectRoot()
     If root = "" Then
-        MsgBox "Папка шагов не найдена", vbExclamation
+        MsgBox MSG_NO_REPORT, vbExclamation
         Exit Sub
     End If
 
-    report = "Карта найденных шагов:" & vbCrLf & vbCrLf
-    total = 0
+    ' --- Проверка 1: файл отчёта действительно существует -------------
+    ' Отчёт строится по результатам анализа схемы (BuildFlatStructure):
+    ' книга "Плоская_таблица_*.xlsx" в папке "02_Подготовка схемы".
+    prepPath = root & "\02_Подготовка схемы"
+    If Not FolderExists(prepPath) Then
+        MsgBox MSG_NO_REPORT, vbExclamation
+        Exit Sub
+    End If
 
-    subName = Dir(root & "\", vbDirectory)
-    Do While Len(subName) > 0
-        If subName <> "." And subName <> ".." Then
-            If (GetAttr(root & "\" & subName) And vbDirectory) = vbDirectory Then
-                folderPath = root & "\" & subName
-                cnt = 0
-                fileName = Dir(folderPath & "\*.*")
-                Do While Len(fileName) > 0
-                    cnt = cnt + 1
-                    fileName = Dir()
-                Loop
-                report = report & subName & " - файлов: " & CStr(cnt) & vbCrLf
-                total = total + cnt
-            End If
+    reportFile = NewestXlsxFile(prepPath)
+    If reportFile = "" Then
+        ' Файла результатов нет - анализ схемы ещё не выполнялся.
+        MsgBox MSG_NO_REPORT, vbExclamation
+        Exit Sub
+    End If
+    If Dir(prepPath & "\" & reportFile) = "" Then
+        MsgBox MSG_NO_REPORT, vbExclamation
+        Exit Sub
+    End If
+
+    ' --- Открытие книги отчёта (без дублирующего открытия) ------------
+    wasOpen = False
+    On Error Resume Next
+    Set reportWb = Workbooks(reportFile)
+    On Error GoTo ErrHandler
+    If Not reportWb Is Nothing Then
+        wasOpen = True
+    Else
+        Set reportWb = Workbooks.Open(prepPath & "\" & reportFile, _
+                                      ReadOnly:=True, UpdateLinks:=0, _
+                                      AddToMru:=False)
+    End If
+    If reportWb Is Nothing Then
+        MsgBox MSG_NO_REPORT, vbExclamation
+        Exit Sub
+    End If
+
+    ' --- Проверка 2: лист, к которому идёт обращение, существует ------
+    If Not SheetExistsInBook(reportWb, "Плоская_таблица") Then
+        If Not wasOpen Then reportWb.Close SaveChanges:=False
+        MsgBox MSG_NO_REPORT, vbExclamation
+        Exit Sub
+    End If
+    Set wsRep = reportWb.Worksheets("Плоская_таблица")
+
+    ' --- Проверка 3: диапазон не пуст (LastRow > 1) -------------------
+    lastRow = LastUsedRowOfSheet(wsRep)
+    If lastRow <= 1 Then
+        If Not wasOpen Then reportWb.Close SaveChanges:=False
+        MsgBox MSG_NO_REPORT, vbExclamation
+        Exit Sub
+    End If
+
+    ' --- Формирование текста отчёта -----------------------------------
+    report = "Отчет об обнаружении (" & reportFile & "):" & vbCrLf & vbCrLf
+    For r = 1 To lastRow
+        lineText = Trim(CStr(wsRep.Cells(r, 1).Value))
+        If Len(lineText) > 0 Then
+            report = report & lineText & vbCrLf
         End If
-        subName = Dir()
-    Loop
+    Next r
 
-    report = report & vbCrLf & "Всего файлов: " & CStr(total)
+    ' Защита от переполнения MsgBox (обрезка очень длинного отчёта).
+    If Len(report) > 3000 Then
+        report = Left(report, 3000) & vbCrLf & "... (см. полный отчёт в файле)"
+    End If
+
+    If Not wasOpen Then reportWb.Close SaveChanges:=False
+
     MsgBox report, vbInformation
-    Mod_Util.WriteLog "Показан отчёт обнаружения"
+    Mod_Util.WriteLog "Показан отчёт обнаружения: " & reportFile
     Exit Sub
+
+CleanUp:
+    ' Закрываем книгу отчёта, если открывали её сами.
+    On Error Resume Next
+    If Not reportWb Is Nothing Then
+        If Not wasOpen Then reportWb.Close SaveChanges:=False
+    End If
+    On Error GoTo 0
+    Exit Sub
+
 ErrHandler:
     Mod_Util.WriteLog "Ошибка в ShowDiscoveryReport_Click: " & Err.Description
-    MsgBox "Ошибка: " & Err.Description, vbExclamation
+    MsgBox MSG_NO_REPORT, vbExclamation
     Err.Clear
+    GoTo CleanUp
 End Sub
 
 ' ------------------------------------------------------------
