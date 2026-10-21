@@ -6,7 +6,46 @@ Option Explicit
 ' Реализация W4 (разделы 6 и 10 спецификации Spec_Dispatcher.md).
 ' Коды ошибок: D001 — нет листа 'Readme', D002 — ошибка создания папки docs
 ' или записи файла Readme.md.
+' W-DOCS-README-UPDATE: в конец Readme добавляются разделы «Workflow» и
+' «Восстановление шаблонов» с полными текстами шаблонов промтов из папки
+' 04_Промты\Шаблоны.
 ' ============================================================================
+
+' ---------------------------------------------------------------------------
+' КОНСТАНТЫ (W-DOCS-README-UPDATE)
+' ---------------------------------------------------------------------------
+
+' Папки, в которых UpdateReadme ищет файлы шаблонов промтов (в порядке
+' приоритета): внутренняя папка проекта и внешняя копия рядом с .xlsm
+' (см. Mod_Folders: FOLDER_PROMPT_TEMPLATES / FOLDER_EXTERNAL_TEMPLATES).
+Private Const TEMPLATES_SUBFOLDERS As String = "04_Промты\Шаблоны|Шаблоны"
+
+' Имена файлов шаблонов промтов, включаемых в раздел «Восстановление шаблонов».
+Private Const TEMPLATE_STEP_00 As String = "prompt_step_00_template.md"
+Private Const TEMPLATE_STEP_V1 As String = "prompt_step_template_v1.md"
+Private Const TEMPLATE_FIX_V10 As String = "prompt_fix_v1.0.md"
+Private Const TEMPLATE_SETTINGS As String = "prompt_settings_template.md"
+
+' Текст вместо ненайденного (или нечитаемого/пустого) файла шаблона.
+Private Const TEMPLATE_NOT_FOUND As String = "[Файл не найден]"
+
+' Код предупреждения для журнала при отсутствии файла шаблона.
+Private Const WARN_CODE_TEMPLATE_MISSING As String = "D003"
+
+' Краткое описание процесса (раздел «## Workflow»). Используется как
+' текст-заглушка, если отдельный файл описания Workflow отсутствует.
+Private Const WORKFLOW_DESCRIPTION As String = _
+    "Workflow Препроцессора — последовательность шагов подготовки базы данных пилота:" & vbCrLf & _
+    "1. Создать папки проекта и проверить наличие исходных файлов." & vbCrLf & _
+    "2. Собрать плоскую таблицу из схемы и выполнить анализ (типы, атрибуты)." & vbCrLf & _
+    "3. Сформировать реестры типов и покрытия, сводную таблицу." & vbCrLf & _
+    "4. По списку шагов (04_Промты\Шаги.txt) генерировать промты следующего шага" & vbCrLf & _
+    "   по шаблону prompt_step_template_v1.md; для декомпозиции — Промт №0" & vbCrLf & _
+    "   по шаблону prompt_step_00_template.md." & vbCrLf & _
+    "5. При ошибках в результатах — формировать промт исправления" & vbCrLf & _
+    "   по шаблону prompt_fix_v1.0.md." & vbCrLf & _
+    "6. Правки вносятся только в файлы папок шагов; настройки — через" & vbCrLf & _
+    "   prompt_settings_template.md. Логи — в 05_Логи."
 
 ' ---------------------------------------------------------------------------
 ' ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Private)
@@ -57,6 +96,120 @@ Private Sub SaveTextToFile(ByVal filePath As String, ByVal content As String)
     Next i
     Close #fnum
 End Sub
+
+' Возвращает полный путь к первому существующему файлу шаблона среди
+' папок-кандидатов (TEMPLATES_SUBFOLDERS), либо пустую строку, если файл
+' нигде не найден.
+Private Function FindTemplatePath(ByVal root As String, _
+                                  ByVal templateName As String) As String
+    Dim dirs() As String
+    Dim i As Long
+    Dim candidate As String
+
+    dirs = Split(TEMPLATES_SUBFOLDERS, "|")
+    For i = LBound(dirs) To UBound(dirs)
+        candidate = NormPath(root) & "\" & dirs(i) & "\" & templateName
+        If Len(Dir(candidate, vbNormal)) > 0 Then
+            FindTemplatePath = candidate
+            Exit Function
+        End If
+    Next i
+
+    FindTemplatePath = ""
+End Function
+
+' Читает текст файла шаблона через Mod_Prompt.ReadTextFile (обёртка над
+' SafeReadText с автоопределением UTF-8 / Windows-1251). Если файл не найден
+' или чтение вернуло пустой результат — пишет [WARN] в лог и возвращает
+' текст TEMPLATE_NOT_FOUND ("[Файл не найден]").
+Private Function ReadTemplateText(ByVal templatePath As String, _
+                                  ByVal templateName As String) As String
+    Dim text As String
+
+    If Len(templatePath) = 0 Or Len(Dir(templatePath, vbNormal)) = 0 Then
+        ' Файл не найден — [WARN] в лог и текст-заглушка.
+        Mod_Util.WriteWarning WARN_CODE_TEMPLATE_MISSING, _
+            "UpdateReadme: шаблон '" & templateName & "' не найден в папке " & _
+            TEMPLATES_SUBFOLDERS
+        ReadTemplateText = TEMPLATE_NOT_FOUND
+        Exit Function
+    End If
+
+    On Error Resume Next
+    text = Mod_Prompt.ReadTextFile(templatePath)
+    If Err.Number <> 0 Then
+        Mod_Util.WriteWarning WARN_CODE_TEMPLATE_MISSING, _
+            "UpdateReadme: ошибка чтения шаблона '" & templateName & "'. Ошибка: " & Err.Description
+        text = ""
+        Err.Clear
+    End If
+    On Error GoTo 0
+
+    If Trim$(text) = "" Then
+        ' SafeReadText при пустом/нечитаемом файле уже пишет [WARN] P006;
+        ' дублируем предупреждение с именем шаблона и ставим заглушку.
+        Mod_Util.WriteWarning WARN_CODE_TEMPLATE_MISSING, _
+            "UpdateReadme: шаблон '" & templateName & "' пуст или не может быть прочитан: " & templatePath
+        text = TEMPLATE_NOT_FOUND
+    End If
+
+    ReadTemplateText = text
+End Function
+
+' Формирует markdown-блок одного восстановленного шаблона: заголовок
+' "### <имя файла>" и блок кода ```markdown ... ```.
+Private Function BuildTemplateBlock(ByVal templateName As String, _
+                                    ByVal templateText As String) As String
+    Dim s As String
+
+    s = "### " & templateName & vbLf & vbLf
+    s = s & "```markdown" & vbLf
+    s = s & Replace(templateText, vbCrLf, vbLf) & vbLf
+    s = s & "```" & vbLf
+
+    BuildTemplateBlock = s
+End Function
+
+' Добавляет в конец текста Readme разделы «## Workflow» и
+' «## Восстановление шаблонов» (W-DOCS-README-UPDATE). Шаблоны читаются из
+' папки <корень>\04_Промты\Шаблоны; отсутствующие файлы заменяются текстом
+' "[Файл не найден]" с записью [WARN] в лог.
+Private Function AppendRecoverySections(ByVal baseText As String, _
+                                        ByVal root As String) As String
+    Dim s As String
+    Dim names() As String
+    Dim i As Long
+
+    s = baseText
+    ' Гарантируем ровно один перевод строки перед новыми разделами.
+    Do While Len(s) >= 1 And (Right(s, 1) = vbLf Or Right(s, 1) = vbCr)
+        s = Left(s, Len(s) - 1)
+    Loop
+    s = s & vbLf & vbLf
+
+    ' --- Раздел «Workflow» (краткое описание процесса, текст-заглушка
+    '     из константы WORKFLOW_DESCRIPTION) -------------------------------
+    s = s & "## Workflow" & vbLf
+    s = s & Replace(WORKFLOW_DESCRIPTION, vbCrLf, vbLf) & vbLf
+    s = s & vbLf
+
+    ' --- Раздел «Восстановление шаблонов» ----------------------------------
+    s = s & "## Восстановление шаблонов" & vbLf
+    s = s & "Если вы потеряли папку 'Шаблоны', скопируйте тексты ниже " & _
+        "в соответствующие файлы." & vbLf
+    s = s & vbLf
+
+    names = Split(TEMPLATE_STEP_00 & "|" & TEMPLATE_STEP_V1 & "|" & _
+                  TEMPLATE_FIX_V10 & "|" & TEMPLATE_SETTINGS, "|")
+
+    For i = LBound(names) To UBound(names)
+        s = s & BuildTemplateBlock(names(i), _
+               ReadTemplateText(FindTemplatePath(root, names(i)), names(i)))
+        s = s & vbLf
+    Next i
+
+    AppendRecoverySections = s
+End Function
 
 ' ---------------------------------------------------------------------------
 ' ПУБЛИЧЕСКИЕ ПРОЦЕДУРЫ И ФУНКЦИИ
@@ -122,7 +275,12 @@ Public Sub UpdateReadme()
 
     If Dir(docsPath, vbDirectory) = "" Then EnsureFolder docsPath
 
-    ' 6. Сохранение файла встроенными средствами VBA.
+    ' 6. W-DOCS-README-UPDATE: добавляем в конец Readme разделы «Workflow»
+    '    и «Восстановление шаблонов» с полными текстами шаблонов промтов
+    '    из 04_Промты\Шаблоны (читаются через Mod_Prompt.ReadTextFile).
+    textFromSheet = AppendRecoverySections(textFromSheet, root)
+
+    ' 7. Сохранение файла встроенными средствами VBA.
     SaveTextToFile filePath, textFromSheet
 
     Mod_Util.WriteLog "UpdateReadme: файл сохранён в " & filePath
