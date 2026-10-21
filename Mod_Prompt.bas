@@ -6,8 +6,35 @@ Option Explicit
 ' чтение списка и текущей позиции шагов.
 ' Реализация W4 (разделы 2, 3, 8, 9, 13 спецификации Spec_Dispatcher.md).
 ' Коды ошибок: P001 — нет Шаги.txt, P002 — ошибка формирования промта шага,
-' P003 — ошибка формирования промта исправления.
+' P003 — ошибка формирования промта исправления,
+' P004 — формирование Промта №0 (декомпозиция) при отсутствии Шаги.txt
+'      (W-PROMPT-GEN-STEP-00).
 ' ============================================================================
+
+' ---------------------------------------------------------------------------
+' КОНСТАНТЫ (W-PROMPT-GEN-STEP-00)
+' ---------------------------------------------------------------------------
+
+' Имя шаблона Промта №0 (декомпозиция) в 04_Промты\Шаблоны.
+Private Const TEMPLATE_STEP0_NAME As String = "prompt_step_00_template.md"
+' Имя файла Промта №0, сохраняемого в 04_Промты.
+Private Const STEP0_PROMPT_FILE As String = "Промт_шаг_00_Декомпозиция.md"
+' Плейсхолдер вместо ненайденного входного файла.
+Private Const STEP0_NOT_FOUND As String = "НЕ НАЙДЕН"
+
+' Правила декомпозиции из Промта v7.13 (п. 10.1 «Состав шагов» и п. 10.4
+' «ДЕКОМПОЗИЦИЯ») — строковая константа для подстановки в {Decomposition_Rules}
+' шаблона prompt_step_00_template.md (W-PROMPT-GEN-STEP-00).
+Private Const DECOMPOSITION_RULES_V713 As String = _
+    "Источник: Промт генератора v7.13, п. 10.1 (состав шагов) и п. 10.4 (декомпозиция на 19 шагов)." & vbCrLf & _
+    "10.1. Состав шагов:" & vbCrLf & _
+    "- ШАГ −1 (внешний, отдельная задача): генерация справочника контрагентов по Промту v9.1 → слияние с текущей конфигурацией → замена файла конфигурации → пополнение РЕЕСТРА ТИПОВ и РЕЕСТРА ТИПОВ СПРАВОЧНИКА КОНТРАГЕНТОВ. Шаги настоящего промта запускаются только после завершения ШАГА −1." & vbCrLf & _
+    "- ШАГ 0 — СКЕЛЕТ: ВСЕ папки (фазы, стадии, этапы, папки ЦИМ) + их атрибуты; имена camelCase по п. 5.2; РЕЕСТР фиксирует полный список имён папок для проверок коллизий." & vbCrLf & _
+    "- ШАГ 1 — УНИВЕРСАЛЬНЫЕ И ПАРАМЕТРИЗУЕМЫЕ типы + их атрибуты." & vbCrLf & _
+    "- ШАГИ 2…N — документы стадий: Фаза A — типы документов (создаются, если отсутствуют в РЕЕСТРЕ ТИПОВ; коллизия с папкой решается суффиксом _doc); Фаза B — атрибуты для всех типов текущей области, ОТСУТСТВУЮЩИХ в РЕЕСТРЕ ПОКРЫТИЯ АТРИБУТАМИ." & vbCrLf & _
+    "- ШАГ N+1 — ФИНАЛЬНЫЙ АУДИТ: сверка РЕЕСТРА ТИПОВ с РЕЕСТРОМ ПОКРЫТИЯ; генерация атрибутов для пропущенных типов; снятие остаточных ошибок валидатора." & vbCrLf & _
+    "10.4. ДЕКОМПОЗИЦИЯ (19 шагов): ШАГ 0 скелет папок Фаз 0–3; ШАГ 1 универсальные + параметризуемые; ШАГ 2 Фаза 0 + 1.1; ШАГ 3 1.2–1.3; ШАГ 4 2.1; ШАГ 5 2.2; ШАГ 6 2.3; ШАГ 7 2.4; ШАГ 8 2.5; ШАГ 9 2.6; ШАГ 10 2.7; ШАГ 11 2.8.1; ШАГ 12 2.8.2; ШАГ 13 2.8.3; ШАГ 14 2.8.4; ШАГ 15 2.8.5–2.8.6; ШАГ 16 2.9; ШАГ 17 2.10; ШАГ 18 Фаза 3." & vbCrLf & _
+    "Формат строк Шаги.txt: NN = Имя_папки (NN — номер шага, Имя_папки — имя папки вида Шаг_NN_Название в 03_Результаты генерации\01_По шагам)."
 
 ' ---------------------------------------------------------------------------
 ' ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Private)
@@ -189,6 +216,24 @@ Private Function ReadErrorsSheetText(ByVal wb As Workbook, ByRef outText As Stri
     End If
     outText = res
     ReadErrorsSheetText = True
+End Function
+
+' Возвращает имя первого найденного файла по маске в папке (для Промта №0).
+' Если файлов нет — возвращает "". Временные файлы Office (~$) пропускаются.
+Private Function FirstMatchFile(ByVal folderPath As String, ByVal mask As String) As String
+    Dim fName As String
+
+    FirstMatchFile = ""
+    If Dir(folderPath, vbDirectory) = "" Then Exit Function
+
+    fName = Dir(folderPath & "\" & mask)
+    Do While fName <> ""
+        If Left(fName, 2) <> "~$" Then       ' пропускаем временные файлы Office
+            FirstMatchFile = fName
+            Exit Function
+        End If
+        fName = Dir()
+    Loop
 End Function
 
 ' Собирает фрагмент схемы из листа «Плоская_таблица» книги, сохранённой
@@ -468,6 +513,13 @@ Public Sub MakeNextStepPrompt()
     readyPath = root & "\03_Результаты генерации\04_Промты_готовые"
     registriesPath = root & "\03_Результаты генерации\03_Реестры"
 
+    ' 0. W-PROMPT-GEN-STEP-00: если Шаги.txt отсутствует — вместо промта
+    '    следующего шага формируем Промт №0 (декомпозиция) и выходим.
+    If Len(Dir(promptsPath & "\Шаги.txt", vbNormal)) = 0 Then
+        GenerateStepZeroPrompt
+        Exit Sub
+    End If
+
     ' 1. Список шагов (при отсутствии Шаги.txt ReadStepList сама
     '    сообщит ошибку P001 и вернёт пустую коллекцию)
     Set steps = ReadStepList()
@@ -618,6 +670,116 @@ ErrHandler:
     Mod_Util.WriteError "P002", "MakeNextStepPrompt: ошибка формирования промта шага. Ошибка: " & Err.Description
     MsgBox "Ошибка P002: не удалось сформировать промт следующего шага." & vbCrLf & _
            Err.Description, vbCritical, "Промт следующего шага"
+    Err.Clear
+End Sub
+
+' Формирует Промт №0 (декомпозиция) при отсутствии Шаги.txt
+' (W-PROMPT-GEN-STEP-00):
+' 1. Собирает пути к папкам 01_Исходные данные\01_Схема / 02_Описание /
+'    03_Конфигурация и находит реальные имена файлов через Dir по маскам
+'    (*.xlsx; *.docx или *.*; *.xml или *.pilotcfx).
+' 2. Если файла нет — MsgBox "Отсутствует файл в папке X", [WARN] в лог,
+'    в промт подставляется плейсхолдер "НЕ НАЙДЕН", работа продолжается.
+' 3. Читает шаблон prompt_step_00_template.md из 04_Промты\Шаблоны,
+'    подставляет {SCHEMA_FILENAME}, {DESCRIPTION_FILENAME},
+'    {CONFIG_FILENAME} и {Decomposition_Rules} (правила декомпозиции v7.13).
+' 4. Сохраняет результат в 04_Промты\Промт_шаг_00_Декомпозиция.md.
+Private Sub GenerateStepZeroPrompt()
+    Dim root As String
+    Dim promptsPath As String
+    Dim schemaFolder As String          ' 01_Исходные данные\01_Схема
+    Dim descFolder As String            ' 01_Исходные данные\02_Описание
+    Dim configFolder As String          ' 01_Исходные данные\03_Конфигурация
+    Dim templatePath As String          ' 04_Промты\Шаблоны\prompt_step_00_template.md
+    Dim outFile As String               ' 04_Промты\Промт_шаг_00_Декомпозиция.md
+    Dim schemaName As String            ' найденное имя файла схемы
+    Dim descName As String              ' найденное имя файла описания
+    Dim configName As String            ' найденное имя файла конфигурации
+    Dim missingList As String           ' перечень отсутствующих входных файлов
+    Dim template As String
+    Dim result As String
+
+    On Error GoTo ErrHandler
+
+    root = NormPath(Mod_Util.GetProjectRoot)
+    promptsPath = root & "\04_Промты"
+    schemaFolder = root & "\01_Исходные данные\01_Схема"
+    descFolder = root & "\01_Исходные данные\02_Описание"
+    configFolder = root & "\01_Исходные данные\03_Конфигурация"
+    templatePath = promptsPath & "\Шаблоны\" & TEMPLATE_STEP0_NAME
+    outFile = promptsPath & "\" & STEP0_PROMPT_FILE
+
+    Mod_Util.WriteLog "GenerateStepZeroPrompt: Шаги.txt не найден, формирую Промт №0 (декомпозиция)"
+
+    ' 1. Реальные имена входных файлов (Dir по маскам, первый найденный)
+    schemaName = FirstMatchFile(schemaFolder, "*.xlsx")
+    If schemaName = "" Then schemaName = FirstMatchFile(schemaFolder, "*.xlsm")
+
+    descName = FirstMatchFile(descFolder, "*.docx")
+    If descName = "" Then descName = FirstMatchFile(descFolder, "*.*")
+
+    configName = FirstMatchFile(configFolder, "*.xml")
+    If configName = "" Then configName = FirstMatchFile(configFolder, "*.pilotcfx")
+
+    ' 2. Отсутствующие файлы — MsgBox + [WARN] + плейсхолдер "НЕ НАЙДЕН";
+    '    формирование Промта №0 при этом НЕ прерывается
+    If schemaName = "" Then
+        Mod_Util.WriteWarning "P004", "GenerateStepZeroPrompt: отсутствует файл в папке 01_Схема (" & schemaFolder & ")"
+        If missingList <> "" Then missingList = missingList & ", "
+        missingList = missingList & "01_Схема"
+        schemaName = STEP0_NOT_FOUND
+    End If
+    If descName = "" Then
+        Mod_Util.WriteWarning "P004", "GenerateStepZeroPrompt: отсутствует файл в папке 02_Описание (" & descFolder & ")"
+        If missingList <> "" Then missingList = missingList & ", "
+        missingList = missingList & "02_Описание"
+        descName = STEP0_NOT_FOUND
+    End If
+    If configName = "" Then
+        Mod_Util.WriteWarning "P004", "GenerateStepZeroPrompt: отсутствует файл в папке 03_Конфигурация (" & configFolder & ")"
+        If missingList <> "" Then missingList = missingList & ", "
+        missingList = missingList & "03_Конфигурация"
+        configName = STEP0_NOT_FOUND
+    End If
+    If missingList <> "" Then
+        MsgBox "Отсутствует файл в папке: " & missingList & "." & vbCrLf & _
+               "В Промте №0 вместо имени подставлено """ & STEP0_NOT_FOUND & """.", _
+               vbExclamation, "Промт №0 (декомпозиция)"
+    End If
+
+    ' 3. Шаблон Промта №0 из 04_Промты\Шаблоны
+    template = ReadTextFile(templatePath)
+    If template = "" Then
+        Mod_Util.WriteError "P004", "GenerateStepZeroPrompt: не найден шаблон " & templatePath
+        MsgBox "Ошибка P004: не найден шаблон " & TEMPLATE_STEP0_NAME & _
+               " в папке 04_Промты\Шаблоны.", vbCritical, "Промт №0 (декомпозиция)"
+        Exit Sub
+    End If
+
+    ' 4. Подстановка плейсхолдеров реальными именами файлов и правилами v7.13
+    result = template
+    result = ReplaceIfPresent(result, "{SCHEMA_FILENAME}", schemaName)
+    result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descName)
+    result = ReplaceIfPresent(result, "{CONFIG_FILENAME}", configName)
+    result = ReplaceIfPresent(result, "{Decomposition_Rules}", DECOMPOSITION_RULES_V713)
+
+    ' 5. Сохранение результата в 04_Промты
+    EnsureFolder promptsPath
+    SaveTextFile outFile, result
+
+    Mod_Util.WriteLog "GenerateStepZeroPrompt: сохранён " & outFile
+
+    ' 6. Инструкция пользователю
+    MsgBox "Файл Шаги.txt не найден. Сформирован Промт №0:" & vbCrLf & _
+           outFile & vbCrLf & vbCrLf & _
+           "Загрузите его в ИИ, получите Шаги.txt и сохраните в 04_Промты.", _
+           vbInformation, "Промт №0 (декомпозиция)"
+    Exit Sub
+
+ErrHandler:
+    Mod_Util.WriteError "P004", "GenerateStepZeroPrompt: ошибка формирования Промта №0. Ошибка: " & Err.Description
+    MsgBox "Ошибка P004: не удалось сформировать Промт №0 (декомпозицию)." & vbCrLf & _
+           Err.Description, vbCritical, "Промт №0 (декомпозиция)"
     Err.Clear
 End Sub
 
