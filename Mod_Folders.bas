@@ -7,6 +7,8 @@ Option Explicit
 ' Коды ошибок модуля:
 '   F001 - папка проекта не определена (книга .xlsm не сохранена);
 '   F002 - ошибка создания папки (MkDir);
+'   F003 - ошибка копирования файла шаблона (FileCopy);
+'   F004 - внешняя папка "Шаблоны" не найдена (предупреждение);
 '   F005 - несоответствие исходных файлов в CheckSourceFolders.
 ' Пути строятся от корня проекта — папки, где лежит .xlsm
 ' (ThisWorkbook.Path). Никаких настроек и диалогов выбора.
@@ -22,7 +24,6 @@ Private Const FOLDER_SOURCE As String = "01_Исходные данные"
 Private Const FOLDER_SCHEMA As String = "01_Исходные данные\01_Схема"
 Private Const FOLDER_DESC As String = "01_Исходные данные\02_Описание"
 Private Const FOLDER_CONFIG As String = "01_Исходные данные\03_Конфигурация"
-Private Const FOLDER_LAYOUT As String = "01_Исходные данные\04_Макет"
 Private Const FOLDER_PREP As String = "02_Подготовка схемы"
 Private Const FOLDER_RESULTS As String = "03_Результаты генерации"
 Private Const FOLDER_STEPS As String = "03_Результаты генерации\01_По шагам"
@@ -30,11 +31,32 @@ Private Const FOLDER_SUMMARY As String = "03_Результаты генерац
 Private Const FOLDER_REGISTRY As String = "03_Результаты генерации\03_Реестры"
 Private Const FOLDER_READY_PROMPTS As String = "03_Результаты генерации\04_Промты_готовые"
 Private Const FOLDER_PROMPTS As String = "04_Промты"
+Private Const FOLDER_PROMPT_TEMPLATES As String = "04_Промты\Шаблоны"   ' папка шаблонов промтов
+Private Const FOLDER_EXTERNAL_TEMPLATES As String = "Шаблоны"           ' внешняя папка рядом с .xlsm
 
 ' Папка существует?
 Private Function FolderExists(ByVal fullPath As String) As Boolean
     FolderExists = (Dir(fullPath, vbDirectory) <> "")
 End Function
+
+' Создаёт цепочку папок по полному пути (аналог mkdir -p).
+' Существующие папки не трогаются. Препроцессор никогда ничего не удаляет.
+Private Sub EnsureFolder(ByVal folderPath As String)
+    Dim parts() As String
+    Dim cur As String
+    Dim i As Long
+
+    If Dir(folderPath, vbDirectory) <> "" Then Exit Sub
+
+    parts = Split(folderPath, "\")
+    cur = parts(0)                        ' диск или UNC-префикс
+    For i = 1 To UBound(parts)
+        If parts(i) <> "" Then
+            cur = cur & "\" & parts(i)
+            If Dir(cur, vbDirectory) = "" Then MkDir cur
+        End If
+    Next i
+End Sub
 
 ' Считает количество файлов с указанным расширением в папке.
 ' Расширение передаётся в виде ".xlsx" и т.п. Учитываются только файлы.
@@ -84,7 +106,6 @@ Public Sub CreateProjectFolders()
                     FOLDER_SCHEMA, _
                     FOLDER_DESC, _
                     FOLDER_CONFIG, _
-                    FOLDER_LAYOUT, _
                     FOLDER_PREP, _
                     FOLDER_RESULTS, _
                     FOLDER_STEPS, _
@@ -100,7 +121,15 @@ Public Sub CreateProjectFolders()
         End If
     Next i
 
+    ' Подпапка шаблонов промтов: "04_Промты\Шаблоны" (через EnsureFolder).
+    EnsureFolder root & "\" & FOLDER_PROMPT_TEMPLATES
+
     Mod_Util.WriteLog "CreateProjectFolders: структура создана/проверена"
+
+    ' Копирование шаблонов из внешней папки "Шаблоны" (рядом с .xlsm).
+    ' Отсутствие папки или ошибки записи не прерывают создание структуры.
+    CopyPromptTemplates root
+
     MsgBox "Структура папок проекта создана/проверена.", vbInformation, "Папки проекта"
     Exit Sub
 
@@ -113,11 +142,61 @@ ErrHandler:
     Err.Clear
 End Sub
 
+' Копирует все файлы из внешней папки "Шаблоны" (в корне проекта, рядом с
+' .xlsm) во внутреннюю папку "04_Промты\Шаблоны".
+' * Если внешняя папка "Шаблоны" отсутствует - выводится MsgBox и в лог
+'   пишется предупреждение; создание остальной структуры НЕ прерывается.
+' * Ошибки отдельных FileCopy (например, нет прав на запись) фиксируются
+'   в логе, но не приводят к аварийному завершению (On Error Resume Next).
+Private Sub CopyPromptTemplates(ByVal root As String)
+    Dim srcPath As String             ' внешняя папка "Шаблоны"
+    Dim dstPath As String             ' "04_Промты\Шаблоны"
+    Dim fileName As String
+    Dim copiedCount As Long
+    Dim failedCount As Long
+
+    srcPath = root & "\" & FOLDER_EXTERNAL_TEMPLATES
+    dstPath = root & "\" & FOLDER_PROMPT_TEMPLATES
+
+    If Not FolderExists(srcPath) Then
+        Mod_Util.WriteWarning "F004", "Mod_Folders: папка ""Шаблоны"" не найдена, " & _
+                                      "копирование шаблонов пропущено."
+        MsgBox "Папка 'Шаблоны' не найдена. Шаблоны промтов не скопированы. " & _
+               "Вы можете восстановить их из файла Readme.", _
+               vbExclamation, "Шаблоны промтов"
+        Exit Sub
+    End If
+
+    ' Папка назначения должна существовать (создана в CreateProjectFolders).
+    EnsureFolder dstPath
+
+    ' Копирование с пофайловой фиксацией ошибок: отсутствие прав на запись
+    ' не должно ломать создание структуры.
+    On Error Resume Next
+    fileName = Dir(srcPath & "\*")
+    Do While fileName <> ""
+        Err.Clear
+        FileCopy srcPath & "\" & fileName, dstPath & "\" & fileName
+        If Err.Number <> 0 Then
+            failedCount = failedCount + 1
+            Mod_Util.WriteError "F003", "CopyPromptTemplates: не удалось скопировать файл """ & _
+                                        fileName & """. Ошибка: " & Err.Description
+            Err.Clear
+        Else
+            copiedCount = copiedCount + 1
+        End If
+        fileName = Dir()
+    Loop
+    On Error GoTo 0
+
+    Mod_Util.WriteLog "CopyPromptTemplates: скопировано файлов: " & copiedCount & _
+                      ", с ошибками: " & failedCount
+End Sub
+
 ' Проверяет наличие исходных папок и файлов в них (кнопка 2, раздел 4):
 '   * 01_Схема        - ровно один .xlsx;
 '   * 02_Описание     - ровно один .docx;
-'   * 03_Конфигурация - ровно один .txt;
-'   * 04_Макет        - 0 или 1 .xlsx.
+'   * 03_Конфигурация - ровно один .pilotcfx.
 ' Все несоответствия пишутся в лог предупреждениями (F005).
 ' Возвращает True, если все условия выполнены, иначе False.
 Public Function CheckSourceFolders() As Boolean
@@ -143,34 +222,24 @@ Public Function CheckSourceFolders() As Boolean
         Exit Function
     End If
 
-    ' четыре проверяемые папки: имя и требуемое расширение
-    folders = Array(FOLDER_SCHEMA, FOLDER_DESC, FOLDER_CONFIG, FOLDER_LAYOUT)
-    exts = Array(".xlsx", ".docx", ".pilotcfx", ".xlsx")
+    ' три проверяемые папки: имя и требуемое расширение
+    folders = Array(FOLDER_SCHEMA, FOLDER_DESC, FOLDER_CONFIG)
+    exts = Array(".xlsx", ".docx", ".pilotcfx")
 
     For i = LBound(folders) To UBound(folders)
         folderFull = root & "\" & CStr(folders(i))
         cnt = CountFilesByExt(folderFull, CStr(exts(i)))
 
-        If i = 3 Then
-            ' 04_Макет - допускается 0 или 1 файл .xlsx
-            If cnt > 1 Then
-                Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                           " - найдено " & cnt & " файлов " & CStr(exts(i)) & _
-                                           ", ожидается не более 1"
-                result = False
-            End If
-        Else
-            ' остальные папки - ровно один файл нужного расширения
-            If cnt = 0 Then
-                Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                           " - файл " & CStr(exts(i)) & " не найден"
-                result = False
-            ElseIf cnt > 1 Then
-                Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                           " - найдено " & cnt & " файлов " & CStr(exts(i)) & _
-                                           ", ожидается ровно 1"
-                result = False
-            End If
+        ' каждая папка - ровно один файл нужного расширения
+        If cnt = 0 Then
+            Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
+                                       " - файл " & CStr(exts(i)) & " не найден"
+            result = False
+        ElseIf cnt > 1 Then
+            Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
+                                       " - найдено " & cnt & " файлов " & CStr(exts(i)) & _
+                                       ", ожидается ровно 1"
+            result = False
         End If
     Next i
 
