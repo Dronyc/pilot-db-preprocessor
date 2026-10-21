@@ -48,7 +48,9 @@ Private Function ReadTextFile(ByVal filePath As String) As String
     Dim s As String
     Dim res As String
 
-    If Dir(filePath) = "" Then
+    ' W-PROMPT-PATHS-REFACTOR: vbNormal — строгая проверка существования
+    ' именно файла (а не папки с таким же именем).
+    If Len(Dir(filePath, vbNormal)) = 0 Then
         ReadTextFile = ""
         Exit Function
     End If
@@ -193,6 +195,7 @@ End Function
 ' в папке 02_Подготовка схемы (последняя по времени изменения книга).
 ' Если файла/листа нет — возвращает "" и пишет предупреждение в лог.
 Private Function GetSchemaFragment() As String
+    Dim root As String
     Dim prepPath As String
     Dim fileName As String
     Dim candidates(1 To 3) As String
@@ -211,7 +214,10 @@ Private Function GetSchemaFragment() As String
 
     GetSchemaFragment = ""
 
-    prepPath = Mod_Util.GetProjectRoot & "\02_Подготовка схемы"
+    ' W-PROMPT-PATHS-REFACTOR: нормализация корневого пути (защита от
+    ' двойных слешей, если GetProjectRoot вернёт путь с завершающим "\")
+    root = NormPath(Mod_Util.GetProjectRoot)
+    prepPath = root & "\02_Подготовка схемы"
     If Dir(prepPath, vbDirectory) = "" Then
         Mod_Util.WriteWarning "P002", "GetSchemaFragment: папка 02_Подготовка схемы не найдена, схема не включена."
         Exit Function
@@ -290,6 +296,7 @@ End Function
 ' При отсутствии файла: ошибка P001, MsgBox, пустая коллекция.
 Public Function ReadStepList() As Collection
     Dim col As Collection
+    Dim root As String
     Dim fnum As Integer
     Dim s As String
     Dim posEq As Long
@@ -301,10 +308,13 @@ Public Function ReadStepList() As Collection
     On Error GoTo ErrHandler
 
     Dim filePath As String
-    filePath = Mod_Util.GetProjectRoot & "\04_Промты\Шаги.txt"
+    ' W-PROMPT-PATHS-REFACTOR: нормализация корневого пути (защита от
+    ' двойных слешей, если GetProjectRoot вернёт путь с завершающим "\")
+    root = NormPath(Mod_Util.GetProjectRoot)
+    filePath = root & "\04_Промты\Шаги.txt"
 
     ' файла нет ? P001, MsgBox, пустая коллекция
-    If Dir(filePath) = "" Then
+    If Len(Dir(filePath, vbNormal)) = 0 Then
         Mod_Util.WriteError "P001", "ReadStepList: не найден Шаги.txt"
         MsgBox "Ошибка P001: не найден файл Шаги.txt (" & vbCrLf & filePath & ")", _
                vbCritical, "Промты"
@@ -345,6 +355,7 @@ End Function
 ' Если папок нет — возвращает "".
 Public Function ReadCurrentStep() As String
     Dim steps As Collection
+    Dim root As String
     Dim stepsPath As String
     Dim i As Long
     Dim nn As String
@@ -359,7 +370,10 @@ Public Function ReadCurrentStep() As String
     If steps Is Nothing Then Exit Function
     If steps.Count = 0 Then Exit Function
 
-    stepsPath = Mod_Util.GetProjectRoot & "\03_Результаты генерации\01_По шагам"
+    ' W-PROMPT-PATHS-REFACTOR: нормализация корневого пути (защита от
+    ' двойных слешей, если GetProjectRoot вернёт путь с завершающим "\")
+    root = NormPath(Mod_Util.GetProjectRoot)
+    stepsPath = root & "\03_Результаты генерации\01_По шагам"
     If Dir(stepsPath, vbDirectory) = "" Then Exit Function
 
     ' идём по порядку Шаги.txt и запоминаем последнюю существующую папку
@@ -584,9 +598,12 @@ Public Sub MakeNextStepPrompt()
 
     ' 9. Папка шага создаётся только по факту формирования промта (раздел 3)
     stepFolder = stepsPath & "\" & nextName
+    ' Создаём папку шага как маркер для ReadCurrentStep,
+    ' сам промт сохраняется в readyPath.
     EnsureFolder stepFolder
 
-    ' 10. Сохранение готового промта
+    ' 10. Сохранение готового промта в 04_Промты_готовые
+    ' (централизованное хранение готовых промтов)
     EnsureFolder readyPath
     promptFile = readyPath & "\Промт_шаг_" & nextNN & ".md"
     SaveTextFile promptFile, result
