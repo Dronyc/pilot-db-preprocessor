@@ -8,7 +8,8 @@ Option Explicit
 ' Коды ошибок: P001 — нет Шаги.txt, P002 — ошибка формирования промта шага,
 ' P003 — ошибка формирования промта исправления,
 ' P004 — формирование Промта №0 (декомпозиция) при отсутствии Шаги.txt
-'      (W-PROMPT-GEN-STEP-00).
+'      (W-PROMPT-GEN-STEP-00),
+' P005 — ошибка сохранения текстового файла в UTF-8 (W-UTF8-EXPORT).
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
@@ -97,19 +98,36 @@ Private Function ReadTextFile(ByVal filePath As String) As String
     ReadTextFile = res
 End Function
 
-' Сохраняет строку в текстовый файл (перезаписывает существующий).
-Private Sub SaveTextFile(ByVal filePath As String, ByVal content As String)
-    Dim fnum As Integer
-    Dim lines() As String
-    Dim i As Long
+' Сохраняет строку в текстовый файл в кодировке UTF-8 (W-UTF8-EXPORT).
+' Перезаписывает существующий файл. Встроенный оператор Print # пишет в
+' ANSI (Windows-1251), из-за чего кириллица в промтах отображается как
+' «кракозябры» в UTF-8 редакторах и на GitHub. Поэтому используется
+' ADODB.Stream с Charset = "utf-8". При ошибке записи — запись в лог
+' (код P005) и возврат без прерывания вызывающей процедуры.
+Private Sub SaveTextFileUtf8(ByVal filePath As String, ByVal content As String)
+    On Error GoTo ErrHandler
 
-    fnum = FreeFile
-    Open filePath For Output As #fnum
-    lines = Split(content, vbCrLf)
-    For i = LBound(lines) To UBound(lines)
-        Print #fnum, lines(i)
-    Next i
-    Close #fnum
+    Dim stream As Object
+    Set stream = CreateObject("ADODB.Stream")
+    stream.Type = 2                 ' adTypeText
+    stream.Charset = "utf-8"
+    stream.Open
+    stream.WriteText content
+    stream.SaveToFile filePath, 2   ' adSaveCreateOverWrite
+    stream.Close
+    Set stream = Nothing
+    Exit Sub
+
+ErrHandler:
+    ' Освободить поток, если он остался открытым.
+    If Not stream Is Nothing Then
+        On Error Resume Next
+        stream.Close
+        On Error GoTo 0
+        Set stream = Nothing
+    End If
+    Mod_Util.WriteError "P005", "SaveTextFileUtf8: ошибка сохранения файла " & _
+        filePath & ". Ошибка: " & Err.Description
 End Sub
 
 ' Заменяет плейсхолдер в тексте только если он там есть.
@@ -594,7 +612,7 @@ Public Sub MakeNextStepPrompt()
 
         EnsureFolder stepsPath & "\Шаг_99_Финал"
         EnsureFolder readyPath
-        SaveTextFile readyPath & "\Промт_финального_аудита.md", result
+        SaveTextFileUtf8 readyPath & "\Промт_финального_аудита.md", result
 
         Mod_Util.WriteLog "MakeNextStepPrompt: сформирован финальный аудит"
         MsgBox "Все шаги из Шаги.txt выполнены." & vbCrLf & _
@@ -658,7 +676,7 @@ Public Sub MakeNextStepPrompt()
     ' (централизованное хранение готовых промтов)
     EnsureFolder readyPath
     promptFile = readyPath & "\Промт_шаг_" & nextNN & ".md"
-    SaveTextFile promptFile, result
+    SaveTextFileUtf8 promptFile, result
 
     Mod_Util.WriteLog "MakeNextStepPrompt: сформирован промт шага " & nextNN
     MsgBox "Сформирован промт шага " & nextNN & " (" & nextName & "):" & vbCrLf & _
@@ -765,7 +783,7 @@ Private Sub GenerateStepZeroPrompt()
 
     ' 5. Сохранение результата в 04_Промты
     EnsureFolder promptsPath
-    SaveTextFile outFile, result
+    SaveTextFileUtf8 outFile, result
 
     Mod_Util.WriteLog "GenerateStepZeroPrompt: сохранён " & outFile
 
@@ -901,7 +919,7 @@ Public Sub MakeFixPrompt()
 
     ' 9. Сохранение готового промта
     EnsureFolder readyPath
-    SaveTextFile readyPath & "\Промт_исправление_шаг_" & current & ".md", result
+    SaveTextFileUtf8 readyPath & "\Промт_исправление_шаг_" & current & ".md", result
 
     Mod_Util.WriteLog "MakeFixPrompt: сформирован промт исправления шага " & current
     MsgBox "Сформирован промт исправления шага " & current & ":" & vbCrLf & _
