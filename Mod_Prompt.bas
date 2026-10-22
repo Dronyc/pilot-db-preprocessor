@@ -33,7 +33,7 @@ Private Const STEP0_NOT_FOUND As String = "НЕ НАЙДЕН"
 ' prompt_step_00_template.md.
 Private Const DECOMPOSITION_RULES_V713 As String = _
     "Алгоритм декомпозиции (выполнять строго по порядку):" & vbCrLf & _
-    "Шаг 1 - Анализ вложений: подсчитай уникальные типы, атрибуты, распределение по фазам/стадиям/этапам. Выведи сводку ""Типов: N, Атрибутов: M, Фаз: F, Стадий: S, Этапов: E""." & vbCrLf & _
+    "Шаг 1 - Анализ вложений: подсчитай уникальные типы, атрибуты, распределение по фазам/стадиям/этапам. Выведи сводку ""Типов: N, Атрибутов: M, Фаз: F, Стадий: S, Этапов: E"". Учти также файлы из папки 04_Дополнительные данные (ГОСТы, регламенты и т.п.), если они переданы вместе со Схемой и Описанием." & vbCrLf & _
     "Шаг 2 - Прогноз объёма: определи лимит типов/атрибутов на один шаг генерации и заложи запас +50%." & vbCrLf & _
     "Шаг 3 - Генерация списка шагов:" & vbCrLf & _
     "- ШАГ 0 - СКЕЛЕТ: все папки (фазы, стадии, этапы) + их атрибуты." & vbCrLf & _
@@ -119,6 +119,11 @@ Private Function SafeReadText(ByVal filePath As String) As String
         res = ""
     End If
     Err.Clear
+
+    ' W-PROMPT-00-REFINE, п.4: ADODB.Stream при чтении UTF-8 возвращает
+    ' символом U+FEFF (BOM) в начале строки — удаляем, чтобы BOM не
+    ' переносился в генерируемые промты.
+    If Left$(res, 1) = ChrW(&HFEFF) Then res = Mid$(res, 2)
 
     ' --- Fallback 1: Windows-1251 (ANSI) -----------------------------------
     If res = "" Then
@@ -216,6 +221,23 @@ Private Function BuildExtraDataBlock(ByVal root As String) As String
         vbCrLf & vbCrLf & vbCrLf
 End Function
 
+' Формирует содержимое плейсхолдера {EXTRA_DATA_LIST} для Промта №0
+' (W-PROMPT-00-REFINE, п.2/п.5): список имён и типов файлов из папки
+' "01_Исходные данные\04_Дополнительные данные" — он подставляется в
+' раздел "Проверка файлов" шаблона prompt_step_00_template.md сразу за
+' пунктом про доп. данные. Если папка пуста или отсутствует —
+' возвращается пустая строка (плейсхолдер заменяется на пусто).
+Private Function BuildStepZeroExtraDataList(ByVal root As String) As String
+    Dim filesList As String
+
+    BuildStepZeroExtraDataList = ""
+    filesList = ListFolderFiles(root & "\01_Исходные данные\04_Дополнительные данные")
+    If filesList = "" Then Exit Function
+
+    BuildStepZeroExtraDataList = "  Найденные файлы доп. данных (имя и тип):" & _
+        vbCrLf & filesList
+End Function
+
 ' Приводит текст к единым разделителям строк vbCrLf (W-UTF8-READ):
 ' ADODB.Stream сохраняет исходные переводы строки файла — CRLF, LF или CR.
 Private Function NormalizeLineEndings(ByVal text As String) As String
@@ -235,16 +257,26 @@ Public Function ReadTextFile(ByVal filePath As String) As String
     ReadTextFile = SafeReadText(filePath)
 End Function
 
-' Сохраняет строку в текстовый файл в кодировке UTF-8 (W-UTF8-EXPORT).
-' Перезаписывает существующий файл. Встроенный оператор Print # пишет в
-' ANSI (Windows-1251), из-за чего кириллица в промтах отображается как
-' «кракозябры» в UTF-8 редакторах и на GitHub. Поэтому используется
-' ADODB.Stream с Charset = "utf-8". При ошибке записи — запись в лог
-' (код P005) и возврат без прерывания вызывающей процедуры.
+' Сохраняет строку в текстовый файл в кодировке UTF-8 БЕЗ BOM
+' (W-UTF8-EXPORT, W-PROMPT-00-REFINE п.5). Перезаписывает существующий
+' файл. Встроенный оператор Print # пишет в ANSI (Windows-1251), из-за
+' чего кириллица в промтах отображается как «кракозябры» в UTF-8
+' редакторах и на GitHub. Поэтому используется ADODB.Stream с
+' Charset = "utf-8". Стандартный WriteText через Charset="utf-8" может
+' добавить заголовок EF BB BF (BOM); чтобы этого избежать, содержимое
+' перед записью очищается от ведущего U+FEFF, а после сохранения файл
+' перечитывается в байтовый поток и, при наличии BOM, перезаписывается
+' без первых трёх байт. При ошибке записи — запись в лог (код P005)
+' и возврат без прерывания вызывающей процедуры.
 Private Sub SaveTextFileUtf8(ByVal filePath As String, ByVal content As String)
     On Error GoTo ErrHandler
 
     Dim stream As Object
+
+    ' Страховка: если содержимое начинается с BOM (U+FEFF) — убрать его,
+    ' иначе ADODB.Stream сохранит удвоенный заголовок.
+    If Left$(content, 1) = ChrW(&HFEFF) Then content = Mid$(content, 2)
+
     Set stream = CreateObject("ADODB.Stream")
     stream.Type = 2                 ' adTypeText
     stream.Charset = "utf-8"
@@ -253,6 +285,9 @@ Private Sub SaveTextFileUtf8(ByVal filePath As String, ByVal content As String)
     stream.SaveToFile filePath, 2   ' adSaveCreateOverWrite
     stream.Close
     Set stream = Nothing
+
+    ' Вырезаем BOM (EF BB BF), если он всё же был добавлен при записи.
+    StripUtf8Bom filePath
     Exit Sub
 
 ErrHandler:
@@ -260,11 +295,59 @@ ErrHandler:
     If Not stream Is Nothing Then
         On Error Resume Next
         stream.Close
-        On Error GoTo 0
         Set stream = Nothing
+        On Error GoTo 0
     End If
     Mod_Util.WriteError "P005", "SaveTextFileUtf8: ошибка сохранения файла " & _
         filePath & ". Ошибка: " & Err.Description
+End Sub
+
+' Удаляет из начала файла filePath заголовок UTF-8 BOM (байты EF BB BF),
+' если он там есть (W-PROMPT-00-REFINE, п.4/п.5). Реализация через
+' ADODB.Stream (бинарный режим); при любой ошибке файл остаётся как есть.
+Private Sub StripUtf8Bom(ByVal filePath As String)
+    Dim bytes() As Byte
+    Dim bin As Object
+
+    On Error GoTo ErrHandler
+
+    If Dir(filePath, vbNormal) = "" Then Exit Sub
+
+    Set bin = CreateObject("ADODB.Stream")
+    bin.Type = 1                    ' adTypeBinary
+    bin.Open
+    bin.LoadFromFile filePath
+
+    If bin.Size >= 3 Then
+        bin.Position = 0
+        bytes = bin.Read(3)
+        If bytes(0) = &HEF And bytes(1) = &HBB And bytes(2) = &HBF Then
+            ' Первые три байта — BOM: перечитываем тело без него.
+            Dim body As Variant
+            body = bin.Read(bin.Size - 3)
+            bin.Close
+            Dim out As Object
+            Set out = CreateObject("ADODB.Stream")
+            out.Type = 1            ' adTypeBinary
+            out.Open
+            If UBound(body) >= 0 Then out.Write body
+            out.SaveToFile filePath, 2   ' adSaveCreateOverWrite
+            out.Close
+            Set out = Nothing
+            Exit Sub
+        End If
+    End If
+
+    bin.Close
+    Set bin = Nothing
+    Exit Sub
+
+ErrHandler:
+    On Error Resume Next
+    If Not bin Is Nothing Then
+        If bin.State = 1 Then bin.Close   ' adStateOpen
+        Set bin = Nothing
+    End If
 End Sub
 
 ' Заменяет плейсхолдер в тексте только если он там есть.
@@ -974,6 +1057,11 @@ Private Sub GenerateStepZeroPrompt()
     result = ReplaceIfPresent(result, "{SCHEMA_FILENAME}", schemaName)
     result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descName)
     result = ReplaceIfPresent(result, "{CONFIG_FILENAME}", configName)
+    ' W-PROMPT-00-REFINE, п.2/п.5: список файлов доп. данных (папка
+    ' 01_Исходные данные\04_Дополнительные данные) подставляется в блок
+    ' "Проверка файлов" шаблона; если папка пуста — плейсхолдер заменяется
+    ' на пустую строку.
+    result = ReplaceIfPresent(result, "{EXTRA_DATA_LIST}", BuildStepZeroExtraDataList(root))
     result = ReplaceIfPresent(result, "{Decomposition_Rules}", DECOMPOSITION_RULES_V713)
 
     ' 5. Сохранение результата в 04_Промты
