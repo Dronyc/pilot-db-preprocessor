@@ -9,6 +9,14 @@ Option Explicit
 Private Const FIRST_ROW As Long = 8                        ' строка, с которой начинается структура (Объект)
 Private Const LAST_COL  As Long = 30                       ' максимальный столбец сканирования
 
+' W-PROMPT-00-SCHEMA-FIX: имя листа и префикс сохраняемого файла результата
+' подготовки схемы (переименовано из "Плоская_таблица").
+Private Const FLAT_SHEET_NAME As String = "Адаптированная_структура"
+' Старое имя листа (обратная совместимость бэкапа листов в книге-инструменте).
+Private Const FLAT_SHEET_NAME_OLD As String = "Плоская_таблица"
+' Подпапка архива старых версий файла результата в 02_Подготовка схемы.
+Private Const PREP_ARCHIVE_SUBFOLDER As String = "Архив"
+
 Private Type NodeRec
     Name       As String
     NodeType   As String
@@ -230,7 +238,14 @@ Public Sub BuildFlatStructure()
     If Dir(resultsPath, vbDirectory) = "" Then MkDir resultsPath
     
     Dim saveName As String
-    saveName = resultsPath & "\Плоская_таблица_" & Format$(Now, "yyyy-mm-dd_hhnnss") & ".xlsx"
+    saveName = resultsPath & "\" & FLAT_SHEET_NAME & "_" & Format$(Now, "yyyy-mm-dd_hhnnss") & ".xlsx"
+
+    ' W-PROMPT-00-SCHEMA-FIX: архивация старых версий перед сохранением новой.
+    ' Все файлы "Адаптированная_структура_*.xlsx", найденные в корне
+    ' 02_Подготовка схемы, перемещаются в подпапку "Архив" (создаётся при
+    ' отсутствии), а старые книги "Плоская_таблица*" — туда же (обратная
+    ' совместимость). В корне папки остаётся только последний сохранённый файл.
+    ArchiveOldSchemaArtifacts resultsPath
     
     ' 2. Показать окно ДО SaveAs (важно — так SaveAs записывает всё корректно)
     On Error Resume Next
@@ -503,10 +518,10 @@ Private Sub CreateSmartTable(ByVal ws As Worksheet, _
     On Error GoTo 0
 End Sub
 
-'---------------- Лист 1: целевая плоская таблица ----------------
+'---------------- Лист 1: адаптированная структура (плоская таблица) --------
 Private Sub WriteFlatTable(ByVal wbOut As Workbook)
     Dim ws As Worksheet
-    GetSheet wbOut, "Плоская_таблица", ws
+    GetSheet wbOut, FLAT_SHEET_NAME, ws
     ws.Range("A1:D1").value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из")
     Dim i As Long, r As Long
     Dim hasError As Boolean
@@ -685,7 +700,8 @@ End Sub
 
 '---------------- W-CORRECTION-PACK-1, п.3.1: проверка дублей ----------------
 ' Выполняется ПОСЛЕ сборки плоской таблицы (данные Nodes[] уже готовы) и
-' ПЕРЕД записью листа "Плоская_таблица". Дубли выявляются по паре
+' ПЕРЕД записью листа "Адаптированная_структура" (ранее — "Плоская_таблица").
+' Дубли выявляются по паре
 ' (номер, наименование): номер — LeadCode из имени узла, наименование —
 ' часть имени после номера. Результаты добавляются в лист "Аномалии схемы"
 ' в виде строк "[!] ..." (столбец "Описание"). Сборку НЕ блокируем —
@@ -795,11 +811,13 @@ Private Function JoinCollection(ByVal col As Collection, ByVal sep As String) As
     JoinCollection = res
 End Function
 
-'---------------- W-CORRECTION-PACK-1, п.3.2: бэкап плоской таблицы ---------
-' Перед перезаписью листа "Плоская_таблица": если такой лист существует
+'---------------- W-CORRECTION-PACK-1, п.3.2: бэкап листа структуры ---------
+' W-PROMPT-00-SCHEMA-FIX: лист переименован в "Адаптированная_структура";
+' перед перезаписью проверяются оба имени — новое и старое ("Плоская_таблица",
+' leftover от предыдущих версий): если такой лист существует
 ' (например, leftover от предыдущего запуска — на новом wbOut его обычно нет),
-' копируем его в лист "Плоская_таблица_bak_<YYYYMMDD_HHMMSS>". Храним последние
-' 5 бэкапов, более старые удаляем. О факте бэкапа пишем INFO в лог.
+' копируем его в лист "Адаптированная_структура_bak_<YYYYMMDD_HHMMSS>". Храним последние
+' 5 бэкапов (и новые, и старые имена), более старые удаляем. О факте бэкапа пишем INFO в лог.
 Private Sub BackupFlatTableSheet()
     Dim wbTool As Workbook
     Dim wsSrc As Worksheet
@@ -814,26 +832,33 @@ Private Sub BackupFlatTableSheet()
 
     Set wbTool = ThisWorkbook
 
-    ' существует ли старый лист "Плоская_таблица"?
+    ' существует ли старый лист "Адаптированная_структура"?
     On Error Resume Next
-    Set wsSrc = wbTool.Worksheets("Плоская_таблица")
+    Set wsSrc = wbTool.Worksheets(FLAT_SHEET_NAME)
+    If wsSrc Is Nothing Then
+        ' обратная совместимость: leftover со старым именем "Плоская_таблица"
+        Err.Clear
+        Set wsSrc = wbTool.Worksheets(FLAT_SHEET_NAME_OLD)
+    End If
     On Error GoTo ErrHandler
     If wsSrc Is Nothing Then Exit Sub      ' старого листа нет — бэкап не нужен
 
-    bakName = "Плоская_таблица_bak_" & Format$(Now, "yyyymmdd_hhnnss")
+    bakName = FLAT_SHEET_NAME & "_bak_" & Format$(Now, "yyyymmdd_hhnnss")
 
     Application.DisplayAlerts = False
     wsSrc.Copy After:=wbTool.Sheets(wbTool.Sheets.Count)
     ActiveSheet.Name = bakName
     Application.DisplayAlerts = True
 
-    Mod_Util.WriteLog "Бэкап плоской таблицы: " & bakName
+    Mod_Util.WriteLog "Бэкап адаптированной структуры: " & bakName
 
-    ' ротация: храним последние 5 бэкапов, старые удаляем
+    ' ротация: храним последние 5 бэкапов (новое и старое имена префиксов),
+    ' старые удаляем
     ReDim namesArr(1 To wbTool.Sheets.Count)
     cnt = 0
     For Each ws In wbTool.Worksheets
-        If Left$(ws.Name, Len("Плоская_таблица_bak_")) = "Плоская_таблица_bak_" Then
+        If Left$(ws.Name, Len(FLAT_SHEET_NAME & "_bak_")) = FLAT_SHEET_NAME & "_bak_" Or _
+           Left$(ws.Name, Len(FLAT_SHEET_NAME_OLD & "_bak_")) = FLAT_SHEET_NAME_OLD & "_bak_" Then
             cnt = cnt + 1
             namesArr(cnt) = ws.Name
         End If
@@ -861,6 +886,54 @@ Private Sub BackupFlatTableSheet()
 ErrHandler:
     Application.DisplayAlerts = True
     Mod_Util.WriteWarning "S007", "BackupFlatTableSheet: ошибка бэкапа листа. Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+'---------------- W-PROMPT-00-SCHEMA-FIX: архивация старых версий -----------
+' Перед сохранением нового файла результата в папке 02_Подготовка схемы
+' проверяется наличие старых файлов "Адаптированная_структура_*.xlsx" (и
+' устаревших "Плоская_таблица*.xlsx"). Если они есть — перемещаются в
+' подпапку "02_Подготовка схемы\Архив" (создаётся, если отсутствует).
+' В итоге в корне 02_Подготовка схемы остаётся только последний сохранённый
+' файл. Ошибки перемещения (например, файл открыт в Excel) логируются и НЕ
+' блокируют сохранение новой версии.
+Private Sub ArchiveOldSchemaArtifacts(ByVal prepPath As String)
+    Dim masks(1 To 2) As String
+    Dim archPath As String
+    Dim fName As String
+    Dim i As Long
+    Dim moved As Long
+
+    On Error GoTo ErrHandler
+
+    If Dir(prepPath, vbDirectory) = "" Then Exit Sub
+
+    archPath = prepPath & "\" & PREP_ARCHIVE_SUBFOLDER
+    If Dir(archPath, vbDirectory) = "" Then MkDir archPath
+
+    masks(1) = FLAT_SHEET_NAME & "_*.xlsx"   ' Адаптированная_структура_*.xlsx
+    masks(2) = FLAT_SHEET_NAME_OLD & "*.xlsx" ' Плоская_таблица*.xlsx (старые версии)
+
+    For i = 1 To 2
+        fName = Dir(prepPath & "\" & masks(i))
+        Do While fName <> ""
+            If Left(fName, 2) <> "~$" Then   ' пропускаем временные файлы Office
+                Name prepPath & "\" & fName As archPath & "\" & fName
+                moved = moved + 1
+            End If
+            fName = Dir()
+        Loop
+    Next i
+
+    If moved > 0 Then
+        Mod_Util.WriteLog "ArchiveOldSchemaArtifacts: перемещено старых версий: " & moved & _
+                          " -> " & archPath
+    End If
+    Exit Sub
+
+ErrHandler:
+    Mod_Util.WriteWarning "S008", "ArchiveOldSchemaArtifacts: ошибка архивации '" & _
+                                  fName & "'. Ошибка: " & Err.Description
     Err.Clear
 End Sub
 
