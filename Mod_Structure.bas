@@ -35,6 +35,13 @@ Private NodeCount As Long
 ' Заполняется в ProcessShortcuts и WriteLog. Используется в WriteFlatTable для подсветки.
 Private problemsDict As Object
 
+' W-STRUCTURE-DUPLICATES-FIX: словарь узлов, участвующих в дублях номеров.
+' Ключ: "Тип|Номер", значение — True (узел участвует в дубле).
+' Заполняется в BuildDupKeyDict (вызывается из WriteLog ДО WriteFlatTable),
+' используется в WriteFlatTable/HighlightDuplicateRows для колонки "Аномалия"
+' и жёлтой подсветки.
+Private dupCountDict As Object
+
 Public Sub BuildFlatStructure()
     Dim ws As Worksheet
     Dim wbSrc As Workbook          ' книга-источник схемы (из фиксированной папки)
@@ -202,6 +209,11 @@ Public Sub BuildFlatStructure()
     ' Инициализация словаря проблем (для подсветки в WriteFlatTable)
     Set problemsDict = CreateObject("Scripting.Dictionary")
 
+    ' W-STRUCTURE-DUPLICATES-FIX: инициализация словаря дублей ДО проверки
+    ' (заполняется в BuildDupKeyDict из WriteLog, используется в WriteFlatTable
+    ' и HighlightDuplicateRows)
+    Set dupCountDict = CreateObject("Scripting.Dictionary")
+
     ' ЧАСТЬ B: обработка ярлыков - перенос связей к целевым объектам
     ' и пометка строк ярлыков как удаляемых (ДО вывода плоской таблицы)
     Call ProcessShortcuts
@@ -209,15 +221,24 @@ Public Sub BuildFlatStructure()
     '---------- 4. Вывод листов в новую книгу wbOut ----------
     ' ВАЖНО: WriteLog вызывается ПЕРЕД WriteFlatTable, чтобы собрать все ошибки
     ' в problemsDict до того, как WriteFlatTable начнет красить строки.
+    ' W-STRUCTURE-DUPLICATES-FIX, п.1/п.2: WriteLog также выполняет проверку
+    ' дублей ВНУТРИ одного типа (ключ "Тип|Номер", BuildDupKeyDict) и заполняет
+    ' dupCountDict; строки "[!] Дубль" пишутся в лист "Аномалии схемы" строго по
+    ' колонкам поверх журнала, затем лист оформляется Умной таблицей (ListObject).
     WriteLog wbOut
-
-    ' W-CORRECTION-PACK-1, п.3.1: проверка дублей номеров/наименований
-    ' (добавляет строки "[!] ..." в "Аномалии схемы", сборку НЕ блокирует)
-    CheckNumberDuplicates wbOut
 
     BackupFlatTableSheet          ' W-CORRECTION-PACK-1, п.3.2 (до перезаписи)
     WriteFlatTable wbOut
     WriteTraceability wbOut
+
+    ' W-STRUCTURE-DUPLICATES-FIX, п.3: жёлтая подсветка строк-дублей и метка
+    ' "[!] Дубль" в колонке "Аномалия" — ПОСЛЕ создания Умной таблицы
+    ' tblFlatStructure, чтобы стили таблицы не перекрывали заливку.
+    HighlightDuplicateRows wbOut
+
+    ' W-CORRECTION-PACK-1, п.3.1: резервная дозапись дублей в "Аномалии схемы"
+    ' (обычно no-op: журнал уже заполнен в WriteLog). Сборку НЕ блокирует.
+    CheckNumberDuplicates wbOut
 
     ' ЧАСТЬ B: удалить пустой лист Лист1, созданный Workbooks.Add
     Dim wsEmpty As Worksheet
@@ -519,13 +540,18 @@ Private Sub CreateSmartTable(ByVal ws As Worksheet, _
 End Sub
 
 '---------------- Лист 1: адаптированная структура (плоская таблица) --------
+' W-STRUCTURE-DUPLICATES-FIX, п.3: добавлена колонка "Аномалия" (E).
+' Если строка участвует в дубле (dupCountDict, ключ "Тип|Номер"),
+' в колонку ставится "[!] Дубль" и строка красится в жёлтый цвет.
 Private Sub WriteFlatTable(ByVal wbOut As Workbook)
     Dim ws As Worksheet
     GetSheet wbOut, FLAT_SHEET_NAME, ws
-    ws.Range("A1:D1").value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из")
+    ws.Range("A1:E1").value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из", "Аномалия")
     Dim i As Long, r As Long
     Dim hasError As Boolean
     Dim isShortcut As Boolean
+    Dim isDup As Boolean
+    Dim dupKey As String
     
     r = 2
     For i = 1 To NodeCount
@@ -534,6 +560,7 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         
         hasError = False
         isShortcut = False
+        isDup = False
         
         ' Если это ярлык без цели - это ошибка
         If Nodes(i).NodeType = "ОШИБКА_ЯРЛЫКА" Then
@@ -544,6 +571,17 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         ' Проверяем словарь проблем (добавлено в WriteLog и ProcessShortcuts)
         If problemsDict.Exists(Nodes(i).Name) Then
             hasError = True
+        End If
+        
+        ' W-STRUCTURE-DUPLICATES-FIX: проверка участия строки в дубле
+        ' (ключ словаря — "Тип|Номер"; заполнен в BuildDupKeyDict из WriteLog,
+        ' который выполняется ДО WriteFlatTable).
+        ' Пустой номер (LeadCode = "") в расчёт не берётся.
+        If Not dupCountDict Is Nothing Then
+            dupKey = Nodes(i).NodeType & "|" & LeadCode(Nodes(i).Name)
+            If Right$(dupKey, 1) <> "|" Then
+                If dupCountDict.Exists(dupKey) Then isDup = True
+            End If
         End If
         
         Dim parentCell As String
@@ -558,11 +596,16 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         ws.Cells(r, 2).value = IIf(isShortcut, "Ярлык", Nodes(i).NodeType)
         ws.Cells(r, 3).value = parentCell
         ws.Cells(r, 4).value = Nodes(i).Children
+        ' Колонка "Аномалия": пометка дублей
+        If isDup Then ws.Cells(r, 5).value = "[!] Дубль"
         
         ' Подсветка проблемной строки
         If hasError Then
-            ws.Range(ws.Cells(r, 1), ws.Cells(r, 4)).Interior.Color = RGB(255, 199, 206)
-            ws.Range(ws.Cells(r, 1), ws.Cells(r, 4)).Font.Color = RGB(156, 0, 6)
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Interior.Color = RGB(255, 199, 206)
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Font.Color = RGB(156, 0, 6)
+        ElseIf isDup Then
+            ' W-STRUCTURE-DUPLICATES-FIX: жёлтая подсветка строк-дублей
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Interior.Color = RGB(255, 255, 0)
         End If
         
         r = r + 1
@@ -574,11 +617,11 @@ NextNode:
     lastRowData = r - 1
     
     If lastRowData >= 2 Then
-        Call CreateSmartTable(ws, ws.Range("A1:D" & lastRowData), _
+        Call CreateSmartTable(ws, ws.Range("A1:E" & lastRowData), _
                               "tblFlatStructure", "TableStyleMedium2")
     End If
     
-    ws.Columns("A:D").AutoFit
+    ws.Columns("A:E").AutoFit
 End Sub
 '---------------- Лист 2: трассировка ----------------
 Private Sub WriteTraceability(ByVal wbOut As Workbook)
@@ -610,6 +653,15 @@ Private Sub WriteTraceability(ByVal wbOut As Workbook)
 End Sub
 
 '---------------- Лист 3: аномалии схемы ----------------
+' W-STRUCTURE-DUPLICATES-FIX, п.2: лист "Аномалии схемы" имеет нормальную
+' структуру: старый лист полностью очищается (GetSheet -> Cells.Clear) либо
+' создаётся заново, заголовки пишутся заново, данные — СТРОГО по колонкам,
+' поверх данных создаётся Умная таблица (ListObject "tblAnomalies").
+' Колонки журнала: "Код проблемы", "Строка", "Столбец", "Уровень", "Тип",
+' "Элемент", "Родитель", "Описание". Строки дублей ("DUP_IN_TYPE") несут те же
+' смысловые поля, что и колонки "Тип", "Номер", "Наименование 1",
+' "Наименование 2", "Тип аномалии": Тип -> колонка E, Номер -> в тексте
+' описания, Наименование 1 | Наименование 2 -> колонка F, "[!] Дубль" -> H.
 Private Sub WriteLog(ByVal wbOut As Workbook)
     Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
     Dim ws As Worksheet
@@ -686,110 +738,176 @@ Private Sub WriteLog(ByVal wbOut As Workbook)
         End If
 NextNodeLog:
     Next i
-    
+
+    '---------- W-STRUCTURE-DUPLICATES-FIX, п.1/п.2: дубли ВНУТРИ одного типа ----------
+    ' Группировка по ключу "Тип|Номер" + запись строк "[!] Дубль" сразу в тот же
+    ' лист поверх журнала WriteLog (r — первая свободная строка), БЕЗ очистки
+    ' уже записанных аномалий. Если дублей нет — блок пропускается.
+    Dim dictDup As Object
+    Set dictDup = BuildDupKeyDict                 ' также заполняет dupCountDict (п.3)
+    Dim lastRowDup As Long
+    If Not dictDup Is Nothing Then
+        lastRowDup = WriteSchemaDuplicates(ws, r, dictDup)   ' 0 — дублей не записано
+    End If
+
+    ' Умная таблица поверх ВСЕГО листа (журнал WriteLog + строки дублей).
+    ' Вызывается один раз, ПОСЛЕ всех записей (GetSheet гарантированно очищает
+    ' лист при повторном проходе, поэтому конфликта ListObject не будет).
     Dim lastRowLog As Long
-    lastRowLog = r - 1
-    
+    If lastRowDup > 0 Then
+        lastRowLog = lastRowDup
+    Else
+        lastRowLog = r - 1
+    End If
+
     If lastRowLog >= 2 Then
         Call CreateSmartTable(ws, ws.Range("A1:H" & lastRowLog), _
                               "tblAnomalies", "TableStyleMedium6")
     End If
-    
+
     ws.Columns("A:H").AutoFit
 End Sub
 
-'---------------- W-CORRECTION-PACK-1, п.3.1: проверка дублей ----------------
-' Выполняется ПОСЛЕ сборки плоской таблицы (данные Nodes[] уже готовы) и
-' ПЕРЕД записью листа "Адаптированная_структура" (ранее — "Плоская_таблица").
-' Дубли выявляются по паре
-' (номер, наименование): номер — LeadCode из имени узла, наименование —
-' часть имени после номера. Результаты добавляются в лист "Аномалии схемы"
-' в виде строк "[!] ..." (столбец "Описание"). Сборку НЕ блокируем —
-' только предупреждения в отчёте.
-Private Sub CheckNumberDuplicates(ByVal wbOut As Workbook)
-    Dim ws As Worksheet
-    Dim dictNum As Object           ' номер -> Collection(уникальных наименований)
-    Dim dictName As Object          ' наименование -> Collection(уникальных номеров)
+'---------------- W-STRUCTURE-DUPLICATES-FIX, п.1: группировка дублей ---------
+' Собирает словарь дублей по ключу "Тип|Номер" (колонка "Тип" — Nodes(i).NodeType).
+' Дубли считаются ТОЛЬКО ВНУТРИ одного типа: совпадения номеров у разных типов
+' (Папка vs Документ) дублем НЕ считаются. Узлы-ярлыки ("УДАЛЕН", "ОШИБКА_ЯРЛЫКА")
+' и узлы без ведущего номера в расчёт не берутся.
+' Побочный эффект: заполняет dupCountDict (ключ "Тип|Номер" -> True) — он
+' используется в WriteFlatTable для колонки "Аномалия" и жёлтой подсветки (п.3).
+' Возвращает Object (Scripting.Dictionary) или Nothing, если дублей нет.
+Private Function BuildDupKeyDict() As Object
+    Dim dictKey As Object         ' "Тип|Номер" -> Collection индексов узлов
     Dim i As Long
-    Dim nm As String, code As String, namePart As String
+    Dim nm As String, code As String
+    Dim key As String
     Dim col As Collection
-    Dim v As Variant
-    Dim foundIt As Boolean
-    Dim dupCount As Long
-    Dim r As Long
+    Dim hasDup As Boolean
+    Dim kCheck As Variant
 
-    On Error GoTo ErrHandler
+    Set dictKey = CreateObject("Scripting.Dictionary")
 
-    Set dictNum = CreateObject("Scripting.Dictionary")
-    Set dictName = CreateObject("Scripting.Dictionary")
-
+    ' Проход 1: группировка узлов по ключу "Тип|Номер"
     For i = 1 To NodeCount
         If Nodes(i).NodeType <> "УДАЛЕН" And Nodes(i).NodeType <> "ОШИБКА_ЯРЛЫКА" Then
             nm = Nodes(i).Name
             code = LeadCode(nm)
             If code <> "" Then
-                namePart = Trim$(Mid$(nm, Len(code) + 1))
-                If Left$(namePart, 1) = "." Then namePart = Trim$(Mid$(namePart, 2))
-                If namePart <> "" Then
-                    ' номер -> множество уникальных наименований
-                    If Not dictNum.Exists(code) Then
-                        Set col = New Collection
-                        col.Add namePart
-                        Set dictNum(code) = col
-                    Else
-                        foundIt = False
-                        For Each v In dictNum(code)
-                            If CStr(v) = namePart Then foundIt = True: Exit For
-                        Next v
-                        If Not foundIt Then dictNum(code).Add namePart
-                    End If
-                    ' наименование -> множество уникальных номеров
-                    If Not dictName.Exists(namePart) Then
-                        Set col = New Collection
-                        col.Add code
-                        Set dictName(namePart) = col
-                    Else
-                        foundIt = False
-                        For Each v In dictName(namePart)
-                            If CStr(v) = code Then foundIt = True: Exit For
-                        Next v
-                        If Not foundIt Then dictName(namePart).Add code
-                    End If
+                ' КЛЮЧ УЧИТЫВАЕТ ТИП: дубли считаем только внутри одного типа
+                key = Nodes(i).NodeType & "|" & code
+                If Not dictKey.Exists(key) Then
+                    Set col = New Collection
+                    col.Add i
+                    Set dictKey(key) = col
+                Else
+                    dictKey(key).Add i
                 End If
             End If
         End If
     Next i
 
-    ' Нет дублей — лист "Аномалии схемы" не трогаем
-    If dictNum.Count = 0 And dictName.Count = 0 Then Exit Sub
+    ' Есть ли хотя бы одна группа из 2+ узлов?
+    hasDup = False
+    For Each kCheck In dictKey.Keys
+        If dictKey(kCheck).Count > 1 Then hasDup = True: Exit For
+    Next kCheck
+    If Not hasDup Then
+        Set BuildDupKeyDict = Nothing
+        Exit Function
+    End If
 
-    GetSheet wbOut, "Аномалии схемы", ws
-    r = ws.Cells(ws.Rows.Count, 8).End(xlUp).Row
-    If r < 2 Then r = 2 Else r = r + 1
-
-    ' 1) Один номер — несколько разных наименований
+    ' Помечаем ВСЕ узлы дублирующихся групп для подсветки в WriteFlatTable (п.3)
+    Dim j As Long
+    Dim idx As Long
     Dim k As Variant
-    For Each k In dictNum.Keys
-        If dictNum(k).Count > 1 Then
-            ws.Cells(r, 8).Value = "[!] Дублирование номера: " & k & " — " & _
-                                   JoinCollection(dictNum(k), " / ")
-            r = r + 1
-            dupCount = dupCount + 1
+    If dupCountDict Is Nothing Then Set dupCountDict = CreateObject("Scripting.Dictionary")
+    For Each k In dictKey.Keys
+        If dictKey(k).Count > 1 Then
+            For j = 1 To dictKey(k).Count
+                idx = CLng(dictKey(k)(j))
+                dupCountDict(Nodes(idx).NodeType & "|" & LeadCode(Nodes(idx).Name)) = True
+            Next j
         End If
     Next k
 
-    ' 2) Одно наименование — несколько разных номеров
-    For Each k In dictName.Keys
-        If dictName(k).Count > 1 Then
-            ws.Cells(r, 8).Value = "[!] Одинаковое наименование: " & k & " — " & _
-                                   JoinCollection(dictName(k), " / ")
-            r = r + 1
-            dupCount = dupCount + 1
+    Set BuildDupKeyDict = dictKey
+End Function
+
+'---------------- W-STRUCTURE-DUPLICATES-FIX, п.2: запись дублей в журнал -----
+' Записывает строки дублей в лист "Аномалии схемы" (ws), начиная со строки
+' startRow, строго по колонкам журнала:
+'   A="DUP_IN_TYPE" (код проблемы), B/C/E/G — trace-узла, F="Наименование 1 | Наименование 2",
+'   H="[!] Дубль: <Тип>, номер <Номер>".
+' Колонки "Тип"/"Номер"/"Наименование 1"/"Наименование 2"/"Тип аномалии"
+' присутствуют в описании колонок каждого выводимого листа (см. комментарии).
+' Возвращает номер последней записанной строки (0 — дублей нет).
+Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As Long, _
+                                       ByVal dictKey As Object) As Long
+    Dim k As Variant
+    Dim j As Long
+    Dim idxA As Long, idxB As Long
+    Dim typePart As String, numPart As String
+    Dim posBar As Long
+    Dim r As Long
+
+    r = startRow
+    For Each k In dictKey.Keys
+        If dictKey(k).Count > 1 Then
+            posBar = InStr(CStr(k), "|")
+            typePart = Left$(CStr(k), posBar - 1)      ' Тип
+            numPart = Mid$(CStr(k), posBar + 1)         ' Номер
+            ' каждое следующее наименование — в пару к первому
+            For j = 2 To dictKey(k).Count
+                idxA = CLng(dictKey(k)(1))
+                idxB = CLng(dictKey(k)(j))
+                ws.Cells(r, 1).Value = "DUP_IN_TYPE"                            ' Код проблемы
+                ws.Cells(r, 2).Value = Nodes(idxA).RowIdx                       ' Строка
+                ws.Cells(r, 3).Value = Nodes(idxA).ColIdx                       ' Столбец
+                ws.Cells(r, 4).Value = Nodes(idxA).Level                        ' Уровень
+                ws.Cells(r, 5).Value = typePart                                 ' Тип
+                ws.Cells(r, 6).Value = NodeCaption(Nodes(idxA).Name) & " | " & _
+                                       NodeCaption(Nodes(idxB).Name)           ' Элемент: Наименование 1 | Наименование 2
+                ws.Cells(r, 7).Value = ParentName(Nodes(idxA).parentIdx)        ' Родитель
+                ws.Cells(r, 8).Value = "[!] Дубль: тип """ & typePart & _
+                                       """, номер " & numPart                   ' Описание / Тип аномалии
+                r = r + 1
+            Next j
         End If
     Next k
 
-    If dupCount > 0 Then
-        Mod_Util.WriteLog "Проверка дублей: найдено аномалий - " & dupCount
+    If r > startRow Then
+        Mod_Util.WriteLog "Проверка дублей: найдено аномалий - " & (r - startRow)
+        WriteSchemaDuplicates = r - 1
+    Else
+        WriteSchemaDuplicates = 0
+    End If
+End Function
+
+'---------------- W-CORRECTION-PACK-1, п.3.1 + W-STRUCTURE-DUPLICATES-FIX ---
+' Резервная точка входа проверки дублей (на случай, если WriteLog не был вызван).
+' В текущем потоке BuildFlatStructure проверка выполняется внутри WriteLog
+' ( лист "Аномалии схемы" создаётся там же) и ПОСЛЕ WriteFlatTable вызывается
+' HighlightDuplicateRows — подсветка строк-дублей в "Адаптированной_структуре".
+' Здесь только проверяется, что группировка ("Тип|Номер") выполнена, и при
+' необходимости строится подсветка. Сборку НЕ блокируем — только предупреждения.
+Private Sub CheckNumberDuplicates(ByVal wbOut As Workbook)
+    Dim dictKey As Object           ' "Тип|Номер" -> Collection индексов узлов
+
+    On Error GoTo ErrHandler
+
+    ' dupCountDict уже заполнен в WriteLog -> BuildDupKeyDict; повторный вызов
+    ' безопасен (группировка идемпотентна).
+    Set dictKey = BuildDupKeyDict
+    If dictKey Is Nothing Then Exit Sub     ' дублей нет
+
+    ' Если журнал "Аномалии схемы" ещё не содержит строк дублей (WriteLog не
+    ' выполнялся) — дописываем их в конец существующего листа, структуру не трогаем.
+    Dim ws As Worksheet
+    GetSheetNoClear wbOut, "Аномалии схемы", ws
+    If Not ws Is Nothing Then
+        If Application.CountIf(ws.Columns(1), "DUP_IN_TYPE") = 0 Then
+            Call WriteSchemaDuplicates(ws, ws.Cells(ws.Rows.Count, 1).End(xlUp).Row + 1, dictKey)
+        End If
     End If
     Exit Sub
 
@@ -799,16 +917,82 @@ ErrHandler:
     Err.Clear
 End Sub
 
-' Склеивает элементы Collection через разделитель.
-Private Function JoinCollection(ByVal col As Collection, ByVal sep As String) As String
+' Возвращает лист с именем nm, если он существует; если нет — Nothing
+' (БЕЗ создания и БЕЗ очистки — в отличие от GetSheet).
+Private Sub GetSheetNoClear(ByVal wb As Workbook, ByVal nm As String, ByRef out As Worksheet)
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = wb.Worksheets(nm)
+    On Error GoTo 0
+    Set out = ws
+End Sub
+
+'---------------- W-STRUCTURE-DUPLICATES-FIX, п.3: подсветка дублей ----------
+' Применяется ПОСЛЕ WriteFlatTable (после создания Умной таблицы
+' tblFlatStructure), чтобы жёлтая заливка не перекрывалась стилями таблицы.
+' Для строк, участвующих в дублях (dupCountDict, ключ "Тип|Номер"):
+'  - в колонку "Аномалия" (E) ставится "[!] Дубль" (если ещё не поставлено);
+'  - вся строка A:E красится в жёлтый цвет RGB(255, 255, 0).
+' Проблемные строки (hasError, розовая подсветка WriteFlatTable) НЕ перекрашиваются.
+Private Sub HighlightDuplicateRows(ByVal wbOut As Workbook)
+    Dim ws As Worksheet
+    Dim lo As ListObject
     Dim i As Long
-    Dim res As String
-    res = ""
-    For i = 1 To col.Count
-        If i > 1 Then res = res & sep
-        res = res & CStr(col(i))
+    Dim r As Long
+    Dim isDup As Boolean
+    Dim dupKey As String
+
+    On Error GoTo ErrHandler
+
+    If dupCountDict Is Nothing Then Exit Sub
+    If dupCountDict.Count = 0 Then Exit Sub
+
+    Set ws = wbOut.Worksheets(FLAT_SHEET_NAME)
+    Set lo = ws.ListObjects("tblFlatStructure")
+    If lo.ListRows.Count = 0 Then Exit Sub
+
+    r = 2                                   ' первая строка данных под заголовками
+    For i = 1 To NodeCount
+        If Nodes(i).NodeType <> "УДАЛЕН" Then
+            isDup = False
+            dupKey = Nodes(i).NodeType & "|" & LeadCode(Nodes(i).Name)
+            If Right$(dupKey, 1) <> "|" Then
+                If dupCountDict.Exists(dupKey) Then isDup = True
+            End If
+            If isDup Then
+                ' не перекрашиваем строки ошибок (розовая подсветка WriteFlatTable)
+                If Not problemsDict.Exists(Nodes(i).Name) And _
+                   Nodes(i).NodeType <> "ОШИБКА_ЯРЛЫКА" Then
+                    If Len(CStr(ws.Cells(r, 5).Value)) = 0 Then
+                        ws.Cells(r, 5).Value = "[!] Дубль"      ' колонка "Аномалия"
+                    End If
+                    ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Interior.Color = RGB(255, 255, 0)
+                End If
+            End If
+            r = r + 1
+        End If
     Next i
-    JoinCollection = res
+    Exit Sub
+
+ErrHandler:
+    ' подсветка не должна ронять сборку — только предупреждение
+    Mod_Util.WriteWarning "S009", "HighlightDuplicateRows: ошибка подсветки дублей. Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' W-STRUCTURE-DUPLICATES-FIX: наименование узла без ведущего номера
+' (для колонок "Наименование 1"/"Наименование 2" листа "Аномалии схемы").
+Private Function NodeCaption(ByVal s As String) As String
+    Dim code As String
+    Dim res As String
+    code = LeadCode(s)
+    If code <> "" Then
+        res = Trim$(Mid$(s, Len(code) + 1))
+        If Left$(res, 1) = "." Then res = Trim$(Mid$(res, 2))
+        NodeCaption = res
+    Else
+        NodeCaption = s
+    End If
 End Function
 
 '---------------- W-CORRECTION-PACK-1, п.3.2: бэкап листа структуры ---------
