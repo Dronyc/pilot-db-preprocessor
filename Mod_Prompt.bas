@@ -25,6 +25,14 @@ Private Const STEP0_PROMPT_FILE As String = "Промт_шаг_00_Декомпо
 ' Плейсхолдер вместо ненайденного входного файла.
 Private Const STEP0_NOT_FOUND As String = "НЕ НАЙДЕН"
 
+' W-PROMPT-00-SCHEMA-FIX: имя артефакта подготовки схемы (лист книги и
+' префикс сохраняемого файла в папке 02_Подготовка схемы).
+Private Const SCHEMA_SHEET_NAME As String = "Адаптированная_структура"
+' Маска файлов артефакта в 02_Подготовка схемы.
+Private Const SCHEMA_ARTIFACT_MASK As String = "Адаптированная_структура_*.xlsx"
+' Подпапка архива старых версий артефакта.
+Private Const SCHEMA_ARCHIVE_SUBFOLDER As String = "Архив"
+
 ' Алгоритм декомпозиции (W-CORRECTION-PACK-1, п.4.1): заменяет старые
 ' «Правила декомпозиции» v7.13 (пункты 10.1/10.4 и фиксированная сетка из
 ' 19 шагов удалены из шаблона Промта №0). Сетка шагов больше НЕ задаётся
@@ -480,8 +488,96 @@ Private Function FirstMatchFile(ByVal folderPath As String, ByVal mask As String
     Loop
 End Function
 
-' Собирает фрагмент схемы из листа «Плоская_таблица» книги, сохранённой
-' в папке 02_Подготовка схемы (последняя по времени изменения книга).
+' W-PROMPT-00-SCHEMA-FIX: возвращает имя самого свежего файла артефакта
+' "Адаптированная структура" (маска Адаптированная_структура_*.xlsx) в папке
+' 02_Подготовка схемы. Файл выбирается по максимальной дате, встроенной в
+' имя (формат yyyy-mm-dd_hhnnss); если даты из имён извлечь не удалось —
+' берётся файл с последней датой изменения на диске. Если подходящих
+' файлов несколько — возвращается последний (самый свежий), если ни одного
+' — пустая строка. Временные файлы Office (~$...) пропускаются.
+Private Function GetNewestSchemaArtifactName(ByVal prepPath As String) As String
+    Dim fName As String
+    Dim best As String
+    Dim bestStamp As String
+    Dim curStamp As String
+    Dim bestDate As Date
+    Dim curDate As Date
+
+    GetNewestSchemaArtifactName = ""
+    If Dir(prepPath, vbDirectory) = "" Then Exit Function
+
+    fName = Dir(prepPath & "\" & SCHEMA_ARTIFACT_MASK)
+    Do While fName <> ""
+        If Left(fName, 2) <> "~$" Then          ' пропускаем временные файлы Office
+            On Error Resume Next
+            curDate = FileDateTime(prepPath & "\" & fName)
+            If Err.Number <> 0 Then
+                Err.Clear
+                curDate = 0
+            End If
+            On Error GoTo 0
+            curStamp = ExtractDateStampFromName(fName)
+            If best = "" Then
+                best = fName
+                bestStamp = curStamp
+                bestDate = curDate
+            Else
+                ' приоритет — дата в имени файла; при её отсутствии/равенстве —
+                ' дата изменения на диске
+                If curStamp > bestStamp Or _
+                   (curStamp = bestStamp And curDate > bestDate) Then
+                    best = fName
+                    bestStamp = curStamp
+                    bestDate = curDate
+                End If
+            End If
+        End If
+        fName = Dir()
+    Loop
+    GetNewestSchemaArtifactName = best
+End Function
+
+' W-PROMPT-00-SCHEMA-FIX: извлекает из имени файла подстроку вида
+' yyyy-mm-dd_hhnnss (16 символов). Сравнивать такие подстроки как строки
+' корректно, поскольку формат лексикографически упорядочен. Если шаблон в
+' имени не найден — возвращается "".
+Private Function ExtractDateStampFromName(ByVal fileName As String) As String
+    Dim i As Long
+    Dim ok As Boolean
+    Dim ch As String
+
+    ExtractDateStampFromName = ""
+    For i = 1 To Len(fileName) - 15
+        ok = Mid$(fileName, i + 4, 1) = "-" And Mid$(fileName, i + 7, 1) = "-" And _
+             Mid$(fileName, i + 10, 1) = "_"
+        If ok Then
+            Dim j As Long
+            For j = 0 To 15
+                Select Case j
+                    Case 0 To 3, 5 To 6, 8 To 9, 11 To 15
+                        ch = Mid$(fileName, i + j, 1)
+                        If ch < "0" Or ch > "9" Then
+                            ok = False
+                            Exit For
+                        End If
+                    Case 4, 7
+                        ' разделители "-" уже проверены
+                    Case 10
+                        ' разделитель "_" уже проверен
+                End Select
+            Next j
+        End If
+        If ok Then
+            ExtractDateStampFromName = Mid$(fileName, i, 16)
+            Exit Function
+        End If
+    Next i
+End Function
+
+' Собирает фрагмент схемы из листа «Адаптированная_структура» книги, сохранённой
+' в папке 02_Подготовка схемы (W-PROMPT-00-SCHEMA-FIX: берётся самый свежий
+' файл "Адаптированная_структура_*.xlsx"; поддержка старого имени
+' "Плоская_таблица*" сохранена для книг, созданных до переименования).
 ' Если файла/листа нет — возвращает "" и пишет предупреждение в лог.
 Private Function GetSchemaFragment() As String
     Dim root As String
@@ -512,10 +608,13 @@ Private Function GetSchemaFragment() As String
         Exit Function
     End If
 
-    ' ищем самый свежий файл результата подготовки схемы
-    candidates(1) = "Плоская_таблица.xlsx"
-    candidates(2) = "*.xlsx"
-    candidates(3) = "*.xlsm"
+    ' W-PROMPT-00-SCHEMA-FIX: ищем самый свежий файл артефакта
+    ' "Адаптированная_структура_*.xlsx"; если таких нет — старый
+    ' "Плоская_таблица*" (обратная совместимость с книгами до переименования),
+    ' затем любой xlsx/xlsm в папке.
+    candidates(1) = SCHEMA_ARTIFACT_MASK
+    candidates(2) = "Плоская_таблица*"
+    candidates(3) = "*.xlsx"
     newest = ""
     For i = 1 To 3
         fileName = LastModifiedFile(prepPath, candidates(i))
@@ -529,7 +628,8 @@ Private Function GetSchemaFragment() As String
     Next i
 
     If newest = "" Then
-        Mod_Util.WriteWarning "P002", "GetSchemaFragment: в 02_Подготовка схемы нет файла Плоская_таблица.xlsx, схема не включена."
+        Mod_Util.WriteWarning "P002", "[!] Отсутствует обязательный файл: Адаптированная структура" & _
+                                 " (в 02_Подготовка схемы нет файла " & SCHEMA_ARTIFACT_MASK & "), схема не включена."
         Exit Function
     End If
 
@@ -547,10 +647,16 @@ Private Function GetSchemaFragment() As String
     On Error GoTo 0
 
     On Error Resume Next
-    Set ws = wb.Worksheets("Плоская_таблица")
+    Set ws = wb.Worksheets(SCHEMA_SHEET_NAME)
+    If ws Is Nothing Then
+        ' обратная совместимость: книги, созданные до переименования
+        Err.Clear
+        Set ws = wb.Worksheets("Плоская_таблица")
+    End If
     On Error GoTo 0
     If ws Is Nothing Then
-        Mod_Util.WriteWarning "P002", "GetSchemaFragment: в файле '" & newest & "' нет листа 'Плоская_таблица', схема не включена."
+        Mod_Util.WriteWarning "P002", "GetSchemaFragment: в файле '" & newest & "' нет листа '" & _
+                                      SCHEMA_SHEET_NAME & "', схема не включена."
         wb.Close SaveChanges:=False
         Exit Function
     End If
@@ -928,7 +1034,7 @@ Public Sub MakeNextStepPrompt()
         Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Реестр_покрытия.txt не найден или пуст, подставлена пустая строка."
     End If
 
-    ' 7. Фрагмент схемы из 02_Подготовка схемы (Плоская_таблица.xlsx, если есть)
+    ' 7. Фрагмент схемы из 02_Подготовка схемы (Адаптированная_структура_*.xlsx, если есть)
     schema = GetSchemaFragment()
 
     ' 8. Подстановка плейсхолдеров (только тех, что есть в шаблоне).
@@ -968,11 +1074,14 @@ End Sub
 
 ' Формирует Промт №0 (декомпозиция) при отсутствии Шаги.txt
 ' (W-PROMPT-GEN-STEP-00):
-' 1. Собирает пути к папкам 01_Исходные данные\01_Схема / 02_Описание /
+' 1. Собирает пути к папкам 02_Подготовка схемы / 01_Исходные данные\02_Описание /
 '    03_Конфигурация и находит реальные имена файлов через Dir по маскам
-'    (*.xlsx; *.docx или *.*; *.xml или *.pilotcfx).
+'    (Адаптированная_структура_*.xlsx; *.docx; *.xml или *.pilotcfx).
 ' 2. Если файла нет — MsgBox "Отсутствует файл в папке X", [WARN] в лог,
 '    в промт подставляется плейсхолдер "НЕ НАЙДЕН", работа продолжается.
+'    ИСКЛЮЧЕНИЕ (W-PROMPT-00-SCHEMA-FIX): Схема (адаптированная структура)
+'    является обязательной — если в 02_Подготовка схемы нет ни одного файла
+'    "Адаптированная_структура_*.xlsx", генерация Промта №0 останавливается.
 ' 3. Читает шаблон prompt_step_00_template.md из 04_Промты\Шаблоны,
 '    подставляет {SCHEMA_FILENAME}, {DESCRIPTION_FILENAME},
 '    {CONFIG_FILENAME} и {Decomposition_Rules} (правила декомпозиции v7.13).
@@ -980,7 +1089,7 @@ End Sub
 Private Sub GenerateStepZeroPrompt()
     Dim root As String
     Dim promptsPath As String
-    Dim schemaFolder As String          ' 01_Исходные данные\01_Схема
+    Dim prepFolder As String            ' 02_Подготовка схемы (артефакт-схема)
     Dim descFolder As String            ' 01_Исходные данные\02_Описание
     Dim configFolder As String          ' 01_Исходные данные\03_Конфигурация
     Dim templatePath As String          ' 04_Промты\Шаблоны\prompt_step_00_template.md
@@ -1004,7 +1113,7 @@ Private Sub GenerateStepZeroPrompt()
 
     root = NormPath(Mod_Util.GetProjectRoot)
     promptsPath = root & "\04_Промты"
-    schemaFolder = root & "\01_Исходные данные\01_Схема"
+    prepFolder = root & "\02_Подготовка схемы"
     descFolder = root & "\01_Исходные данные\02_Описание"
     configFolder = root & "\01_Исходные данные\03_Конфигурация"
     templatePath = promptsPath & "\Шаблоны\" & TEMPLATE_STEP0_NAME
@@ -1012,11 +1121,30 @@ Private Sub GenerateStepZeroPrompt()
 
     Mod_Util.WriteLog "GenerateStepZeroPrompt: Шаги.txt не найден, формирую Промт №0 (декомпозиция)"
 
-    ' 1. Реальные имена входных файлов (W-CORRECTION-PACK-1, п.4.2):
-    '    схема — *.xlsx; описание — *.docx; конфигурация — через FindConfigFile
+    ' 1. Реальные имена входных файлов:
+    '    W-PROMPT-00-SCHEMA-FIX: схема (адаптированная структура) берётся из
+    '    папки 02_Подготовка схемы — самый свежий файл по дате в имени
+    '    (при равенстве/отсутствии даты в имени — по дате изменения); если
+    '    файлов несколько, берётся последний; если файлов нет — ошибка и
+    '    остановка генерации.
+    '    описание — *.docx; конфигурация — через FindConfigFile
     '    (валидны .xml и .txt; если только .pilotcfx — предупреждение от
     '    FindConfigFile, генерация НЕ блокируется).
-    schemaName = FirstMatchFile(schemaFolder, "*.xlsx")
+    schemaName = GetNewestSchemaArtifactName(prepFolder)
+
+    ' Обязательность Схемы (W-PROMPT-00-SCHEMA-FIX): без адаптированной
+    ' структуры Промт №0 не формируется.
+    If schemaName = "" Then
+        Mod_Util.WriteError "P004", "[!] Отсутствует обязательный файл: Адаптированная структура" & _
+                                     " (папка 02_Подготовка схемы, маска " & SCHEMA_ARTIFACT_MASK & ")."
+        MsgBox "[!] Отсутствует обязательный файл: Адаптированная структура" & vbCrLf & _
+               "Папка: " & prepFolder & vbCrLf & _
+               "Маска: " & SCHEMA_ARTIFACT_MASK & vbCrLf & vbCrLf & _
+               "Выполните подготовку схемы (Собрать плоскую структуру) и повторите попытку." & vbCrLf & _
+               "Генерация Промта №0 остановлена.", _
+               vbCritical, "Промт №0 (декомпозиция)"
+        Exit Sub
+    End If
 
     descName = FirstMatchFile(descFolder, "*.docx")
 
@@ -1025,12 +1153,6 @@ Private Sub GenerateStepZeroPrompt()
 
     ' 2. Отсутствующие файлы — MsgBox + [!] (FormatMissingFile) + плейсхолдер
     '    "НЕ НАЙДЕН"; формирование Промта №0 при этом НЕ прерывается
-    If schemaName = "" Then
-        Mod_Util.WriteWarning "P004", Mod_Util.FormatMissingFile("01_Исходные данные\01_Схема\*.xlsx")
-        If missingList <> "" Then missingList = missingList & ", "
-        missingList = missingList & "01_Схема"
-        schemaName = STEP0_NOT_FOUND
-    End If
     If descName = "" Then
         Mod_Util.WriteWarning "P004", Mod_Util.FormatMissingFile("01_Исходные данные\02_Описание\*.docx")
         If missingList <> "" Then missingList = missingList & ", "

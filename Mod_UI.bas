@@ -239,8 +239,8 @@ End Sub
 Public Sub BuildFlatStructure_Click()
     On Error GoTo ErrHandler
     Mod_Structure.BuildFlatStructure
-    Mod_Util.WriteLog "Плоская таблица собрана"
-    MsgBox "Плоская таблица собрана"
+    Mod_Util.WriteLog "Адаптированная структура собрана"
+    MsgBox "Адаптированная структура собрана"
     Exit Sub
 ErrHandler:
     Mod_Util.WriteLog "Ошибка в BuildFlatStructure_Click: " & Err.Description
@@ -442,7 +442,8 @@ Public Sub ShowDiscoveryReport_Click()
 
     ' --- Проверка 1: файл отчёта действительно существует -------------
     ' Отчёт строится по результатам анализа схемы (BuildFlatStructure):
-    ' книга "Плоская_таблица_*.xlsx" в папке "02_Подготовка схемы".
+    ' книга "Адаптированная_структура_*.xlsx" в папке "02_Подготовка схемы"
+    ' (W-PROMPT-00-SCHEMA-FIX; ранее — "Плоская_таблица_*.xlsx").
     prepPath = root & "\02_Подготовка схемы"
     If Not FolderExists(prepPath) Then
         MsgBox MSG_NO_REPORT, vbExclamation
@@ -478,12 +479,18 @@ Public Sub ShowDiscoveryReport_Click()
     End If
 
     ' --- Проверка 2: лист, к которому идёт обращение, существует ------
-    If Not SheetExistsInBook(reportWb, "Плоская_таблица") Then
+    ' W-PROMPT-00-SCHEMA-FIX: лист переименован в "Адаптированная_структура";
+    ' старое имя "Плоская_таблица" принимается для книг, созданных до
+    ' переименования.
+    If SheetExistsInBook(reportWb, "Адаптированная_структура") Then
+        Set wsRep = reportWb.Worksheets("Адаптированная_структура")
+    ElseIf SheetExistsInBook(reportWb, "Плоская_таблица") Then
+        Set wsRep = reportWb.Worksheets("Плоская_таблица")
+    Else
         If Not wasOpen Then reportWb.Close SaveChanges:=False
         MsgBox MSG_NO_REPORT, vbExclamation
         Exit Sub
     End If
-    Set wsRep = reportWb.Worksheets("Плоская_таблица")
 
     ' --- Проверка 3: диапазон не пуст (LastRow > 1) -------------------
     lastRow = LastUsedRowOfSheet(wsRep)
