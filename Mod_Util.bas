@@ -91,8 +91,38 @@ Public Function GetStepsFolder() As String
     End If
 End Function
 
+' ---------------------------------------------------------------------------
+' W-CORRECTION-PACK-1, п.1.1: УНИФИЦИРОВАННЫЙ ФОРМАТ СООБЩЕНИЙ ЖУРНАЛА
+'   ERROR:  "ERROR [<код>]: <текст>"   (задаётся внутри WriteError)
+'   WARN:   "[!] <текст>"              (задаётся внутри WriteWarning)
+'   INFO:   "[i] <текст>"              (добавляется внутри WriteLog, если
+'                                        текст ещё не содержит маркера)
+' Вызывающий код передаёт чистый текст; маркер формата подставляется здесь,
+' поэтому все записи журнала выглядят одинаково независимо от модуля.
+' Допускается явная префиксация текста ("[i] ...", "[!] ...", "ERROR ...") —
+' в этом случае дублирование маркера исключается.
+' ---------------------------------------------------------------------------
+
+' Возвращает true, если текст уже начинается с одного из унифицированных
+' маркеров формата ("[i]", "[!]", "ERROR").
+Private Function HasUnifiedPrefix(ByVal message As String) As Boolean
+    Dim m As String
+    m = Trim$(message)
+    HasUnifiedPrefix = (Left$(m, 3) = "[i]" Or Left$(m, 3) = "[!]" Or _
+                        Left$(m, 5) = "ERROR")
+End Function
+
+' Возвращает стандартное сообщение об отсутствующем обязательном файле
+' (W-CORRECTION-PACK-1, п.1.1): "[!] Отсутствует обязательный файл: <FileName>".
+Public Function FormatMissingFile(ByVal FileName As String) As String
+    FormatMissingFile = "[!] Отсутствует обязательный файл: " & FileName
+End Function
+
 ' Записывает сообщение в журнал <корень>\05_Логи\Препроцессор_YYYY-MM-DD.log.
-' Формат строки: [YYYY-MM-DD HH:NN:SS] <message>.
+' Формат строки: [YYYY-MM-DD HH:NN:SS] <message>, где <message> для
+' информационных сообщений имеет вид "[i] <текст>" (W-CORRECTION-PACK-1,
+' п.1.1). Если текст уже помечен маркером "[i]"/"[!]"/"ERROR" (сообщения
+' WriteError/WriteWarning), повторная пометка НЕ добавляется.
 ' ВАЖНО: обработка ошибок здесь сознательно НЕ применяется - WriteLog
 ' вызывается из обработчиков ошибок других процедур, и любая собственная
 ' ошибка могла бы зациклить журналирование. Если корень не задан или
@@ -113,18 +143,27 @@ Public Sub WriteLog(ByVal message As String)
 
     fnum = FreeFile
     Open logFile For Append As #fnum
-    Print #fnum, "[" & Format(Now, "yyyy-mm-dd hh:nn:ss") & "] " & message
+    ' W-CORRECTION-PACK-1, п.1.1: информационные сообщения помечаются "[i]";
+    ' сообщения ERROR/WARN приходят уже с маркером (см. WriteError/WriteWarning).
+    If HasUnifiedPrefix(message) Then
+        Print #fnum, "[" & Format(Now, "yyyy-mm-dd hh:nn:ss") & "] " & message
+    Else
+        Print #fnum, "[" & Format(Now, "yyyy-mm-dd hh:nn:ss") & "] [i] " & message
+    End If
     Close #fnum
 End Sub
 
-' Записывает ошибку с кодом в журнал: "[ERROR <код>] <сообщение>".
+' Записывает ошибку в журнал в унифицированном формате (W-CORRECTION-PACK-1,
+' п.1.1): "ERROR [<код>]: <текст>".
 Public Sub WriteError(ByVal code As String, ByVal message As String)
-    WriteLog "[ERROR " & code & "] " & message
+    WriteLog "ERROR [" & code & "]: " & message
 End Sub
 
-' Записывает предупреждение с кодом в журнал: "[WARN <код>] <сообщение>".
+' Записывает предупреждение в журнал в унифицированном формате
+' (W-CORRECTION-PACK-1, п.1.1): "[!] <текст>". Код сохраняется в тексте
+' сообщения для трассировки источника предупреждения.
 Public Sub WriteWarning(ByVal code As String, ByVal message As String)
-    WriteLog "[WARN " & code & "] " & message
+    WriteLog "[!] (" & code & ") " & message
 End Sub
 
 ' Возвращает значение параметра конфигурации по ключу из файла
@@ -171,6 +210,64 @@ ErrHandler:
     WriteError "U002", "GetConfigValue: ошибка чтения configuration.txt. Ошибка: " & Err.Description
     GetConfigValue = ""
     Err.Clear
+End Function
+
+' ---------------------------------------------------------------------------
+' W-CORRECTION-PACK-1, п.1.2: поиск файла конфигурации в папке FolderPath.
+' Формат конфигурации: принимается .xml (приоритет) или .txt; .pilotcfx ИИ не
+' принимается. Правила:
+'   * найден .xml  - вернуть полный путь к нему;
+'   * иначе найден .txt - вернуть полный путь к нему;
+'   * иначе в папке есть хотя бы один .pilotcfx (и нет .xml/.txt) - вернуть ""
+'     и записать предупреждение "[!] Найден только .pilotcfx, требуется .xml или .txt";
+'   * иначе (файлов конфигурации нет вовсе) - вернуть "".
+' Временные файлы Office (~$) пропускаются. Если папка не существует - "".
+' ---------------------------------------------------------------------------
+Public Function FindConfigFile(ByVal FolderPath As String) As String
+    Dim fName As String
+    Dim xmlFound As String
+    Dim txtFound As String
+    Dim pilotcfxFound As Boolean
+
+    FindConfigFile = ""
+
+    If Dir(FolderPath, vbDirectory) = "" Then Exit Function
+
+    ' проход по всем файлам папки: фиксируем первый .xml, первый .txt
+    ' и наличие хотя бы одного .pilotcfx. Dir без атрибутов возвращает
+    ' только файлы (не подпапки).
+    fName = Dir(FolderPath & "\*")
+    Do While fName <> ""
+        If Left$(fName, 2) <> "~$" Then           ' пропускаем временные файлы Office
+            If Right$(LCase$(fName), 4) = ".xml" Then
+                If xmlFound = "" Then xmlFound = FolderPath & "\" & fName
+            ElseIf Right$(LCase$(fName), 4) = ".txt" Then
+                If txtFound = "" Then txtFound = FolderPath & "\" & fName
+            ElseIf Right$(LCase$(fName), 8) = ".pilotcfx" Then
+                pilotcfxFound = True
+            End If
+        End If
+        fName = Dir()
+    Loop
+
+    ' приоритет: .xml > .txt
+    If xmlFound <> "" Then
+        FindConfigFile = xmlFound
+        Exit Function
+    End If
+    If txtFound <> "" Then
+        FindConfigFile = txtFound
+        Exit Function
+    End If
+
+    ' только .pilotcfx без .xml/.txt - предупреждение, пустой результат
+    If pilotcfxFound Then
+        WriteWarning "U006", "Найден только .pilotcfx, требуется .xml или .txt (" & FolderPath & ")"
+        FindConfigFile = ""
+        Exit Function
+    End If
+
+    FindConfigFile = ""
 End Function
 
 ' Открывает указанную папку в проводнике Windows.

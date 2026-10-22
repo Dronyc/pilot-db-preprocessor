@@ -25,19 +25,22 @@ Private Const STEP0_PROMPT_FILE As String = "Промт_шаг_00_Декомпо
 ' Плейсхолдер вместо ненайденного входного файла.
 Private Const STEP0_NOT_FOUND As String = "НЕ НАЙДЕН"
 
-' Правила декомпозиции из Промта v7.13 (п. 10.1 «Состав шагов» и п. 10.4
-' «ДЕКОМПОЗИЦИЯ») — строковая константа для подстановки в {Decomposition_Rules}
-' шаблона prompt_step_00_template.md (W-PROMPT-GEN-STEP-00).
+' Алгоритм декомпозиции (W-CORRECTION-PACK-1, п.4.1): заменяет старые
+' «Правила декомпозиции» v7.13 (пункты 10.1/10.4 и фиксированная сетка из
+' 19 шагов удалены из шаблона Промта №0). Сетка шагов больше НЕ задаётся
+' заранее — ИИ строит её сам по алгоритму «анализ → прогноз → шаги».
+' Строковая константа для подстановки в {Decomposition_Rules} шаблона
+' prompt_step_00_template.md.
 Private Const DECOMPOSITION_RULES_V713 As String = _
-    "Источник: Промт генератора v7.13, п. 10.1 (состав шагов) и п. 10.4 (декомпозиция на 19 шагов)." & vbCrLf & _
-    "10.1. Состав шагов:" & vbCrLf & _
-    "- ШАГ −1 (внешний, отдельная задача): генерация справочника контрагентов по Промту v9.1 → слияние с текущей конфигурацией → замена файла конфигурации → пополнение РЕЕСТРА ТИПОВ и РЕЕСТРА ТИПОВ СПРАВОЧНИКА КОНТРАГЕНТОВ. Шаги настоящего промта запускаются только после завершения ШАГА −1." & vbCrLf & _
-    "- ШАГ 0 — СКЕЛЕТ: ВСЕ папки (фазы, стадии, этапы, папки ЦИМ) + их атрибуты; имена camelCase по п. 5.2; РЕЕСТР фиксирует полный список имён папок для проверок коллизий." & vbCrLf & _
-    "- ШАГ 1 — УНИВЕРСАЛЬНЫЕ И ПАРАМЕТРИЗУЕМЫЕ типы + их атрибуты." & vbCrLf & _
-    "- ШАГИ 2…N — документы стадий: Фаза A — типы документов (создаются, если отсутствуют в РЕЕСТРЕ ТИПОВ; коллизия с папкой решается суффиксом _doc); Фаза B — атрибуты для всех типов текущей области, ОТСУТСТВУЮЩИХ в РЕЕСТРЕ ПОКРЫТИЯ АТРИБУТАМИ." & vbCrLf & _
-    "- ШАГ N+1 — ФИНАЛЬНЫЙ АУДИТ: сверка РЕЕСТРА ТИПОВ с РЕЕСТРОМ ПОКРЫТИЯ; генерация атрибутов для пропущенных типов; снятие остаточных ошибок валидатора." & vbCrLf & _
-    "10.4. ДЕКОМПОЗИЦИЯ (19 шагов): ШАГ 0 скелет папок Фаз 0–3; ШАГ 1 универсальные + параметризуемые; ШАГ 2 Фаза 0 + 1.1; ШАГ 3 1.2–1.3; ШАГ 4 2.1; ШАГ 5 2.2; ШАГ 6 2.3; ШАГ 7 2.4; ШАГ 8 2.5; ШАГ 9 2.6; ШАГ 10 2.7; ШАГ 11 2.8.1; ШАГ 12 2.8.2; ШАГ 13 2.8.3; ШАГ 14 2.8.4; ШАГ 15 2.8.5–2.8.6; ШАГ 16 2.9; ШАГ 17 2.10; ШАГ 18 Фаза 3." & vbCrLf & _
-    "Формат строк Шаги.txt: NN = Имя_папки (NN — номер шага, Имя_папки — имя папки вида Шаг_NN_Название в 03_Результаты генерации\01_По шагам)."
+    "Алгоритм декомпозиции (выполнять строго по порядку):" & vbCrLf & _
+    "Шаг 1 - Анализ вложений: подсчитай уникальные типы, атрибуты, распределение по фазам/стадиям/этапам. Выведи сводку ""Типов: N, Атрибутов: M, Фаз: F, Стадий: S, Этапов: E""." & vbCrLf & _
+    "Шаг 2 - Прогноз объёма: определи лимит типов/атрибутов на один шаг генерации и заложи запас +50%." & vbCrLf & _
+    "Шаг 3 - Генерация списка шагов:" & vbCrLf & _
+    "- ШАГ 0 - СКЕЛЕТ: все папки (фазы, стадии, этапы) + их атрибуты." & vbCrLf & _
+    "- ШАГ 1 - УНИВЕРСАЛЬНЫЕ И ПАРАМЕТРИЗУЕМЫЕ типы + их атрибуты." & vbCrLf & _
+    "- ШАГИ 2...N - расписание фаз/стадий/этапов: полное покрытие схемы без пропусков." & vbCrLf & _
+    "- ШАГ N+1 - ФИНАЛЬНЫЙ АУДИТ." & vbCrLf & _
+    "Шаг 4 - Формат вывода Шаги.txt: ""NN|Имя_папки"", разделитель - pipe (|), НЕ ""=""! Без пояснений. (NN - номер шага, Имя_папки - имя папки вида Шаг_NN_Название в 03_Результаты генерации\01_По шагам)."
 
 ' ---------------------------------------------------------------------------
 ' ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Private)
@@ -171,6 +174,46 @@ Private Function SafeReadText(ByVal filePath As String) As String
     End If
 
     SafeReadText = res
+End Function
+
+' Собирает список имён файлов в папке folderPath через Dir() без рекурсии
+' (W-CORRECTION-PACK-1, п.4.3). Временные файлы Office (~$) пропускаются.
+' Возвращает строку "- имя1" & vbCrLf & "- имя2" ... либо "" (папка пуста
+' или не существует).
+Private Function ListFolderFiles(ByVal folderPath As String) As String
+    Dim fName As String
+    Dim res As String
+
+    ListFolderFiles = ""
+    If Dir(folderPath, vbDirectory) = "" Then Exit Function
+
+    fName = Dir(folderPath & "\*")        ' Dir без атрибутов - только файлы
+    Do While fName <> ""
+        If Left$(fName, 2) <> "~$" Then   ' пропускаем временные файлы Office
+            If res <> "" Then res = res & vbCrLf
+            res = res & "- " & fName
+        End If
+        fName = Dir()
+    Loop
+    ListFolderFiles = res
+End Function
+
+' Формирует блок "ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА" для подстановки в начало
+' промта (W-CORRECTION-PACK-1, п.4.3): если папка
+' "01_Исходные данные\04_Дополнительные данные" не пуста - перечисляет её
+' файлы; иначе возвращает "" (блок не добавляется).
+Private Function BuildExtraDataBlock(ByVal root As String) As String
+    Dim filesList As String
+
+    BuildExtraDataBlock = ""
+    filesList = ListFolderFiles(root & "\01_Исходные данные\04_Дополнительные данные")
+    If filesList = "" Then Exit Function
+
+    BuildExtraDataBlock = "### ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА" & vbCrLf & _
+        "В папке 04_Дополнительные данные найдены файлы:" & vbCrLf & _
+        filesList & vbCrLf & _
+        "Учитывай их при генерации, если они относятся к текущему шагу." & _
+        vbCrLf & vbCrLf & vbCrLf
 End Function
 
 ' Приводит текст к единым разделителям строк vbCrLf (W-UTF8-READ):
@@ -452,7 +495,10 @@ End Function
 ' коллекцией. Каждая запись — строка вида "NN|Имя_папки".
 ' W-UTF8-READ: файл читается целиком через SafeReadText (автоопределение
 ' UTF-8 / Windows-1251), затем разбивается на строки Split(text, vbCrLf);
-' пустые строки пропускаются, формат строки — "NN = Имя_папки".
+' пустые строки пропускаются.
+' W-CORRECTION-PACK-1, п.4.4: основной формат строки — "NN|Имя_папки"
+' (разделитель — pipe). Устаревший вариант "NN = Имя_папки" принимается с
+' предупреждением в логе; каждая запись нормализуется к виду "NN|Имя_папки".
 ' При отсутствии файла: ошибка P001, MsgBox, пустая коллекция.
 ' При ошибке чтения: [WARN] P006 в лог, пустая коллекция без прерывания.
 Public Function ReadStepList() As Collection
@@ -462,6 +508,7 @@ Public Function ReadStepList() As Collection
     Dim lines() As String
     Dim i As Long
     Dim s As String
+    Dim posPipe As Long
     Dim posEq As Long
     Dim nn As String
     Dim nm As String
@@ -497,7 +544,7 @@ Public Function ReadStepList() As Collection
         Exit Function
     End If
 
-    ' Разбить текст на строки; формат строки: "NN = Имя_папки"
+    ' Разбить текст на строки; формат строки: "NN|Имя_папки"
     ' (W-UTF8-READ: ADODB.Stream сохраняет переводы строки файла как есть,
     ' поэтому сначала нормализуем CRLF/LF/CR к vbCrLf).
     lines = Split(NormalizeLineEndings(text), vbCrLf)
@@ -506,11 +553,26 @@ Public Function ReadStepList() As Collection
         s = Trim$(lines(i))
         ' пропуск пустых строк
         If s <> "" Then
-            posEq = InStr(s, "=")
-            If posEq > 0 Then
-                nn = Trim(Left(s, posEq - 1))
-                nm = Trim(Mid(s, posEq + 1))
+            posPipe = InStr(s, "|")
+            If posPipe > 0 Then
+                ' канонический формат (W-CORRECTION-PACK-1, п.4.4): NN|Имя_папки
+                nn = Trim(Left(s, posPipe - 1))
+                nm = Trim(Mid(s, posPipe + 1))
                 If nn <> "" And nm <> "" Then col.Add nn & "|" & nm
+            Else
+                ' устаревший формат "NN = Имя_папки" — принимаем с
+                ' предупреждением, чтобы старые Шаги.txt не ломали работу
+                posEq = InStr(s, "=")
+                If posEq > 0 Then
+                    nn = Trim(Left(s, posEq - 1))
+                    nm = Trim(Mid(s, posEq + 1))
+                    If nn <> "" And nm <> "" Then
+                        Mod_Util.WriteWarning "P001", "ReadStepList: строка " & _
+                            (i + 1) & " Шаги.txt использует разделитель ""="" вместо ""|"": """ & _
+                            s & """. Обновите файл до формата ""NN|Имя_папки""."
+                        col.Add nn & "|" & nm
+                    End If
+                End If
             End If
         End If
     Next i
@@ -639,6 +701,14 @@ Public Sub MakeNextStepPrompt()
 
     On Error GoTo ErrHandler
 
+    ' W-CORRECTION-PACK-1, п.2.3: блокировка генерации при неготовых исходниках
+    If Not Mod_Folders.CheckSourceFolders() Then
+        Mod_Util.WriteError "F005", "MakeNextStepPrompt: Исходные данные не готовы. Генерация остановлена."
+        MsgBox "ERROR [F005]: Исходные данные не готовы. Генерация остановлена.", _
+               vbCritical, "Промт следующего шага"
+        Exit Sub
+    End If
+
     root = NormPath(Mod_Util.GetProjectRoot)
     stepsPath = root & "\03_Результаты генерации\01_По шагам"
     promptsPath = root & "\04_Промты"
@@ -716,8 +786,8 @@ Public Sub MakeNextStepPrompt()
         End If
         schema = GetSchemaFragment()
 
-        ' финальный аудит: NN = 99, STEP_NAME = Шаг_99_Финал
-        result = template
+        ' W-CORRECTION-PACK-1, п.4.3: блок доп. данных перед текстом промта
+        result = BuildExtraDataBlock(root) & template
         result = ReplaceIfPresent(result, "{NN}", "99")
         result = ReplaceIfPresent(result, "{STEP_NAME}", "Шаг_99_Финал")
         result = ReplaceIfPresent(result, "{REGISTRY_TYPES}", regTypes)
@@ -772,8 +842,10 @@ Public Sub MakeNextStepPrompt()
     ' 7. Фрагмент схемы из 02_Подготовка схемы (Плоская_таблица.xlsx, если есть)
     schema = GetSchemaFragment()
 
-    ' 8. Подстановка плейсхолдеров (только тех, что есть в шаблоне)
-    result = template
+    ' 8. Подстановка плейсхолдеров (только тех, что есть в шаблоне).
+    '    W-CORRECTION-PACK-1, п.4.3: если папка 04_Дополнительные данные не
+    '    пуста — в начало промта вставляется блок "ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА".
+    result = BuildExtraDataBlock(root) & template
     result = ReplaceIfPresent(result, "{NN}", nextNN)
     result = ReplaceIfPresent(result, "{STEP_NAME}", nextName)
     result = ReplaceIfPresent(result, "{REGISTRY_TYPES}", regTypes)
@@ -833,6 +905,14 @@ Private Sub GenerateStepZeroPrompt()
 
     On Error GoTo ErrHandler
 
+    ' W-CORRECTION-PACK-1, п.2.3: блокировка генерации при неготовых исходниках
+    If Not Mod_Folders.CheckSourceFolders() Then
+        Mod_Util.WriteError "F005", "GenerateStepZeroPrompt: Исходные данные не готовы. Генерация остановлена."
+        MsgBox "ERROR [F005]: Исходные данные не готовы. Генерация остановлена.", _
+               vbCritical, "Промт №0 (декомпозиция)"
+        Exit Sub
+    End If
+
     root = NormPath(Mod_Util.GetProjectRoot)
     promptsPath = root & "\04_Промты"
     schemaFolder = root & "\01_Исходные данные\01_Схема"
@@ -843,38 +923,39 @@ Private Sub GenerateStepZeroPrompt()
 
     Mod_Util.WriteLog "GenerateStepZeroPrompt: Шаги.txt не найден, формирую Промт №0 (декомпозиция)"
 
-    ' 1. Реальные имена входных файлов (Dir по маскам, первый найденный)
+    ' 1. Реальные имена входных файлов (W-CORRECTION-PACK-1, п.4.2):
+    '    схема — *.xlsx; описание — *.docx; конфигурация — через FindConfigFile
+    '    (валидны .xml и .txt; если только .pilotcfx — предупреждение от
+    '    FindConfigFile, генерация НЕ блокируется).
     schemaName = FirstMatchFile(schemaFolder, "*.xlsx")
-    If schemaName = "" Then schemaName = FirstMatchFile(schemaFolder, "*.xlsm")
 
     descName = FirstMatchFile(descFolder, "*.docx")
-    If descName = "" Then descName = FirstMatchFile(descFolder, "*.*")
 
-    configName = FirstMatchFile(configFolder, "*.xml")
-    If configName = "" Then configName = FirstMatchFile(configFolder, "*.pilotcfx")
+    configName = Mod_Util.FindConfigFile(configFolder)
+    If configName <> "" Then configName = Mid$(configName, InStrRev(configName, "\") + 1)
 
-    ' 2. Отсутствующие файлы — MsgBox + [WARN] + плейсхолдер "НЕ НАЙДЕН";
-    '    формирование Промта №0 при этом НЕ прерывается
+    ' 2. Отсутствующие файлы — MsgBox + [!] (FormatMissingFile) + плейсхолдер
+    '    "НЕ НАЙДЕН"; формирование Промта №0 при этом НЕ прерывается
     If schemaName = "" Then
-        Mod_Util.WriteWarning "P004", "GenerateStepZeroPrompt: отсутствует файл в папке 01_Схема (" & schemaFolder & ")"
+        Mod_Util.WriteWarning "P004", Mod_Util.FormatMissingFile("01_Исходные данные\01_Схема\*.xlsx")
         If missingList <> "" Then missingList = missingList & ", "
         missingList = missingList & "01_Схема"
         schemaName = STEP0_NOT_FOUND
     End If
     If descName = "" Then
-        Mod_Util.WriteWarning "P004", "GenerateStepZeroPrompt: отсутствует файл в папке 02_Описание (" & descFolder & ")"
+        Mod_Util.WriteWarning "P004", Mod_Util.FormatMissingFile("01_Исходные данные\02_Описание\*.docx")
         If missingList <> "" Then missingList = missingList & ", "
         missingList = missingList & "02_Описание"
         descName = STEP0_NOT_FOUND
     End If
     If configName = "" Then
-        Mod_Util.WriteWarning "P004", "GenerateStepZeroPrompt: отсутствует файл в папке 03_Конфигурация (" & configFolder & ")"
+        Mod_Util.WriteWarning "P004", Mod_Util.FormatMissingFile("01_Исходные данные\03_Конфигурация\*.xml или *.txt")
         If missingList <> "" Then missingList = missingList & ", "
         missingList = missingList & "03_Конфигурация"
         configName = STEP0_NOT_FOUND
     End If
     If missingList <> "" Then
-        MsgBox "Отсутствует файл в папке: " & missingList & "." & vbCrLf & _
+        MsgBox "[!] Отсутствует обязательный файл: " & missingList & "." & vbCrLf & _
                "В Промте №0 вместо имени подставлено """ & STEP0_NOT_FOUND & """.", _
                vbExclamation, "Промт №0 (декомпозиция)"
     End If

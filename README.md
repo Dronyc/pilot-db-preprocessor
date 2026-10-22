@@ -37,13 +37,15 @@
 1. `docs/Spec_Dispatcher.md` — требования к препроцессору.
 2. `docs/Audit_Report.md` — состояние исходного кода и расхождения.
 3. `docs/Spec_Optimization.md` — задачи, порядок выполнения и проверки.
-4. `README.md` — общий контекст проекта.
+4. `docs/Project_Map.md` — карта проекта (модули, папки, форматы, поток данных).
+5. `README.md` — общий контекст проекта.
 
 ## Ключевые файлы
 
 - [Спецификация](docs/Spec_Dispatcher.md)
 - [Аудит](docs/Audit_Report.md)
 - [Задание на оптимизацию](docs/Spec_Optimization.md)
+- [Карта проекта](docs/Project_Map.md)
 - [Правила работы с репозиторием](CONTRIBUTING.md)
 - [Игнорируемые файлы](.gitignore)
 ```
