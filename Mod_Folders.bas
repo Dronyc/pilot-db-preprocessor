@@ -24,6 +24,8 @@ Private Const FOLDER_SOURCE As String = "01_Исходные данные"
 Private Const FOLDER_SCHEMA As String = "01_Исходные данные\01_Схема"
 Private Const FOLDER_DESC As String = "01_Исходные данные\02_Описание"
 Private Const FOLDER_CONFIG As String = "01_Исходные данные\03_Конфигурация"
+' W-CORRECTION-PACK-1, п.2.1: папка дополнительных данных пользователя.
+Private Const FOLDER_EXTRA As String = "01_Исходные данные\04_Дополнительные данные"
 Private Const FOLDER_PREP As String = "02_Подготовка схемы"
 Private Const FOLDER_RESULTS As String = "03_Результаты генерации"
 Private Const FOLDER_STEPS As String = "03_Результаты генерации\01_По шагам"
@@ -76,6 +78,25 @@ Private Function CountFilesByExt(ByVal folderPath As String, ByVal ext As String
     CountFilesByExt = cnt
 End Function
 
+' Возвращает полный путь первого файла с указанным расширением в папке
+' (W-CORRECTION-PACK-1, п.2.2). Временные файлы Office (~$) пропускаются.
+' Если папка не существует или файл не найден - возвращает "".
+Private Function FirstMatchFileByExt(ByVal folderPath As String, ByVal ext As String) As String
+    Dim fName As String
+
+    FirstMatchFileByExt = ""
+    If Not FolderExists(folderPath) Then Exit Function
+
+    fName = Dir(folderPath & "\*" & ext)
+    Do While fName <> ""
+        If Left$(fName, 2) <> "~$" Then       ' пропускаем временные файлы Office
+            FirstMatchFileByExt = folderPath & "\" & fName
+            Exit Function
+        End If
+        fName = Dir()
+    Loop
+End Function
+
 ' ---------------------------------------------------------------------------
 ' ПУБЛИЧЕСКИЕ ПРОЦЕДУРЫ И ФУНКЦИИ
 ' ---------------------------------------------------------------------------
@@ -101,11 +122,14 @@ Public Sub CreateProjectFolders()
 
 
     ' Порядок важен: 05_Логи - первая (нужна для лога), затем остальные.
+    ' W-CORRECTION-PACK-1, п.2.1: добавлена папка доп. данных
+    ' "01_Исходные данные\04_Дополнительные данные".
     relList = Array(FOLDER_LOGS, _
                     FOLDER_SOURCE, _
                     FOLDER_SCHEMA, _
                     FOLDER_DESC, _
                     FOLDER_CONFIG, _
+                    FOLDER_EXTRA, _
                     FOLDER_PREP, _
                     FOLDER_RESULTS, _
                     FOLDER_STEPS, _
@@ -193,24 +217,33 @@ Private Sub CopyPromptTemplates(ByVal root As String)
                       ", с ошибками: " & failedCount
 End Sub
 
-' Проверяет наличие исходных папок и файлов в них (кнопка 2, раздел 4):
-'   * 01_Схема        - ровно один .xlsx;
-'   * 02_Описание     - ровно один .docx;
-'   * 03_Конфигурация - ровно один .pilotcfx.
-' Все несоответствия пишутся в лог предупреждениями (F005).
-' Возвращает True, если все условия выполнены, иначе False.
+' Проверяет наличие исходных папок и файлов в них (W-CORRECTION-PACK-1,
+' п.2.2 — переписана под унифицированные форматы сообщений):
+'   * 01_Схема          - требуется .xlsx; нет -> WriteError(FormatMissingFile), False;
+'   * 02_Описание       - требуется .docx; нет -> WriteError, False;
+'   * 03_Конфигурация   - через Mod_Util.FindConfigFile: .xml или .txt - OK;
+'                         только .pilotcfx -> WriteWarning, False;
+'                         ничего нет -> WriteError(FormatMissingFile), False;
+'   * 04_Дополнительные данные - информационно: если папка не пуста,
+'                         WriteLog "[i] Дополнительные данные: <N> файл(ов)".
+' Все сообщения собираются в массив msgs и при наличии ошибок выводятся в
+' журнал единым блоком (каждое сообщение — отдельной записью). Если всё OK —
+' WriteLog "[i] Проверка исходных данных: OK".
+' Возвращает True/False (функция вызывается из генератора промтов — см.
+' Mod_Prompt.GenerateStepZeroPrompt / MakeNextStepPrompt, блокировка F005).
 Public Function CheckSourceFolders() As Boolean
     Dim root As String
-    Dim folders As Variant
-    Dim exts As Variant
+    Dim schemaFull As String            ' полный путь файла схемы (или "")
+    Dim descFull As String              ' полный путь файла описания (или "")
+    Dim cfgFull As String               ' полный путь конфигурации (или "")
+    Dim extraPath As String             ' папка доп. данных
+    Dim extraCnt As Long                ' число файлов в папке доп. данных
+    Dim msgs() As String                ' собранные сообщения по всем проверкам
+    Dim msgCount As Long
+    Dim hasErrors As Boolean
     Dim i As Long
-    Dim cnt As Long
-    Dim folderFull As String
-    Dim result As Boolean
 
     On Error GoTo ErrHandler
-
-    result = True
 
     root = Mod_Util.GetProjectRoot()
     If root = "" Then
@@ -222,29 +255,64 @@ Public Function CheckSourceFolders() As Boolean
         Exit Function
     End If
 
-    ' три проверяемые папки: имя и требуемое расширение
-    folders = Array(FOLDER_SCHEMA, FOLDER_DESC, FOLDER_CONFIG)
-    exts = Array(".xlsx", ".docx", ".pilotcfx")
+    ReDim msgs(1 To 8)
+    msgCount = 0
+    hasErrors = False
 
-    For i = LBound(folders) To UBound(folders)
-        folderFull = root & "\" & CStr(folders(i))
-        cnt = CountFilesByExt(folderFull, CStr(exts(i)))
+    ' --- 1. Схема: требуется .xlsx ----------------------------------------
+    schemaFull = FirstMatchFileByExt(root & "\" & FOLDER_SCHEMA, ".xlsx")
+    If schemaFull = "" Then
+        msgCount = msgCount + 1
+        msgs(msgCount) = Mod_Util.FormatMissingFile(FOLDER_SCHEMA & "\*.xlsx")
+        hasErrors = True
+    End If
 
-        ' каждая папка - ровно один файл нужного расширения
-        If cnt = 0 Then
-            Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                       " - файл " & CStr(exts(i)) & " не найден"
-            result = False
-        ElseIf cnt > 1 Then
-            Mod_Util.WriteWarning "F005", "CheckSourceFolders: " & CStr(folders(i)) & _
-                                       " - найдено " & cnt & " файлов " & CStr(exts(i)) & _
-                                       ", ожидается ровно 1"
-            result = False
-        End If
+    ' --- 2. Описание: требуется .docx -------------------------------------
+    descFull = FirstMatchFileByExt(root & "\" & FOLDER_DESC, ".docx")
+    If descFull = "" Then
+        msgCount = msgCount + 1
+        msgs(msgCount) = Mod_Util.FormatMissingFile(FOLDER_DESC & "\*.docx")
+        hasErrors = True
+    End If
+
+    ' --- 3. Конфигурация: .xml (приоритет) или .txt; .pilotcfx не принимается
+    cfgFull = Mod_Util.FindConfigFile(root & "\" & FOLDER_CONFIG)
+    If cfgFull <> "" Then
+        ' найден .xml или .txt - OK
+    ElseIf CountFilesByExt(root & "\" & FOLDER_CONFIG, ".pilotcfx") > 0 Then
+        ' только .pilotcfx (без .xml/.txt) - предупреждение, проверка не пройдена
+        ' (предупреждение "[!] Найден только .pilotcfx..." пишет FindConfigFile)
+        msgCount = msgCount + 1
+        msgs(msgCount) = "[!] Конфигурация: найден только .pilotcfx, требуется .xml или .txt"
+        hasErrors = True
+    Else
+        ' ничего нет - ошибка отсутствующего обязательного файла
+        msgCount = msgCount + 1
+        msgs(msgCount) = Mod_Util.FormatMissingFile(FOLDER_CONFIG & "\*.xml или *.txt")
+        hasErrors = True
+    End If
+
+    ' --- 4. Дополнительные данные: информационная сводка ------------------
+    extraPath = root & "\" & FOLDER_EXTRA
+    extraCnt = CountFilesByExt(extraPath, "*")
+    If extraCnt > 0 Then
+        Mod_Util.WriteLog "Дополнительные данные: " & extraCnt & " файл(ов)"
+    End If
+
+    ' --- Итог ---------------------------------------------------------------
+    If Not hasErrors Then
+        Mod_Util.WriteLog "Проверка исходных данных: OK"
+        CheckSourceFolders = True
+        Exit Function
+    End If
+
+    ' есть ошибки - выводим все сообщения единым блоком (каждое — запись лога)
+    For i = 1 To msgCount
+        Mod_Util.WriteError "F005", msgs(i)
     Next i
+    Mod_Util.WriteLog "Проверка исходных данных: найдено проблем - " & msgCount
 
-    Mod_Util.WriteLog "CheckSourceFolders: результат " & IIf(result, "True", "False")
-    CheckSourceFolders = result
+    CheckSourceFolders = False
     Exit Function
 
 ErrHandler:

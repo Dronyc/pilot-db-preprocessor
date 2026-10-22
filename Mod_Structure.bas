@@ -202,6 +202,12 @@ Public Sub BuildFlatStructure()
     ' ВАЖНО: WriteLog вызывается ПЕРЕД WriteFlatTable, чтобы собрать все ошибки
     ' в problemsDict до того, как WriteFlatTable начнет красить строки.
     WriteLog wbOut
+
+    ' W-CORRECTION-PACK-1, п.3.1: проверка дублей номеров/наименований
+    ' (добавляет строки "[!] ..." в "Аномалии схемы", сборку НЕ блокирует)
+    CheckNumberDuplicates wbOut
+
+    BackupFlatTableSheet          ' W-CORRECTION-PACK-1, п.3.2 (до перезаписи)
     WriteFlatTable wbOut
     WriteTraceability wbOut
 
@@ -675,6 +681,187 @@ NextNodeLog:
     End If
     
     ws.Columns("A:H").AutoFit
+End Sub
+
+'---------------- W-CORRECTION-PACK-1, п.3.1: проверка дублей ----------------
+' Выполняется ПОСЛЕ сборки плоской таблицы (данные Nodes[] уже готовы) и
+' ПЕРЕД записью листа "Плоская_таблица". Дубли выявляются по паре
+' (номер, наименование): номер — LeadCode из имени узла, наименование —
+' часть имени после номера. Результаты добавляются в лист "Аномалии схемы"
+' в виде строк "[!] ..." (столбец "Описание"). Сборку НЕ блокируем —
+' только предупреждения в отчёте.
+Private Sub CheckNumberDuplicates(ByVal wbOut As Workbook)
+    Dim ws As Worksheet
+    Dim dictNum As Object           ' номер -> Collection(уникальных наименований)
+    Dim dictName As Object          ' наименование -> Collection(уникальных номеров)
+    Dim i As Long
+    Dim nm As String, code As String, namePart As String
+    Dim col As Collection
+    Dim v As Variant
+    Dim foundIt As Boolean
+    Dim dupCount As Long
+    Dim r As Long
+
+    On Error GoTo ErrHandler
+
+    Set dictNum = CreateObject("Scripting.Dictionary")
+    Set dictName = CreateObject("Scripting.Dictionary")
+
+    For i = 1 To NodeCount
+        If Nodes(i).NodeType <> "УДАЛЕН" And Nodes(i).NodeType <> "ОШИБКА_ЯРЛЫКА" Then
+            nm = Nodes(i).Name
+            code = LeadCode(nm)
+            If code <> "" Then
+                namePart = Trim$(Mid$(nm, Len(code) + 1))
+                If Left$(namePart, 1) = "." Then namePart = Trim$(Mid$(namePart, 2))
+                If namePart <> "" Then
+                    ' номер -> множество уникальных наименований
+                    If Not dictNum.Exists(code) Then
+                        Set col = New Collection
+                        col.Add namePart
+                        Set dictNum(code) = col
+                    Else
+                        foundIt = False
+                        For Each v In dictNum(code)
+                            If CStr(v) = namePart Then foundIt = True: Exit For
+                        Next v
+                        If Not foundIt Then dictNum(code).Add namePart
+                    End If
+                    ' наименование -> множество уникальных номеров
+                    If Not dictName.Exists(namePart) Then
+                        Set col = New Collection
+                        col.Add code
+                        Set dictName(namePart) = col
+                    Else
+                        foundIt = False
+                        For Each v In dictName(namePart)
+                            If CStr(v) = code Then foundIt = True: Exit For
+                        Next v
+                        If Not foundIt Then dictName(namePart).Add code
+                    End If
+                End If
+            End If
+        End If
+    Next i
+
+    ' Нет дублей — лист "Аномалии схемы" не трогаем
+    If dictNum.Count = 0 And dictName.Count = 0 Then Exit Sub
+
+    GetSheet wbOut, "Аномалии схемы", ws
+    r = ws.Cells(ws.Rows.Count, 8).End(xlUp).Row
+    If r < 2 Then r = 2 Else r = r + 1
+
+    ' 1) Один номер — несколько разных наименований
+    Dim k As Variant
+    For Each k In dictNum.Keys
+        If dictNum(k).Count > 1 Then
+            ws.Cells(r, 8).Value = "[!] Дублирование номера: " & k & " — " & _
+                                   JoinCollection(dictNum(k), " / ")
+            r = r + 1
+            dupCount = dupCount + 1
+        End If
+    Next k
+
+    ' 2) Одно наименование — несколько разных номеров
+    For Each k In dictName.Keys
+        If dictName(k).Count > 1 Then
+            ws.Cells(r, 8).Value = "[!] Одинаковое наименование: " & k & " — " & _
+                                   JoinCollection(dictName(k), " / ")
+            r = r + 1
+            dupCount = dupCount + 1
+        End If
+    Next k
+
+    If dupCount > 0 Then
+        Mod_Util.WriteLog "Проверка дублей: найдено аномалий - " & dupCount
+    End If
+    Exit Sub
+
+ErrHandler:
+    ' проверка дублей не должна ронять сборку — только предупреждение
+    Mod_Util.WriteWarning "S006", "CheckNumberDuplicates: ошибка проверки дублей. Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' Склеивает элементы Collection через разделитель.
+Private Function JoinCollection(ByVal col As Collection, ByVal sep As String) As String
+    Dim i As Long
+    Dim res As String
+    res = ""
+    For i = 1 To col.Count
+        If i > 1 Then res = res & sep
+        res = res & CStr(col(i))
+    Next i
+    JoinCollection = res
+End Function
+
+'---------------- W-CORRECTION-PACK-1, п.3.2: бэкап плоской таблицы ---------
+' Перед перезаписью листа "Плоская_таблица": если такой лист существует
+' (например, leftover от предыдущего запуска — на новом wbOut его обычно нет),
+' копируем его в лист "Плоская_таблица_bak_<YYYYMMDD_HHMMSS>". Храним последние
+' 5 бэкапов, более старые удаляем. О факте бэкапа пишем INFO в лог.
+Private Sub BackupFlatTableSheet()
+    Dim wbTool As Workbook
+    Dim wsSrc As Worksheet
+    Dim ws As Worksheet
+    Dim bakName As String
+    Dim namesArr() As String
+    Dim cnt As Long
+    Dim i As Long, j As Long
+    Dim tmp As String
+
+    On Error GoTo ErrHandler
+
+    Set wbTool = ThisWorkbook
+
+    ' существует ли старый лист "Плоская_таблица"?
+    On Error Resume Next
+    Set wsSrc = wbTool.Worksheets("Плоская_таблица")
+    On Error GoTo ErrHandler
+    If wsSrc Is Nothing Then Exit Sub      ' старого листа нет — бэкап не нужен
+
+    bakName = "Плоская_таблица_bak_" & Format$(Now, "yyyymmdd_hhnnss")
+
+    Application.DisplayAlerts = False
+    wsSrc.Copy After:=wbTool.Sheets(wbTool.Sheets.Count)
+    ActiveSheet.Name = bakName
+    Application.DisplayAlerts = True
+
+    Mod_Util.WriteLog "Бэкап плоской таблицы: " & bakName
+
+    ' ротация: храним последние 5 бэкапов, старые удаляем
+    ReDim namesArr(1 To wbTool.Sheets.Count)
+    cnt = 0
+    For Each ws In wbTool.Worksheets
+        If Left$(ws.Name, Len("Плоская_таблица_bak_")) = "Плоская_таблица_bak_" Then
+            cnt = cnt + 1
+            namesArr(cnt) = ws.Name
+        End If
+    Next ws
+
+    If cnt > 5 Then
+        ' сортировка имён по возрастанию (формат даты позволяет сортировать как строки)
+        For i = 1 To cnt - 1
+            For j = i + 1 To cnt
+                If namesArr(j) < namesArr(i) Then
+                    tmp = namesArr(i)
+                    namesArr(i) = namesArr(j)
+                    namesArr(j) = tmp
+                End If
+            Next j
+        Next i
+        Application.DisplayAlerts = False
+        For i = 1 To cnt - 5                    ' самые старые — удалить
+            wbTool.Worksheets(namesArr(i)).Delete
+        Next i
+        Application.DisplayAlerts = True
+    End If
+    Exit Sub
+
+ErrHandler:
+    Application.DisplayAlerts = True
+    Mod_Util.WriteWarning "S007", "BackupFlatTableSheet: ошибка бэкапа листа. Ошибка: " & Err.Description
+    Err.Clear
 End Sub
 
 
