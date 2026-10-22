@@ -248,7 +248,7 @@ Private Function BuildStepZeroExtraDataList(ByVal root As String) As String
     filesList = ListFolderFiles(root & "\01_Исходные данные\04_Дополнительные данные")
     If filesList = "" Then Exit Function
 
-    BuildStepZeroExtraDataList = "-  Найденные файлы доп. данных:" & _
+    BuildStepZeroExtraDataList = "- Найденные файлы доп. данных:" & _
         vbCrLf & filesList
 End Function
 
