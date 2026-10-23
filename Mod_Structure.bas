@@ -216,6 +216,11 @@ Public Sub BuildFlatStructure()
     ' (колонка "Аномалия") и HighlightDuplicateRows (жёлтая подсветка).
     Set dupCountDict = CreateObject("Scripting.Dictionary")
 
+    ' W-DEBUG-ANOMALIES-EMPTY: отладочное логирование цепочки подготовки листа
+    ' "Аномалии схемы" (DebugLog -> Mod_Util.DebugLog: Immediate + файл-журнал,
+    ' на лист ничего не пишется). Плоская структура сформирована (массив Nodes).
+    Mod_Util.DebugLog "BuildFlatStructure: сформировано строк = " & NodeCount
+
     ' ЧАСТЬ B: обработка ярлыков - перенос связей к целевым объектам
     ' и пометка строк ярлыков как удаляемых (ДО вывода плоской таблицы)
     Call ProcessShortcuts
@@ -256,9 +261,15 @@ Public Sub BuildFlatStructure()
     Set dictDupMain = BuildDupKeyDict
 
     ' 3) Запись строк дублей (r инкрементируется, каждая пара — в свою строку).
+    '    W-DEBUG-ANOMALIES-EMPTY: логирование вызова/завершения — позволяет
+    '    выявить этап, на котором теряются данные о дублях.
     lastRowDupMain = 0
     If Not dictDupMain Is Nothing Then
+        Mod_Util.DebugLog "BuildFlatStructure: вызов WriteSchemaDuplicates"
         lastRowDupMain = WriteSchemaDuplicates(wsAnom, 2, dictDupMain)
+        Mod_Util.DebugLog "BuildFlatStructure: WriteSchemaDuplicates завершён"
+    Else
+        Mod_Util.DebugLog "BuildFlatStructure: WriteSchemaDuplicates не вызван (дублей нет)"
     End If
 
     ' 4) ListObject tblAnomalies — ТОЛЬКО после записанных данных.
@@ -739,13 +750,26 @@ End Sub
 ' GetSheetNoClear и любые попытки переподготовки листа внутри процедуры.
 Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
     Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
+
+    ' W-DEBUG-ANOMALIES-EMPTY: отладочное логирование записи на лист
+    ' "Аномалии схемы" (DebugLog -> Immediate + файл-журнал, на лист не пишет).
+    ' "переданных строк" — число строк плоской структуры (массив Nodes),
+    ' передаваемых в этот этап обработки.
+    Mod_Util.DebugLog "WriteLog(лист): старт, переданных строк = " & NodeCount
+
     ' W-STRUCTURE-LOG-FIX: НЕ получаем лист через GetSheetNoClear и НЕ вызываем
     ' PrepareAnomaliesSheet — иначе Cells.Clear стирал бы уже записанные строки
     ' дублей. Лист подготовлен и заполнен дублями в BuildFlatStructure; здесь
     ' только дозаписываем остальные аномалии в переданный лист БЕЗ очистки.
     ' ws гарантированно не Nothing: вызывающая процедура получила его из
     ' PrepareAnomaliesSheet до создания ListObject.
-    If ws Is Nothing Then Exit Sub
+    If ws Is Nothing Then
+        Mod_Util.DebugLog "WriteLog(лист): нет данных для записи (лист не передан)"
+        Exit Sub
+    End If
+    If NodeCount <= 0 Then
+        Mod_Util.DebugLog "WriteLog(лист): нет данных для записи (плоская структура пуста)"
+    End If
 
     Dim r As Long
     ' первая свободная строка: после заголовков (2) и после строк дублей
@@ -831,10 +855,58 @@ NextNodeLog:
     Dim lastRowLog As Long
     lastRowLog = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
 
+    ' W-DEBUG-ANOMALIES-EMPTY: логирование состояния ListObject tblAnomalies
+    ' ДО Resize. Если данных на листе нет (последняя непустая строка —
+    ' заголовки, т.е. < 2), Resize не выполняется и это фиксируется в журнале.
+    Dim loAnomDbg As ListObject
+    Dim loRowsBefore As Long
+    Set loAnomDbg = Nothing
+    On Error Resume Next
+    Set loAnomDbg = ws.ListObjects("tblAnomalies")
+    On Error GoTo 0
+    If loAnomDbg Is Nothing Then
+        Mod_Util.DebugLog "WriteLog(лист): нет данных для записи или таблица отсутствует: " & _
+                          "ListObject ""tblAnomalies"" не найден, Resize не выполняется"
+    Else
+        loRowsBefore = loAnomDbg.ListRows.Count
+        Mod_Util.DebugLog "WriteLog(лист): до Resize, ListObject строк = " & loRowsBefore
+        ' Проверка сохранности заголовков перед Resize (Resize НЕ должен их
+        ' затирать): адрес и размер шапки таблицы + фактические тексты A1:H1.
+        Mod_Util.DebugLog "WriteLog(лист): до Resize, HeaderRange = " & _
+                          loAnomDbg.HeaderRange.Address(False, False) & _
+                          ", строк заголовка = " & loAnomDbg.HeaderRange.Rows.Count & _
+                          ", столбцов = " & loAnomDbg.HeaderRange.Columns.Count
+        Mod_Util.DebugLog "WriteLog(лист): до Resize, заголовки A1:H1 = """ & _
+                          CStr(ws.Range("A1").Value) & "|" & CStr(ws.Range("B1").Value) & _
+                          "|" & CStr(ws.Range("C1").Value) & "|" & CStr(ws.Range("D1").Value) & _
+                          "|" & CStr(ws.Range("E1").Value) & "|" & CStr(ws.Range("F1").Value) & _
+                          "|" & CStr(ws.Range("G1").Value) & "|" & CStr(ws.Range("H1").Value) & """"
+    End If
+
     If lastRowLog >= 2 Then
         On Error Resume Next
         ws.ListObjects("tblAnomalies").Resize ws.Range("A1:H" & lastRowLog)
         On Error GoTo 0
+    Else
+        Mod_Util.DebugLog "WriteLog(лист): нет данных для записи (после обработки последняя строка = " & _
+                          lastRowLog & "), Resize не выполняется"
+    End If
+
+    ' W-DEBUG-ANOMALIES-EMPTY: состояние ListObject ПОСЛЕ Resize (и проверка,
+    ' что заголовки после Resize остались на месте — иначе видны дефолтные
+    ' "Столбец1...", означающие потерю структуры таблицы).
+    If Not loAnomDbg Is Nothing Then
+        Mod_Util.DebugLog "WriteLog(лист): после Resize, ListObject строк = " & _
+                          loAnomDbg.ListRows.Count
+        Mod_Util.DebugLog "WriteLog(лист): после Resize, HeaderRange = " & _
+                          loAnomDbg.HeaderRange.Address(False, False) & _
+                          ", строк заголовка = " & loAnomDbg.HeaderRange.Rows.Count & _
+                          ", столбцов = " & loAnomDbg.HeaderRange.Columns.Count
+        Mod_Util.DebugLog "WriteLog(лист): после Resize, заголовки A1:H1 = """ & _
+                          CStr(ws.Range("A1").Value) & "|" & CStr(ws.Range("B1").Value) & _
+                          "|" & CStr(ws.Range("C1").Value) & "|" & CStr(ws.Range("D1").Value) & _
+                          "|" & CStr(ws.Range("E1").Value) & "|" & CStr(ws.Range("F1").Value) & _
+                          "|" & CStr(ws.Range("G1").Value) & "|" & CStr(ws.Range("H1").Value) & """"
     End If
 
     ws.Columns("A:H").AutoFit
@@ -925,6 +997,42 @@ Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As 
     Dim typePart As String, numPart As String
     Dim posBar As Long
     Dim r As Long
+    Dim dupGroups As Long          ' W-DEBUG-ANOMALIES-EMPTY: число групп-дублей
+    Dim dupPairs As Long           ' W-DEBUG-ANOMALIES-EMPTY: число пар (строк) дублей
+
+    ' W-DEBUG-ANOMALIES-EMPTY: старт процедуры.
+    Mod_Util.DebugLog "WriteSchemaDuplicates: старт"
+
+    If ws Is Nothing Then
+        Mod_Util.DebugLog "WriteSchemaDuplicates: лист не передан (ws Is Nothing), выход без записи"
+        WriteSchemaDuplicates = 0
+        Exit Function
+    End If
+    If dictKey Is Nothing Then
+        Mod_Util.DebugLog "WriteSchemaDuplicates: словарь дублей не передан (dictKey Is Nothing), выход без записи"
+        WriteSchemaDuplicates = 0
+        Exit Function
+    End If
+
+    ' Подсчёт найденных дублей ДО записи (только логирование, логику не меняем):
+    ' dupGroups — группы из 2+ узлов, dupPairs — строки, которые будут записаны
+    ' (по одной на каждую пару "первый элемент + следующий").
+    For Each k In dictKey.Keys
+        If dictKey(k).Count > 1 Then
+            dupGroups = dupGroups + 1
+            dupPairs = dupPairs + (dictKey(k).Count - 1)
+        End If
+    Next k
+    Mod_Util.DebugLog "WriteSchemaDuplicates: найдено дублей = " & dupPairs & _
+                      " (групп = " & dupGroups & ")"
+
+    ' W-DEBUG-ANOMALIES-EMPTY: сообщение о начале записи на лист. Если дублей
+    ' нет (dupPairs = 0), запись не выполняется — это тоже видно в журнале.
+    If dupPairs > 0 Then
+        Mod_Util.DebugLog "WriteSchemaDuplicates: запись на лист, строк = " & dupPairs
+    Else
+        Mod_Util.DebugLog "WriteSchemaDuplicates: нет дублей для записи на лист"
+    End If
 
     r = startRow
     For Each k In dictKey.Keys
@@ -952,6 +1060,8 @@ Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As 
     Next k
 
     If r > startRow Then
+        ' W-DEBUG-ANOMALIES-EMPTY: верификация фактической записи строк дублей.
+        Mod_Util.DebugLog "WriteSchemaDuplicates: запись завершена, последняя строка = " & (r - 1)
         ' W-STRUCTURE-DUPLICATES-SAVE-FIX: верификация фактической записи —
         ' строки дублей должны реально стоять в колонке A листа.
         Dim dupWritten As Long
@@ -963,6 +1073,10 @@ Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As 
         End If
         WriteSchemaDuplicates = r - 1
     Else
+        ' W-DEBUG-ANOMALIES-EMPTY: ни одной строки дублей не записано
+        ' (в основном потоке этот выход означает, что дубли могли быть потеряны
+        ' на этапе сбора — см. сообщение "найдено дублей" выше).
+        Mod_Util.DebugLog "WriteSchemaDuplicates: запись не выполнялась (дублей нет), возврат 0"
         WriteSchemaDuplicates = 0
     End If
 End Function
