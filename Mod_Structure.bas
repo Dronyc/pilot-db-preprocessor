@@ -35,9 +35,10 @@ Private NodeCount As Long
 ' Заполняется в ProcessShortcuts и WriteLog. Используется в WriteFlatTable для подсветки.
 Private problemsDict As Object
 
-' W-STRUCTURE-DUPLICATES-FIX: словарь узлов, участвующих в дублях номеров.
-' Ключ: "Тип|Номер", значение — True (узел участвует в дубле).
-' Заполняется в BuildDupKeyDict (вызывается из WriteLog ДО WriteFlatTable),
+' W-STRUCTURE-DUPLICATES-FIX / W-STRUCTURE-DUPLICATES-SAVE-FIX: словарь узлов,
+' участвующих в дублях номеров. Ключ: "Тип|Номер", значение — True (узел
+' участвует в дубле). Заполняется в BuildDupKeyDict, который вызывается из
+' главной процедуры BuildFlatStructure ПЕРЕД WriteSchemaDuplicates/WriteFlatTable;
 ' используется в WriteFlatTable/HighlightDuplicateRows для колонки "Аномалия"
 ' и жёлтой подсветки.
 Private dupCountDict As Object
@@ -209,9 +210,10 @@ Public Sub BuildFlatStructure()
     ' Инициализация словаря проблем (для подсветки в WriteFlatTable)
     Set problemsDict = CreateObject("Scripting.Dictionary")
 
-    ' W-STRUCTURE-DUPLICATES-FIX: инициализация словаря дублей ДО проверки
-    ' (заполняется в BuildDupKeyDict из WriteLog, используется в WriteFlatTable
-    ' и HighlightDuplicateRows)
+    ' W-STRUCTURE-DUPLICATES-SAVE-FIX: инициализация словаря дублей ДО поиска.
+    ' Заполняется в BuildDupKeyDict (вызывается из главной процедуры ПЕРЕД
+    ' WriteSchemaDuplicates/WriteFlatTable), используется в WriteFlatTable
+    ' (колонка "Аномалия") и HighlightDuplicateRows (жёлтая подсветка).
     Set dupCountDict = CreateObject("Scripting.Dictionary")
 
     ' ЧАСТЬ B: обработка ярлыков - перенос связей к целевым объектам
@@ -219,25 +221,69 @@ Public Sub BuildFlatStructure()
     Call ProcessShortcuts
 
     '---------- 4. Вывод листов в новую книгу wbOut ----------
-    ' ВАЖНО: WriteLog вызывается ПЕРЕД WriteFlatTable, чтобы собрать все ошибки
-    ' в problemsDict до того, как WriteFlatTable начнет красить строки.
-    ' W-STRUCTURE-DUPLICATES-FIX, п.1/п.2: WriteLog также выполняет проверку
-    ' дублей ВНУТРИ одного типа (ключ "Тип|Номер", BuildDupKeyDict) и заполняет
-    ' dupCountDict; строки "[!] Дубль" пишутся в лист "Аномалии схемы" строго по
-    ' колонкам поверх журнала, затем лист оформляется Умной таблицей (ListObject).
+    ' W-STRUCTURE-DUPLICATES-SAVE-FIX: исправлен порядок вызовов. Ранее лист
+    ' "Аномалии схемы" мог быть очищен (GetSheet -> Cells.Clear) или перекрыт
+    ' ListObject ПОСЛЕ записи строк дублей — на листе оставались только
+    ' заголовки. Новый гарантированный порядок:
+    '   1) PrepareAnomaliesSheet   — лист создан/очищен, записаны заголовки;
+    '      очистка листа больше НИКОГДА не выполняется после записи данных;
+    '   2) BuildDupKeyDict         — поиск дублей ("Тип|Номер"), заполнение dupCountDict;
+    '   3) WriteSchemaDuplicates   — запись строк дублей в свободные строки листа;
+    '   4) CreateSmartTable        — ListObject tblAnomalies создается СТРОГО
+    '      ПОСЛЕ записанных данных (по фактическому диапазону A:H);
+    '   5) WriteLog                — остальные аномалии (ярлыки/сироты/коды),
+    '      дозаписываются ниже строк дублей, таблица расширяется;
+    '   6) BackupFlatTableSheet + WriteFlatTable — основная таблица;
+    '   7) HighlightDuplicateRows  — жёлтая подсветка и метка "[!] Дубль"
+    '      ПОСЛЕ создания Умной таблицы tblFlatStructure;
+    '   8) WriteTraceability       — трассировка.
+    Dim wsAnom As Worksheet           ' лист "Аномалии схемы"
+    Dim dictDupMain As Object         ' "Тип|Номер" -> Collection индексов узлов
+    Dim lastRowDupMain As Long        ' последняя строка записанных дублей
+    Dim anomaliesRange As Range       ' фактический диапазон листа A:H
+
+    ' 1) Подготовка листа "Аномалии схемы": создание/очистка + заголовки.
+    '    Дальнейшие шаги только ДОПИСЫВАЮТ строки — повторной очистки нет.
+    PrepareAnomaliesSheet wbOut, wsAnom
+
+    ' 2) Поиск дублей внутри одного типа (ключ "Тип|Номер") + dupCountDict.
+    Set dictDupMain = BuildDupKeyDict
+
+    ' 3) Запись строк дублей (r инкрементируется, каждая пара — в свою строку).
+    lastRowDupMain = 0
+    If Not dictDupMain Is Nothing Then
+        lastRowDupMain = WriteSchemaDuplicates(wsAnom, 2, dictDupMain)
+    End If
+
+    ' 4) ListObject tblAnomalies — ТОЛЬКО после записанных данных.
+    '    Если дублей нет, создаём таблицу по заголовкам и расширим её в WriteLog.
+    If lastRowDupMain >= 2 Then
+        Set anomaliesRange = wsAnom.Range("A1:H" & lastRowDupMain)
+    Else
+        Set anomaliesRange = wsAnom.Range("A1:H2")
+    End If
+    Call CreateSmartTable(wsAnom, anomaliesRange, "tblAnomalies", "TableStyleMedium6")
+
+    ' 5) Журнал остальных аномалий (ярлык без цели / сирота / коды):
+    '    проблемы собираются в problemsDict ДО WriteFlatTable (подсветка ошибок),
+    '    строки дозаписываются под дубли, таблица расширяется до A1:H(lastRowLog).
     WriteLog wbOut
 
+    ' 6) Основная таблица структуры.
     BackupFlatTableSheet          ' W-CORRECTION-PACK-1, п.3.2 (до перезаписи)
     WriteFlatTable wbOut
-    WriteTraceability wbOut
 
-    ' W-STRUCTURE-DUPLICATES-FIX, п.3: жёлтая подсветка строк-дублей и метка
-    ' "[!] Дубль" в колонке "Аномалия" — ПОСЛЕ создания Умной таблицы
-    ' tblFlatStructure, чтобы стили таблицы не перекрывали заливку.
+    ' 7) W-STRUCTURE-DUPLICATES-FIX, п.3: жёлтая подсветка строк-дублей и метка
+    '    "[!] Дубль" в колонке "Аномалия" — ПОСЛЕ создания Умной таблицы
+    '    tblFlatStructure, чтобы стили таблицы не перекрывали заливку.
+    '    dupCountDict передаётся из BuildDupKeyDict (шаг 2).
     HighlightDuplicateRows wbOut
 
+    ' 8) Лист трассировки.
+    WriteTraceability wbOut
+
     ' W-CORRECTION-PACK-1, п.3.1: резервная дозапись дублей в "Аномалии схемы"
-    ' (обычно no-op: журнал уже заполнен в WriteLog). Сборку НЕ блокирует.
+    ' (обычно no-op: журнал уже заполнен на шагах 2-3). Сборку НЕ блокирует.
     CheckNumberDuplicates wbOut
 
     ' ЧАСТЬ B: удалить пустой лист Лист1, созданный Workbooks.Add
@@ -574,8 +620,8 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         End If
         
         ' W-STRUCTURE-DUPLICATES-FIX: проверка участия строки в дубле
-        ' (ключ словаря — "Тип|Номер"; заполнен в BuildDupKeyDict из WriteLog,
-        ' который выполняется ДО WriteFlatTable).
+        ' (ключ словаря — "Тип|Номер"; заполнен в BuildDupKeyDict, который
+        ' вызывается из главной процедуры ДО WriteFlatTable).
         ' Пустой номер (LeadCode = "") в расчёт не берётся.
         If Not dupCountDict Is Nothing Then
             dupKey = Nodes(i).NodeType & "|" & LeadCode(Nodes(i).Name)
@@ -653,23 +699,43 @@ Private Sub WriteTraceability(ByVal wbOut As Workbook)
 End Sub
 
 '---------------- Лист 3: аномалии схемы ----------------
-' W-STRUCTURE-DUPLICATES-FIX, п.2: лист "Аномалии схемы" имеет нормальную
-' структуру: старый лист полностью очищается (GetSheet -> Cells.Clear) либо
-' создаётся заново, заголовки пишутся заново, данные — СТРОГО по колонкам,
-' поверх данных создаётся Умная таблица (ListObject "tblAnomalies").
+' W-STRUCTURE-DUPLICATES-SAVE-FIX: лист "Аномалии схемы" готовится ОДИН РАЗ в
+' начале (PrepareAnomaliesSheet): создание/очистка + заголовки. После этого
+' данные только ДОПИСЫВАЮТСТЯ (WriteSchemaDuplicates, затем WriteLog), повторной
+' очистки листа нет — записи больше не теряются. Умная таблица (ListObject
+' "tblAnomalies") создаётся строго ПОСЛЕ записанных строк дублей (в главной
+' процедуре BuildFlatStructure) и расширяется в конце WriteLog.
 ' Колонки журнала: "Код проблемы", "Строка", "Столбец", "Уровень", "Тип",
 ' "Элемент", "Родитель", "Описание". Строки дублей ("DUP_IN_TYPE") несут те же
 ' смысловые поля, что и колонки "Тип", "Номер", "Наименование 1",
 ' "Наименование 2", "Тип аномалии": Тип -> колонка E, Номер -> в тексте
 ' описания, Наименование 1 | Наименование 2 -> колонка F, "[!] Дубль" -> H.
+
+' Подготовка листа "Аномалии схемы": очистка/создание + заголовки.
+' Вызывается ОДИН раз ДО любой записки данных на лист.
+Private Sub PrepareAnomaliesSheet(ByVal wbOut As Workbook, ByRef out As Worksheet)
+    GetSheet wbOut, "Аномалии схемы", out
+    out.Range("A1:H1").Value = Array("Код проблемы", "Строка", "Столбец", _
+                                     "Уровень", "Тип", "Элемент", "Родитель", "Описание")
+End Sub
+
 Private Sub WriteLog(ByVal wbOut As Workbook)
     Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
+    ' W-STRUCTURE-DUPLICATES-SAVE-FIX: НЕ получаем и НЕ очищаем лист через
+    ' GetSheet — иначе Cells.Clear стирал бы уже записанные строки дублей.
+    ' Лист подготовлен и заполнен дублями в BuildFlatStructure; здесь берём
+    ' существующий лист БЕЗ очистки и дозаписываем остальные аномалии.
     Dim ws As Worksheet
-    GetSheet wbOut, "Аномалии схемы", ws
-    ws.Range("A1:H1").value = Array("Код проблемы", "Строка", "Столбец", _
-                                    "Уровень", "Тип", "Элемент", "Родитель", "Описание")
+    GetSheetNoClear wbOut, "Аномалии схемы", ws
+    If ws Is Nothing Then
+        ' аварийный вариант: листа нет (не должен встречаться) — создаём и пишем заголовки
+        PrepareAnomaliesSheet wbOut, ws
+    End If
+
     Dim r As Long
-    r = 2
+    ' первая свободная строка: после заголовков (2) и после строк дублей
+    r = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row + 1
+    If r < 2 Then r = 2
     Dim i As Long
     For i = 1 To NodeCount
         ' Пропускаем успешно обработанные ярлыки, чтобы не засорять журнал
@@ -739,26 +805,15 @@ Private Sub WriteLog(ByVal wbOut As Workbook)
 NextNodeLog:
     Next i
 
-    '---------- W-STRUCTURE-DUPLICATES-FIX, п.1/п.2: дубли ВНУТРИ одного типа ----------
-    ' Группировка по ключу "Тип|Номер" + запись строк "[!] Дубль" сразу в тот же
-    ' лист поверх журнала WriteLog (r — первая свободная строка), БЕЗ очистки
-    ' уже записанных аномалий. Если дублей нет — блок пропускается.
-    Dim dictDup As Object
-    Set dictDup = BuildDupKeyDict                 ' также заполняет dupCountDict (п.3)
-    Dim lastRowDup As Long
-    If Not dictDup Is Nothing Then
-        lastRowDup = WriteSchemaDuplicates(ws, r, dictDup)   ' 0 — дублей не записано
-    End If
-
-    ' Умная таблица поверх ВСЕГО листа (журнал WriteLog + строки дублей).
-    ' Вызывается один раз, ПОСЛЕ всех записей (GetSheet гарантированно очищает
-    ' лист при повторном проходе, поэтому конфликта ListObject не будет).
+    '---------- W-STRUCTURE-DUPLICATES-SAVE-FIX ----------
+    ' Дубли ("Тип|Номер") уже найдены (BuildDupKeyDict) и записаны
+    ' (WriteSchemaDuplicates) в главной процедуре ДО этого вызова — здесь их
+    ' повторный поиск/запись НЕ выполняются. Осталось только синхронизировать
+    ' Умную таблицу tblAnomalies с фактическими данными листа (журнал выше):
+    ' пересоздать её по диапазону A1:H(lastRowLog), если таблица есть, либо
+    ' создать поверх уже записанных строк, если таблица отсутствует.
     Dim lastRowLog As Long
-    If lastRowDup > 0 Then
-        lastRowLog = lastRowDup
-    Else
-        lastRowLog = r - 1
-    End If
+    lastRowLog = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
 
     If lastRowLog >= 2 Then
         Call CreateSmartTable(ws, ws.Range("A1:H" & lastRowLog), _
@@ -834,6 +889,10 @@ Private Function BuildDupKeyDict() As Object
 End Function
 
 '---------------- W-STRUCTURE-DUPLICATES-FIX, п.2: запись дублей в журнал -----
+' W-STRUCTURE-DUPLICATES-SAVE-FIX: усилена проверка записи — каждая пара дублей
+' пишется в СВОЮ строку (r инкрементируется на каждой итерации), перед выходом
+' проверяется, что в колонке A реально стоят значения "DUP_IN_TYPE" (иначе
+' запись считается потерянной и фиксируется предупреждение).
 ' Записывает строки дублей в лист "Аномалии схемы" (ws), начиная со строки
 ' startRow, строго по колонкам журнала:
 '   A="DUP_IN_TYPE" (код проблемы), B/C/E/G — trace-узла, F="Наименование 1 | Наименование 2",
@@ -876,7 +935,15 @@ Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As 
     Next k
 
     If r > startRow Then
+        ' W-STRUCTURE-DUPLICATES-SAVE-FIX: верификация фактической записи —
+        ' строки дублей должны реально стоять в колонке A листа.
+        Dim dupWritten As Long
+        dupWritten = Application.WorksheetFunction.CountA(ws.Range("A" & startRow & ":A" & (r - 1)))
         Mod_Util.WriteLog "Проверка дублей: найдено аномалий - " & (r - startRow)
+        If dupWritten = 0 Then
+            Mod_Util.WriteWarning "S010", "WriteSchemaDuplicates: записано " & _
+                (r - startRow) & " строк, но на листе ""Аномалии схемы"" значений нет — проверка сохранности."
+        End If
         WriteSchemaDuplicates = r - 1
     Else
         WriteSchemaDuplicates = 0
@@ -884,29 +951,36 @@ Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As 
 End Function
 
 '---------------- W-CORRECTION-PACK-1, п.3.1 + W-STRUCTURE-DUPLICATES-FIX ---
-' Резервная точка входа проверки дублей (на случай, если WriteLog не был вызван).
-' В текущем потоке BuildFlatStructure проверка выполняется внутри WriteLog
-' ( лист "Аномалии схемы" создаётся там же) и ПОСЛЕ WriteFlatTable вызывается
-' HighlightDuplicateRows — подсветка строк-дублей в "Адаптированной_структуре".
-' Здесь только проверяется, что группировка ("Тип|Номер") выполнена, и при
-' необходимости строится подсветка. Сборку НЕ блокируем — только предупреждения.
+' Резервная точка входа проверки дублей (на случай, если основной поток не записал
+' строки дублей). W-STRUCTURE-DUPLICATES-SAVE-FIX: в текущем потоке порядок такой:
+' PrepareAnomaliesSheet -> BuildDupKeyDict -> WriteSchemaDuplicates ->
+' CreateSmartTable(tblAnomalies) -> WriteLog -> WriteFlatTable ->
+' HighlightDuplicateRows. Здесь только страховка: если на листе "Аномалии схемы"
+' нет ни одной строки "DUP_IN_TYPE", дубли дописываются в конец листа (без
+' очистки!). Сборку НЕ блокируем — только предупреждения.
 Private Sub CheckNumberDuplicates(ByVal wbOut As Workbook)
     Dim dictKey As Object           ' "Тип|Номер" -> Collection индексов узлов
 
     On Error GoTo ErrHandler
 
-    ' dupCountDict уже заполнен в WriteLog -> BuildDupKeyDict; повторный вызов
-    ' безопасен (группировка идемпотентна).
+    ' dupCountDict уже заполнен в BuildDupKeyDict (главная процедура); повторный
+    ' вызов безопасен (группировка идемпотентна).
     Set dictKey = BuildDupKeyDict
     If dictKey Is Nothing Then Exit Sub     ' дублей нет
 
-    ' Если журнал "Аномалии схемы" ещё не содержит строк дублей (WriteLog не
-    ' выполнялся) — дописываем их в конец существующего листа, структуру не трогаем.
+    ' Если журнал "Аномалии схемы" ещё не содержит строк дублей (основная запись
+    ' не выполнилась) — дописываем их в конец существующего листа, структуру не трогаем.
     Dim ws As Worksheet
     GetSheetNoClear wbOut, "Аномалии схемы", ws
     If Not ws Is Nothing Then
         If Application.CountIf(ws.Columns(1), "DUP_IN_TYPE") = 0 Then
-            Call WriteSchemaDuplicates(ws, ws.Cells(ws.Rows.Count, 1).End(xlUp).Row + 1, dictKey)
+            Dim lastRowBackup As Long
+            lastRowBackup = WriteSchemaDuplicates(ws, ws.Cells(ws.Rows.Count, 1).End(xlUp).Row + 1, dictKey)
+            ' ListObject создаётся/расширяется ПОСЛЕ дозаписанных данных
+            If lastRowBackup >= 2 Then
+                Call CreateSmartTable(ws, ws.Range("A1:H" & lastRowBackup), _
+                                      "tblAnomalies", "TableStyleMedium6")
+            End If
         End If
     End If
     Exit Sub
