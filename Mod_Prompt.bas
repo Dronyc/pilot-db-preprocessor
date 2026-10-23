@@ -20,6 +20,8 @@ Option Explicit
 
 ' Имя шаблона Промта №0 (декомпозиция) в 04_Промты\Шаблоны.
 Private Const TEMPLATE_STEP0_NAME As String = "prompt_step_00_template.md"
+' W-PROMPT-PATH-FIX: имя шаблона промта шага в 04_Промты\Шаблоны.
+Private Const TEMPLATE_STEP_V1_NAME As String = "prompt_step_template_v1.md"
 ' Имя файла Промта №0, сохраняемого в 04_Промты.
 Private Const STEP0_PROMPT_FILE As String = "Промт_шаг_00_Декомпозиция.md"
 ' Плейсхолдер вместо ненайденного входного файла.
@@ -891,6 +893,7 @@ Public Sub MakeNextStepPrompt()
     Dim result As String
     Dim stepFolder As String
     Dim promptFile As String
+    Dim templatePath As String   ' W-PROMPT-PATH-FIX: полный путь к шаблону промта шага
     Dim i As Long
     Dim j As Long
 
@@ -961,11 +964,20 @@ Public Sub MakeNextStepPrompt()
             Loop
         End If
 
-        ' читаем шаблон того же уровня (prompt_step_template_v1.md)
-        template = ReadTextFile(promptsPath & "\prompt_step_template_v1.md")
+        ' читаем шаблон того же уровня (04_Промты\Шаблоны\prompt_step_template_v1.md)
+        ' W-PROMPT-PATH-FIX: шаблон лежит в подпапке "Шаблоны", а не в корне "04_Промты".
+        templatePath = promptsPath & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME
+        Mod_Util.WriteLog "[i] Поиск шаблона шага по пути: " & templatePath
+        If Len(Dir(templatePath, vbNormal)) = 0 Then
+            template = ""
+        Else
+            template = ReadTextFile(templatePath)
+        End If
         If template = "" Then
-            Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон prompt_step_template_v1.md"
-            MsgBox "Ошибка P002: не найден шаблон prompt_step_template_v1.md в папке 04_Промты.", _
+            Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
+                " (проверен путь: " & templatePath & ")"
+            MsgBox "Ошибка P002: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
+                   " в папке 04_Промты\Шаблоны.", _
                    vbCritical, "Промт следующего шага"
             Exit Sub
         End If
@@ -1015,11 +1027,20 @@ Public Sub MakeNextStepPrompt()
         Exit Sub
     End If
 
-    ' 5. Шаблон промта шага
-    template = ReadTextFile(promptsPath & "\prompt_step_template_v1.md")
+    ' 5. Шаблон промта шага (04_Промты\Шаблоны\prompt_step_template_v1.md)
+    ' W-PROMPT-PATH-FIX: шаблон лежит в подпапке "Шаблоны", а не в корне "04_Промты".
+    templatePath = promptsPath & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME
+    Mod_Util.WriteLog "[i] Поиск шаблона шага по пути: " & templatePath
+    If Len(Dir(templatePath, vbNormal)) = 0 Then
+        template = ""
+    Else
+        template = ReadTextFile(templatePath)
+    End If
     If template = "" Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон prompt_step_template_v1.md"
-        MsgBox "Ошибка P002: не найден шаблон prompt_step_template_v1.md в папке 04_Промты.", _
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
+            " (проверен путь: " & templatePath & ")"
+        MsgBox "Ошибка P002: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
+               " в папке 04_Промты\Шаблоны.", _
                vbCritical, "Промт следующего шага"
         Exit Sub
     End If
