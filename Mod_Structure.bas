@@ -224,15 +224,21 @@ Public Sub BuildFlatStructure()
     ' W-STRUCTURE-DUPLICATES-SAVE-FIX: исправлен порядок вызовов. Ранее лист
     ' "Аномалии схемы" мог быть очищен (GetSheet -> Cells.Clear) или перекрыт
     ' ListObject ПОСЛЕ записи строк дублей — на листе оставались только
-    ' заголовки. Новый гарантированный порядок:
+    ' заголовки. W-STRUCTURE-LOG-FIX: усилены гарантии — PrepareAnomaliesSheet и
+    ' WriteSchemaDuplicates выполняются ДО создания ListObject, а сам ListObject
+    ' (CreateSmartTable) создаётся СТРОГО ОДИН РАЗ в конце подготовки журнала,
+    ' когда все данные уже лежат в ячейках; WriteLog пересоздание таблицы НЕ
+    ' выполняет (только Resize). Новый гарантированный порядок:
     '   1) PrepareAnomaliesSheet   — лист создан/очищен, записаны заголовки;
     '      очистка листа больше НИКОГДА не выполняется после записи данных;
     '   2) BuildDupKeyDict         — поиск дублей ("Тип|Номер"), заполнение dupCountDict;
     '   3) WriteSchemaDuplicates   — запись строк дублей в свободные строки листа;
     '   4) CreateSmartTable        — ListObject tblAnomalies создается СТРОГО
-    '      ПОСЛЕ записанных данных (по фактическому диапазону A:H);
+    '      ПОСЛЕ записанных данных (по фактическому диапазону A:H) и ТОЛЬКО
+    '      ОДИН РАЗ — повторных вызовов для tblAnomalies в потоке сборки нет;
     '   5) WriteLog                — остальные аномалии (ярлыки/сироты/коды),
-    '      дозаписываются ниже строк дублей, таблица расширяется;
+    '      дозаписываются ниже строк дублей в переданный лист wsAnom (ByRef);
+    '      существующая таблица расширяется через Resize (без пересоздания);
     '   6) BackupFlatTableSheet + WriteFlatTable — основная таблица;
     '   7) HighlightDuplicateRows  — жёлтая подсветка и метка "[!] Дубль"
     '      ПОСЛЕ создания Умной таблицы tblFlatStructure;
@@ -266,8 +272,11 @@ Public Sub BuildFlatStructure()
 
     ' 5) Журнал остальных аномалий (ярлык без цели / сирота / коды):
     '    проблемы собираются в problemsDict ДО WriteFlatTable (подсветка ошибок),
-    '    строки дозаписываются под дубли, таблица расширяется до A1:H(lastRowLog).
-    WriteLog wbOut
+    '    строки дозаписываются под дубли, существующая таблица tblAnomalies
+    '    РАСШИРЯЕТСЯ через Resize до A1:H(lastRowLog) — пересоздание ListObject
+    '    внутри WriteLog запрещено (W-STRUCTURE-LOG-FIX). Лист передаётся явно
+    '    (ByRef wsAnom), повторный поиск через GetSheetNoClear не выполняется.
+    WriteLog wbOut, wsAnom
 
     ' 6) Основная таблица структуры.
     BackupFlatTableSheet          ' W-CORRECTION-PACK-1, п.3.2 (до перезаписи)
@@ -705,6 +714,12 @@ End Sub
 ' очистки листа нет — записи больше не теряются. Умная таблица (ListObject
 ' "tblAnomalies") создаётся строго ПОСЛЕ записанных строк дублей (в главной
 ' процедуре BuildFlatStructure) и расширяется в конце WriteLog.
+' W-STRUCTURE-LOG-FIX: WriteLog НЕ управляет структурой таблиц — внутри неё
+' запрещено вызывать CreateSmartTable (пересоздание ListObject ломало заголовки,
+' оставляя дефолтные "Столбец1...") и PrepareAnomaliesSheet (Cells.Clear стирал
+' уже записанные данные). Лист передаётся в WriteLog явно (ByRef wsAnom), его
+' повторный поиск через GetSheetNoClear исключён; существующая tblAnomalies
+' только РАСШИРЯЕТСЯ методом Resize до фактических данных.
 ' Колонки журнала: "Код проблемы", "Строка", "Столбец", "Уровень", "Тип",
 ' "Элемент", "Родитель", "Описание". Строки дублей ("DUP_IN_TYPE") несут те же
 ' смысловые поля, что и колонки "Тип", "Номер", "Наименование 1",
@@ -712,25 +727,25 @@ End Sub
 ' описания, Наименование 1 | Наименование 2 -> колонка F, "[!] Дубль" -> H.
 
 ' Подготовка листа "Аномалии схемы": очистка/создание + заголовки.
-' Вызывается ОДИН раз ДО любой записки данных на лист.
+' Вызывается ОДИН раз ДО любой записки данных на лист (в BuildFlatStructure).
 Private Sub PrepareAnomaliesSheet(ByVal wbOut As Workbook, ByRef out As Worksheet)
     GetSheet wbOut, "Аномалии схемы", out
     out.Range("A1:H1").Value = Array("Код проблемы", "Строка", "Столбец", _
                                      "Уровень", "Тип", "Элемент", "Родитель", "Описание")
 End Sub
 
-Private Sub WriteLog(ByVal wbOut As Workbook)
+' W-STRUCTURE-LOG-FIX: сигнатура изменена — лист "Аномалии схемы" передаётся
+' явно по ссылке (ByRef ws), чтобы исключить повторный поиск через
+' GetSheetNoClear и любые попытки переподготовки листа внутри процедуры.
+Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
     Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
-    ' W-STRUCTURE-DUPLICATES-SAVE-FIX: НЕ получаем и НЕ очищаем лист через
-    ' GetSheet — иначе Cells.Clear стирал бы уже записанные строки дублей.
-    ' Лист подготовлен и заполнен дублями в BuildFlatStructure; здесь берём
-    ' существующий лист БЕЗ очистки и дозаписываем остальные аномалии.
-    Dim ws As Worksheet
-    GetSheetNoClear wbOut, "Аномалии схемы", ws
-    If ws Is Nothing Then
-        ' аварийный вариант: листа нет (не должен встречаться) — создаём и пишем заголовки
-        PrepareAnomaliesSheet wbOut, ws
-    End If
+    ' W-STRUCTURE-LOG-FIX: НЕ получаем лист через GetSheetNoClear и НЕ вызываем
+    ' PrepareAnomaliesSheet — иначе Cells.Clear стирал бы уже записанные строки
+    ' дублей. Лист подготовлен и заполнен дублями в BuildFlatStructure; здесь
+    ' только дозаписываем остальные аномалии в переданный лист БЕЗ очистки.
+    ' ws гарантированно не Nothing: вызывающая процедура получила его из
+    ' PrepareAnomaliesSheet до создания ListObject.
+    If ws Is Nothing Then Exit Sub
 
     Dim r As Long
     ' первая свободная строка: после заголовков (2) и после строк дублей
@@ -805,19 +820,21 @@ Private Sub WriteLog(ByVal wbOut As Workbook)
 NextNodeLog:
     Next i
 
-    '---------- W-STRUCTURE-DUPLICATES-SAVE-FIX ----------
+    '---------- W-STRUCTURE-LOG-FIX ----------
     ' Дубли ("Тип|Номер") уже найдены (BuildDupKeyDict) и записаны
     ' (WriteSchemaDuplicates) в главной процедуре ДО этого вызова — здесь их
-    ' повторный поиск/запись НЕ выполняются. Осталось только синхронизировать
-    ' Умную таблицу tblAnomalies с фактическими данными листа (журнал выше):
-    ' пересоздать её по диапазону A1:H(lastRowLog), если таблица есть, либо
-    ' создать поверх уже записанных строк, если таблица отсутствует.
+    ' повторный поиск/запись НЕ выполняются. Вызов CreateSmartTable ИЗ ИСПОЛНЕНИЯ
+    ' WriteLog ИСКЛЮЧЁН: он удалял и пересоздавал ListObject tblAnomalies, из-за
+    ' чего терялись заголовки (Excel подставлял дефолтные "Столбец1...").
+    ' Существующая таблица (создана ОДИН раз в BuildFlatStructure после записи
+    ' дублей) только РАСШИРЯЕТСЯ методом Resize до фактических данных журнала.
     Dim lastRowLog As Long
     lastRowLog = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
 
     If lastRowLog >= 2 Then
-        Call CreateSmartTable(ws, ws.Range("A1:H" & lastRowLog), _
-                              "tblAnomalies", "TableStyleMedium6")
+        On Error Resume Next
+        ws.ListObjects("tblAnomalies").Resize ws.Range("A1:H" & lastRowLog)
+        On Error GoTo 0
     End If
 
     ws.Columns("A:H").AutoFit
