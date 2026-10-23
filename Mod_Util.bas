@@ -166,6 +166,34 @@ Public Sub WriteWarning(ByVal code As String, ByVal message As String)
     WriteLog "[!] (" & code & ") " & message
 End Sub
 
+' W-DEBUG-ANOMALIES-EMPTY: отладочное логирование цепочки подготовки листа
+' "Аномалии схемы" (BuildFlatStructure -> WriteSchemaDuplicates -> WriteLog).
+' Сообщения с префиксом "[DEBUG] ":
+'   * пишутся в Immediate (Debug.Print) — всегда;
+'   * передаются в существующую файловую WriteLog этого модуля (журнал
+'     <корень>\05_Логи\Препроцессор_YYYY-MM-DD.log) — только если корень
+'     проекта задан (иначе WriteLog молча выходит и запись теряется);
+'   * на лист "Аномалии схемы" НЕ пишутся.
+' Рекурсия исключена: DebugLog вызывает WriteLog напрямую, WriteLog вызов
+' DebugLog не выполняет. Ошибки журналирования не должны ронять сборку —
+' собственная ошибка фиксируется в Immediate и подавляется.
+Public Sub DebugLog(ByVal msg As String)
+    Dim s As String
+    s = "[DEBUG] " & msg
+
+    ' 1. Immediate — доступно даже без настроенного корня проекта.
+    Debug.Print s
+
+    ' 2. Файловый журнал через существующий механизм WriteLog (без рекурсии).
+    On Error GoTo ErrHandler
+    If GetProjectRoot() <> "" Then WriteLog s
+    Exit Sub
+
+ErrHandler:
+    Debug.Print "[DEBUG] DebugLog: ошибка записи в файл журнала: " & Err.Description
+    Err.Clear
+End Sub
+
 ' Возвращает значение параметра конфигурации по ключу из файла
 ' <корень>\01_Исходные данные\03_Конфигурация\configuration.txt.
 ' Формат строки: "key=value" (без пробелов вокруг "="), регистр ключа значим.
