@@ -424,8 +424,13 @@ Fail:                                       ' прочие ошибки (нап�
     Dim errDesc As String
     errDesc = Err.Description
     Err.Clear
-    Mod_Util.WriteError "S004", "Ошибка открытия файла схемы: " & errDesc
-    MsgBox "Ошибка открытия файла схемы.", vbExclamation
+    ' W-FIX-ANOMALIES-EMPTY: раньше сюда попадали из-за ошибки отладочного
+    ' логирования в WriteLog, но текст "Ошибка открытия файла схемы" маскировал
+    ' реальную причину (ошибка выполнения, не связанная с открытием схемы).
+    ' Код S004 сохранён, текст сделан нейтральным; префикс "BuildFlatStructure: "
+    ' и уточнение о возможной причине добавлены в сообщение.
+    Mod_Util.WriteError "S004", "BuildFlatStructure: ошибка выполнения (возможно, не связана с открытием схемы): " & errDesc
+    MsgBox "Ошибка выполнения BuildFlatStructure: " & errDesc, vbExclamation
 End Sub
 
 '---------------- Вспомогательные функции ----------------
@@ -860,27 +865,61 @@ NextNodeLog:
     ' заголовки, т.е. < 2), Resize не выполняется и это фиксируется в журнале.
     Dim loAnomDbg As ListObject
     Dim loRowsBefore As Long
+    Dim hdrAddrDbg As String      ' W-FIX-ANOMALIES-EMPTY: адрес HeaderRange для журнала
     Set loAnomDbg = Nothing
     On Error Resume Next
     Set loAnomDbg = ws.ListObjects("tblAnomalies")
     On Error GoTo 0
+    ' W-FIX-ANOMALIES-EMPTY (блокер B): весь блок отладочного логирования
+    ' состояния tblAnomalies (до Resize и после Resize) обёрнут в локальную
+    ' обработку ошибок — ошибка в отладочном логировании НЕ должна прерывать
+    ' WriteLog и приводить к выходу в Fail главной процедуры BuildFlatStructure.
+    On Error Resume Next
     If loAnomDbg Is Nothing Then
         Mod_Util.DebugLog "WriteLog(лист): нет данных для записи или таблица отсутствует: " & _
                           "ListObject ""tblAnomalies"" не найден, Resize не выполняется"
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Err.Clear
+        End If
     Else
         loRowsBefore = loAnomDbg.ListRows.Count
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Err.Clear
+        End If
         Mod_Util.DebugLog "WriteLog(лист): до Resize, ListObject строк = " & loRowsBefore
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Err.Clear
+        End If
         ' Проверка сохранности заголовков перед Resize (Resize НЕ должен их
         ' затирать): адрес и размер шапки таблицы + фактические тексты A1:H1.
+        ' W-FIX-ANOMALIES-EMPTY (блокер B): Address(False, False) заменён на
+        ' Address (без аргументов) — вызов с аргументами в ряде конфигураций
+        ' завершался ошибкой и ронял сборку через Fail главной процедуры.
+        hdrAddrDbg = loAnomDbg.HeaderRange.Address
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Err.Clear
+        End If
         Mod_Util.DebugLog "WriteLog(лист): до Resize, HeaderRange = " & _
-                          loAnomDbg.HeaderRange.Address(False, False) & _
+                          hdrAddrDbg & _
                           ", строк заголовка = " & loAnomDbg.HeaderRange.Rows.Count & _
                           ", столбцов = " & loAnomDbg.HeaderRange.Columns.Count
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Err.Clear
+        End If
         Mod_Util.DebugLog "WriteLog(лист): до Resize, заголовки A1:H1 = """ & _
                           CStr(ws.Range("A1").Value) & "|" & CStr(ws.Range("B1").Value) & _
                           "|" & CStr(ws.Range("C1").Value) & "|" & CStr(ws.Range("D1").Value) & _
                           "|" & CStr(ws.Range("E1").Value) & "|" & CStr(ws.Range("F1").Value) & _
                           "|" & CStr(ws.Range("G1").Value) & "|" & CStr(ws.Range("H1").Value) & """"
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Err.Clear
+        End If
     End If
 
     If lastRowLog >= 2 Then
@@ -895,19 +934,42 @@ NextNodeLog:
     ' W-DEBUG-ANOMALIES-EMPTY: состояние ListObject ПОСЛЕ Resize (и проверка,
     ' что заголовки после Resize остались на месте — иначе видны дефолтные
     ' "Столбец1...", означающие потерю структуры таблицы).
+    ' W-FIX-ANOMALIES-EMPTY (блокер B): этот блок также находится внутри
+    ' локальной обработки ошибок (On Error Resume Next), начатой выше.
     If Not loAnomDbg Is Nothing Then
         Mod_Util.DebugLog "WriteLog(лист): после Resize, ListObject строк = " & _
                           loAnomDbg.ListRows.Count
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Err.Clear
+        End If
+        hdrAddrDbg = loAnomDbg.HeaderRange.Address
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Err.Clear
+        End If
         Mod_Util.DebugLog "WriteLog(лист): после Resize, HeaderRange = " & _
-                          loAnomDbg.HeaderRange.Address(False, False) & _
+                          hdrAddrDbg & _
                           ", строк заголовка = " & loAnomDbg.HeaderRange.Rows.Count & _
                           ", столбцов = " & loAnomDbg.HeaderRange.Columns.Count
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Err.Clear
+        End If
         Mod_Util.DebugLog "WriteLog(лист): после Resize, заголовки A1:H1 = """ & _
                           CStr(ws.Range("A1").Value) & "|" & CStr(ws.Range("B1").Value) & _
                           "|" & CStr(ws.Range("C1").Value) & "|" & CStr(ws.Range("D1").Value) & _
                           "|" & CStr(ws.Range("E1").Value) & "|" & CStr(ws.Range("F1").Value) & _
                           "|" & CStr(ws.Range("G1").Value) & "|" & CStr(ws.Range("H1").Value) & """"
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Err.Clear
+        End If
     End If
+    ' W-FIX-ANOMALIES-EMPTY (блокер B): конец блока отладочного логирования —
+    ' возвращаем стандартную обработку ошибок. Ошибки в этом блоке не приводят
+    ' к прерыванию WriteLog и выходу в Fail главной процедуры.
+    On Error GoTo 0
 
     ws.Columns("A:H").AutoFit
 End Sub
@@ -928,8 +990,18 @@ Private Function BuildDupKeyDict() As Object
     Dim col As Collection
     Dim hasDup As Boolean
     Dim kCheck As Variant
+    ' W-FIX-ANOMALIES-EMPTY (блокер A): счётчики диагностики поиска дублей.
+    Dim nodesWithCode As Long     ' узлы с непустым ведущим номером (LeadCode <> "")
+    Dim nodesSkipped As Long      ' узлы, отброшенные по типу или пустому коду
+    Dim dupGroupsDbg As Long      ' число групп с Count > 1
+    Dim dbgExamples As Long       ' счётчик выводимых примеров ключей (до 5)
+    Dim keysArr As Variant        ' массив ключей для вывода примеров
 
     Set dictKey = CreateObject("Scripting.Dictionary")
+
+    ' W-FIX-ANOMALIES-EMPTY (блокер A): старт процедуры — видно, сколько узлов
+    ' всего участвует в поиске дублей.
+    Mod_Util.DebugLog "BuildDupKeyDict: старт, узлов = " & NodeCount
 
     ' Проход 1: группировка узлов по ключу "Тип|Номер"
     For i = 1 To NodeCount
@@ -937,6 +1009,7 @@ Private Function BuildDupKeyDict() As Object
             nm = Nodes(i).Name
             code = LeadCode(nm)
             If code <> "" Then
+                nodesWithCode = nodesWithCode + 1
                 ' КЛЮЧ УЧИТЫВАЕТ ТИП: дубли считаем только внутри одного типа
                 key = Nodes(i).NodeType & "|" & code
                 If Not dictKey.Exists(key) Then
@@ -946,15 +1019,47 @@ Private Function BuildDupKeyDict() As Object
                 Else
                     dictKey(key).Add i
                 End If
+            Else
+                ' W-FIX-ANOMALIES-EMPTY (блокер A): узел отброшен — пустой код
+                nodesSkipped = nodesSkipped + 1
             End If
+        Else
+            ' W-FIX-ANOMALIES-EMPTY (блокер A): узел отброшен по типу
+            ' ("УДАЛЕН"/"ОШИБКА_ЯРЛЫКА")
+            nodesSkipped = nodesSkipped + 1
         End If
     Next i
+
+    ' W-FIX-ANOMALIES-EMPTY (блокер A): итоги прохода 1 — если nodesWithCode = 0
+    ' или dictKey.Count = 0, поиск дублей не может найти ни одной группы.
+    Mod_Util.DebugLog "BuildDupKeyDict: узлов с номером = " & nodesWithCode & _
+                      ", отброшено = " & nodesSkipped & ", ключей = " & dictKey.Count
 
     ' Есть ли хотя бы одна группа из 2+ узлов?
     hasDup = False
     For Each kCheck In dictKey.Keys
         If dictKey(kCheck).Count > 1 Then hasDup = True: Exit For
     Next kCheck
+
+    ' W-FIX-ANOMALIES-EMPTY (блокер A): число групп с дублями и примеры ключей
+    ' (до 5 любых), чтобы видеть, что именно собрал словарь. Логику поиска
+    ' дублей это не меняет — только диагностика.
+    For Each kCheck In dictKey.Keys
+        If dictKey(kCheck).Count > 1 Then dupGroupsDbg = dupGroupsDbg + 1
+    Next kCheck
+    Mod_Util.DebugLog "BuildDupKeyDict: групп с дублями = " & dupGroupsDbg
+
+    If dictKey.Count > 0 Then
+        keysArr = dictKey.Keys
+        dbgExamples = 0
+        For i = 0 To UBound(keysArr)
+            If dbgExamples >= 5 Then Exit For
+            Mod_Util.DebugLog "BuildDupKeyDict: пример ключа = " & CStr(keysArr(i)) & _
+                              " (узлов = " & dictKey(keysArr(i)).Count & ")"
+            dbgExamples = dbgExamples + 1
+        Next i
+    End If
+
     If Not hasDup Then
         Set BuildDupKeyDict = Nothing
         Exit Function
