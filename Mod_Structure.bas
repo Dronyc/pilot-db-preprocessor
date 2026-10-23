@@ -288,23 +288,29 @@ Public Sub BuildFlatStructure()
     '    внутри WriteLog запрещено (W-STRUCTURE-LOG-FIX). Лист передаётся явно
     '    (ByRef wsAnom), повторный поиск через GetSheetNoClear не выполняется.
     WriteLog wbOut, wsAnom
+    Mod_Util.DebugLog "BuildFlatStructure: WriteLog завершён, переход к BackupFlatTableSheet"
 
     ' 6) Основная таблица структуры.
     BackupFlatTableSheet          ' W-CORRECTION-PACK-1, п.3.2 (до перезаписи)
+    Mod_Util.DebugLog "BuildFlatStructure: BackupFlatTableSheet завершён"
     WriteFlatTable wbOut
+    Mod_Util.DebugLog "BuildFlatStructure: WriteFlatTable завершён"
 
     ' 7) W-STRUCTURE-DUPLICATES-FIX, п.3: жёлтая подсветка строк-дублей и метка
     '    "[!] Дубль" в колонке "Аномалия" — ПОСЛЕ создания Умной таблицы
     '    tblFlatStructure, чтобы стили таблицы не перекрывали заливку.
     '    dupCountDict передаётся из BuildDupKeyDict (шаг 2).
     HighlightDuplicateRows wbOut
+    Mod_Util.DebugLog "BuildFlatStructure: HighlightDuplicateRows завершён"
 
     ' 8) Лист трассировки.
     WriteTraceability wbOut
+    Mod_Util.DebugLog "BuildFlatStructure: WriteTraceability завершён"
 
     ' W-CORRECTION-PACK-1, п.3.1: резервная дозапись дублей в "Аномалии схемы"
     ' (обычно no-op: журнал уже заполнен на шагах 2-3). Сборку НЕ блокирует.
     CheckNumberDuplicates wbOut
+    Mod_Util.DebugLog "BuildFlatStructure: CheckNumberDuplicates завершён"
 
     ' ЧАСТЬ B: удалить пустой лист Лист1, созданный Workbooks.Add
     Dim wsEmpty As Worksheet
@@ -559,6 +565,7 @@ End Sub
 ' чтобы Excel не показывал предупреждений об удалении листов).
 Private Sub GetSheet(ByVal wb As Workbook, ByVal nm As String, ByRef out As Worksheet)
     Dim ws As Worksheet
+    Mod_Util.DebugLog "GetSheet: старт, имя = " & nm
     On Error Resume Next
     Set ws = wb.Worksheets(nm)
     If Err.Number <> 0 Then
@@ -571,6 +578,7 @@ Private Sub GetSheet(ByVal wb As Workbook, ByVal nm As String, ByRef out As Work
         ws.Cells.Clear              ' очистка вместо удаления листа
     End If
     Set out = ws
+    Mod_Util.DebugLog "GetSheet: лист получен/создан"
 End Sub
 
 '---------------- Вспомогательная процедура: Умная таблица ----------------
@@ -586,6 +594,8 @@ Private Sub CreateSmartTable(ByVal ws As Worksheet, _
     Dim lo As ListObject
     Dim newLo As ListObject
 
+    Mod_Util.DebugLog "CreateSmartTable: старт, имя = " & tableName & ", адрес = " & rng.Address
+
     On Error Resume Next
 
     ' Удалить старую таблицу с таким же именем (при повторном запуске)
@@ -595,17 +605,20 @@ Private Sub CreateSmartTable(ByVal ws As Worksheet, _
             Exit For
         End If
     Next lo
+    Mod_Util.DebugLog "CreateSmartTable: старая таблица удалена (если была)"
 
     ' Создать новую таблицу
     Set newLo = ws.ListObjects.Add( _
         SourceType:=xlSrcRange, _
         Source:=rng, _
         XlListObjectHasHeaders:=xlYes)
+    Mod_Util.DebugLog "CreateSmartTable: таблица создана"
 
     If Not newLo Is Nothing Then
         newLo.Name = tableName
         newLo.TableStyle = styleName
     End If
+    Mod_Util.DebugLog "CreateSmartTable: имя и стиль назначены"
 
     On Error GoTo 0
 End Sub
@@ -616,7 +629,9 @@ End Sub
 ' в колонку ставится "[!] Дубль" и строка красится в жёлтый цвет.
 Private Sub WriteFlatTable(ByVal wbOut As Workbook)
     Dim ws As Worksheet
+    Mod_Util.DebugLog "WriteFlatTable: старт"
     GetSheet wbOut, FLAT_SHEET_NAME, ws
+    Mod_Util.DebugLog "WriteFlatTable: GetSheet завершён"
     ws.Range("A1:E1").value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из", "Аномалия")
     Dim i As Long, r As Long
     Dim hasError As Boolean
@@ -682,22 +697,29 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         r = r + 1
 NextNode:
     Next i
+    Mod_Util.DebugLog "WriteFlatTable: данные записаны, строк = " & (r - 1)
     
     ' Создаём Умную таблицу
     Dim lastRowData As Long
     lastRowData = r - 1
     
     If lastRowData >= 2 Then
+        Mod_Util.DebugLog "WriteFlatTable: вызов CreateSmartTable"
         Call CreateSmartTable(ws, ws.Range("A1:E" & lastRowData), _
                               "tblFlatStructure", "TableStyleMedium2")
+        Mod_Util.DebugLog "WriteFlatTable: CreateSmartTable завершён"
     End If
     
+    Mod_Util.DebugLog "WriteFlatTable: вызов AutoFit"
     ws.Columns("A:E").AutoFit
+    Mod_Util.DebugLog "WriteFlatTable: AutoFit завершён"
 End Sub
 '---------------- Лист 2: трассировка ----------------
 Private Sub WriteTraceability(ByVal wbOut As Workbook)
     Dim ws As Worksheet
+    Mod_Util.DebugLog "WriteTraceability: старт"
     GetSheet wbOut, "Трассировка", ws
+    Mod_Util.DebugLog "WriteTraceability: GetSheet завершён"
     ws.Range("A1:H1").value = Array("№", "Строка", "Столбец", "Уровень", "Отображаемое имя", "Тип", "Цвет RGB", "Родитель")
     Dim i As Long
     For i = 1 To NodeCount
@@ -710,17 +732,22 @@ Private Sub WriteTraceability(ByVal wbOut As Workbook)
         ws.Cells(i + 1, 7).value = HexRGB(Nodes(i).ColorCode)
         ws.Cells(i + 1, 8).value = ParentName(Nodes(i).parentIdx)
     Next i
+    Mod_Util.DebugLog "WriteTraceability: данные записаны"
     
     ' Создаём Умную таблицу (вместо автофильтра Range.AutoFilter)
     Dim lastRowTrace As Long
     lastRowTrace = NodeCount + 1
     
     If lastRowTrace >= 2 Then
+        Mod_Util.DebugLog "WriteTraceability: вызов CreateSmartTable"
         Call CreateSmartTable(ws, ws.Range("A1:H" & lastRowTrace), _
                               "tblTraceability", "TableStyleMedium4")
+        Mod_Util.DebugLog "WriteTraceability: CreateSmartTable завершён"
     End If
     
+    Mod_Util.DebugLog "WriteTraceability: вызов AutoFit"
     ws.Columns("A:H").AutoFit
+    Mod_Util.DebugLog "WriteTraceability: AutoFit завершён"
 End Sub
 
 '---------------- Лист 3: аномалии схемы ----------------
@@ -1324,6 +1351,8 @@ Private Sub BackupFlatTableSheet()
 
     On Error GoTo ErrHandler
 
+    Mod_Util.DebugLog "BackupFlatTableSheet: старт"
+
     Set wbTool = ThisWorkbook
 
     ' существует ли старый лист "Адаптированная_структура"?
@@ -1335,7 +1364,10 @@ Private Sub BackupFlatTableSheet()
         Set wsSrc = wbTool.Worksheets(FLAT_SHEET_NAME_OLD)
     End If
     On Error GoTo ErrHandler
-    If wsSrc Is Nothing Then Exit Sub      ' старого листа нет — бэкап не нужен
+    If wsSrc Is Nothing Then
+        Mod_Util.DebugLog "BackupFlatTableSheet: старый лист не найден, бэкап не требуется"
+        Exit Sub      ' старого листа нет — бэкап не нужен
+    End If
 
     bakName = FLAT_SHEET_NAME & "_bak_" & Format$(Now, "yyyymmdd_hhnnss")
 
@@ -1344,6 +1376,7 @@ Private Sub BackupFlatTableSheet()
     ActiveSheet.Name = bakName
     Application.DisplayAlerts = True
 
+    Mod_Util.DebugLog "BackupFlatTableSheet: бэкап создан"
     Mod_Util.WriteLog "Бэкап адаптированной структуры: " & bakName
 
     ' ротация: храним последние 5 бэкапов (новое и старое имена префиксов),
