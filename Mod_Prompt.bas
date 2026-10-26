@@ -269,23 +269,11 @@ Private Function ListFolderFiles(ByVal folderPath As String) As String
     ListFolderFiles = res
 End Function
 
-' Формирует блок "ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА" для подстановки в начало
-' промта (W-CORRECTION-PACK-1, п.4.3): если папка
-' "01_Исходные данные\04_Дополнительные данные" не пуста - перечисляет её
-' файлы; иначе возвращает "" (блок не добавляется).
-Private Function BuildExtraDataBlock(ByVal root As String) As String
-    Dim filesList As String
-
-    BuildExtraDataBlock = ""
-    filesList = ListFolderFiles(root & "\01_Исходные данные\04_Дополнительные данные")
-    If filesList = "" Then Exit Function
-
-    BuildExtraDataBlock = "### ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА" & vbCrLf & _
-        "В папке 04_Дополнительные данные найдены файлы:" & vbCrLf & _
-        filesList & vbCrLf & _
-        "Учитывай их при генерации, если они относятся к текущему шагу." & _
-        vbCrLf & vbCrLf & vbCrLf
-End Function
+' УСТАРЕЛО (W-PROMPT-INVARIANTS-CODE-2): функция BuildExtraDataBlock удалена —
+' старая сборка блока «ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА» для промта шага заменена на
+' BuildExtraDataListBlock (блок 3.4, вызывается из FillAllPlaceholders внутри
+' BuildPromptForStep). Для Промта №0 (декомпозиция) сохранён
+' BuildStepZeroExtraDataList.
 
 ' Формирует содержимое плейсхолдера {EXTRA_DATA_LIST} для Промта №0
 ' (W-PROMPT-00-REFINE, п.2/п.5; W-PROMPT-00-FORMAT-FIX, п.5): список
@@ -2470,115 +2458,6 @@ Private Sub GenerateStepZeroPrompt()
     End If
 
     ' 7. Инструкция пользователю
-    MsgBox "Файл Шаги.txt не найден. Сформирован Промт №0:" & vbCrLf & _
-           outFile & vbCrLf & vbCrLf & _
-           "Загрузите его в ИИ, получите Шаги.txt и сохраните в 04_Промты.", _
-           vbInformation, "Промт №0 (декомпозиция)"
-    Exit Sub
-
-ErrHandler:
-    Mod_Util.WriteError "P004", "GenerateStepZeroPrompt: ошибка формирования Промта №0. Ошибка: " & Err.Description
-    MsgBox "Ошибка P004: не удалось сформировать Промт №0 (декомпозицию)." & vbCrLf & _
-           Err.Description, vbCritical, "Промт №0 (декомпозиция)"
-    Err.Clear
-End Sub
-
-    ' W-CORRECTION-PACK-1, п.2.3: блокировка генерации при неготовых исходниках
-    If Not Mod_Folders.CheckSourceFolders() Then
-        Mod_Util.WriteError "F005", "GenerateStepZeroPrompt: Исходные данные не готовы. Генерация остановлена."
-        MsgBox "ERROR [F005]: Исходные данные не готовы. Генерация остановлена.", _
-               vbCritical, "Промт №0 (декомпозиция)"
-        Exit Sub
-    End If
-
-    root = NormPath(Mod_Util.GetProjectRoot)
-    promptsPath = root & "\04_Промты"
-    prepFolder = root & "\02_Подготовка схемы"
-    descFolder = root & "\01_Исходные данные\02_Описание"
-    configFolder = root & "\01_Исходные данные\03_Конфигурация"
-    templatePath = promptsPath & "\Шаблоны\" & TEMPLATE_STEP0_NAME
-    outFile = promptsPath & "\" & STEP0_PROMPT_FILE
-
-    Mod_Util.WriteLog "GenerateStepZeroPrompt: Шаги.txt не найден, формирую Промт №0 (декомпозиция)"
-
-    ' 1. Реальные имена входных файлов:
-    '    W-PROMPT-00-SCHEMA-FIX: схема (адаптированная структура) берётся из
-    '    папки 02_Подготовка схемы — самый свежий файл по дате в имени
-    '    (при равенстве/отсутствии даты в имени — по дате изменения); если
-    '    файлов несколько, берётся последний; если файлов нет — ошибка и
-    '    остановка генерации.
-    '    описание — *.docx; конфигурация — через FindConfigFile
-    '    (валидны .xml и .txt; если только .pilotcfx — предупреждение от
-    '    FindConfigFile, генерация НЕ блокируется).
-    schemaName = GetNewestSchemaArtifactName(prepFolder)
-
-    ' Обязательность Схемы (W-PROMPT-00-SCHEMA-FIX): без адаптированной
-    ' структуры Промт №0 не формируется.
-    If schemaName = "" Then
-        Mod_Util.WriteError "P004", "[!] Отсутствует обязательный файл: Адаптированная структура" & _
-                                     " (папка 02_Подготовка схемы, маска " & SCHEMA_ARTIFACT_MASK & ")."
-        MsgBox "[!] Отсутствует обязательный файл: Адаптированная структура" & vbCrLf & _
-               "Папка: " & prepFolder & vbCrLf & _
-               "Маска: " & SCHEMA_ARTIFACT_MASK & vbCrLf & vbCrLf & _
-               "Выполните подготовку схемы (Собрать плоскую структуру) и повторите попытку." & vbCrLf & _
-               "Генерация Промта №0 остановлена.", _
-               vbCritical, "Промт №0 (декомпозиция)"
-        Exit Sub
-    End If
-
-    descName = FirstMatchFile(descFolder, "*.docx")
-
-    configName = Mod_Util.FindConfigFile(configFolder)
-    If configName <> "" Then configName = Mid$(configName, InStrRev(configName, "\") + 1)
-
-    ' 2. Отсутствующие файлы — MsgBox + [!] (FormatMissingFile) + плейсхолдер
-    '    "НЕ НАЙДЕН"; формирование Промта №0 при этом НЕ прерывается
-    If descName = "" Then
-        Mod_Util.WriteWarning "P004", Mod_Util.FormatMissingFile("01_Исходные данные\02_Описание\*.docx")
-        If missingList <> "" Then missingList = missingList & ", "
-        missingList = missingList & "02_Описание"
-        descName = STEP0_NOT_FOUND
-    End If
-    If configName = "" Then
-        Mod_Util.WriteWarning "P004", Mod_Util.FormatMissingFile("01_Исходные данные\03_Конфигурация\*.xml или *.txt")
-        If missingList <> "" Then missingList = missingList & ", "
-        missingList = missingList & "03_Конфигурация"
-        configName = STEP0_NOT_FOUND
-    End If
-    If missingList <> "" Then
-        MsgBox "[!] Отсутствует обязательный файл: " & missingList & "." & vbCrLf & _
-               "В Промте №0 вместо имени подставлено """ & STEP0_NOT_FOUND & """.", _
-               vbExclamation, "Промт №0 (декомпозиция)"
-    End If
-
-    ' 3. Шаблон Промта №0 из 04_Промты\Шаблоны
-    template = ReadTextFile(templatePath)
-    If template = "" Then
-        Mod_Util.WriteError "P004", "GenerateStepZeroPrompt: не найден шаблон " & templatePath
-        MsgBox "Ошибка P004: не найден шаблон " & TEMPLATE_STEP0_NAME & _
-               " в папке 04_Промты\Шаблоны.", vbCritical, "Промт №0 (декомпозиция)"
-        Exit Sub
-    End If
-
-    ' 4. Подстановка плейсхолдеров реальными именами файлов и правилами v7.13
-    result = template
-    result = ReplaceIfPresent(result, "{SCHEMA_FILENAME}", schemaName)
-    result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descName)
-    result = ReplaceIfPresent(result, "{CONFIG_FILENAME}", configName)
-    ' W-PROMPT-00-REFINE, п.2/п.5: список файлов доп. данных (папка
-    ' 01_Исходные данные\04_Дополнительные данные) подставляется в блок
-    ' "Проверка файлов" шаблона; если папка пуста — плейсхолдер заменяется
-    ' на пустую строку.
-    result = ReplaceIfPresent(result, "{EXTRA_DATA_LIST}", BuildStepZeroExtraDataList(root))
-    result = ReplaceIfPresent(result, "{Decomposition_Rules}", DECOMPOSITION_RULES_V713)
-
-    ' 5. Сохранение результата в 04_Промты
-    EnsureFolder promptsPath
-    SaveTextFileUtf8 outFile, result
-
-    Mod_Util.WriteLog "GenerateStepZeroPrompt: сохранён " & outFile
-
-    ' 6. Инструкция пользователю
     MsgBox "Файл Шаги.txt не найден. Сформирован Промт №0:" & vbCrLf & _
            outFile & vbCrLf & vbCrLf & _
            "Загрузите его в ИИ, получите Шаги.txt и сохраните в 04_Промты.", _
