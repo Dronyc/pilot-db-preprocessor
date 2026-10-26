@@ -842,6 +842,20 @@ End Sub
 ' видимости; ошибка AutoFit фиксируется в DebugLog и не прерывает запись.
 Private Sub SafeAutoFit(ByVal ws As Worksheet, ByVal cols As String)
     Dim prevVisible As XlSheetVisibility
+    ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ A: страховочная проверка валидности ws.
+    ' Если переданный объект ws не является корректным Worksheet (ошибка при
+    ' обращении к ws.Range("A1")), AutoFit на таком листе может завершиться
+    ' ошибкой 438 вне локальной обработки — выходим из процедуры до тела.
+    On Error Resume Next
+    Dim testRange As Range
+    Set testRange = ws.Range("A1")
+    If Err.Number <> 0 Then
+        Mod_Util.DebugLog "SafeAutoFit: объект ws не является корректным Worksheet: " & Err.Description
+        Err.Clear
+        On Error GoTo 0
+        Exit Sub
+    End If
+    On Error GoTo 0
     On Error Resume Next
     prevVisible = ws.Visible
     If prevVisible <> xlSheetVisible Then ws.Visible = xlSheetVisible
@@ -887,6 +901,10 @@ End Sub
 Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
     Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
 
+    ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ B: маркер входа в WriteLog(лист) —
+    ' подтверждает, что выполнение дошло до самой процедуры.
+    Mod_Util.DebugLog "WriteLog-DIAG: старт WriteLog(лист)"
+
     ' W-DEBUG-ANOMALIES-EMPTY: отладочное логирование записи на лист
     ' "Аномалии схемы" (DebugLog -> Immediate + файл-журнал, на лист не пишет).
     ' "переданных строк" — число строк плоской структуры (массив Nodes),
@@ -912,16 +930,24 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
     r = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row + 1
     If r < 2 Then r = 2
     Dim i As Long
+    ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ D: локальный перехват ошибок цикла записи
+    ' с продолжением (Resume Next) — позволяет пройти весь цикл и увидеть в
+    ' журнале ВСЕ падающие операции, а не только первую.
+    On Error GoTo DiagErr
     For i = 1 To NodeCount
         ' Пропускаем успешно обработанные ярлыки, чтобы не засорять журнал
         If Nodes(i).NodeType = "УДАЛЕН" Then GoTo NextNodeLog
         
         Dim nm As String, pn As String
+        ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ C: маркер перед чтением полей узла
+        Mod_Util.DebugLog "WriteLog-DIAG: строка=" & i & ", перед чтением Name/ParentName узла"
         nm = Nodes(i).Name
         pn = ParentName(Nodes(i).parentIdx)
 
         ' Ошибка: ярлык без цели
         If Nodes(i).NodeType = "ОШИБКА_ЯРЛЫКА" Then
+            ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ C: маркер перед записью ws.Cells(r, N)
+            Mod_Util.DebugLog "WriteLog-DIAG: строка=" & i & ", перед ws.Cells(" & r & ", 1..8) (SHORTCUT_NO_TARGET)"
             ws.Cells(r, 1).value = "SHORTCUT_NO_TARGET"
             ws.Cells(r, 2).value = Nodes(i).RowIdx
             ws.Cells(r, 3).value = Nodes(i).ColIdx
@@ -936,6 +962,8 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
 
         ' сирота
         If Nodes(i).parentIdx = 0 And nm <> "Объект" Then
+            ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ C: маркер перед записью ws.Cells(r, N)
+            Mod_Util.DebugLog "WriteLog-DIAG: строка=" & i & ", перед ws.Cells(" & r & ", 1..8) (ORPHAN)"
             ws.Cells(r, 1).value = "ORPHAN"
             ws.Cells(r, 2).value = Nodes(i).RowIdx
             ws.Cells(r, 3).value = Nodes(i).ColIdx
@@ -949,10 +977,14 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
 
         ' проверки кодов
         Dim cc As String, pc As String
+        ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ C: маркер перед вычислением кодов LeadCode/CodeDepth
+        Mod_Util.DebugLog "WriteLog-DIAG: строка=" & i & ", перед LeadCode/CodeDepth"
         cc = LeadCode(nm)
         pc = LeadCode(pn)
         If cc <> "" And pc <> "" Then
             If Left(cc, Len(pc) + 1) <> pc & "." Then
+                ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ C: маркер перед записью ws.Cells(r, N)
+                Mod_Util.DebugLog "WriteLog-DIAG: строка=" & i & ", перед ws.Cells(" & r & ", 1..8) (CODE_PARENT_MISMATCH)"
                 ws.Cells(r, 1).value = "CODE_PARENT_MISMATCH"
                 ws.Cells(r, 2).value = Nodes(i).RowIdx
                 ws.Cells(r, 3).value = Nodes(i).ColIdx
@@ -965,6 +997,8 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
                 If Not problemsDict.Exists(nm) Then problemsDict.Add nm, "E"
             End If
             If CodeDepth(cc) <> CodeDepth(pc) + 1 Then
+                ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ C: маркер перед записью ws.Cells(r, N)
+                Mod_Util.DebugLog "WriteLog-DIAG: строка=" & i & ", перед ws.Cells(" & r & ", 1..8) (CODE_DEPTH_JUMP)"
                 ws.Cells(r, 1).value = "CODE_DEPTH_JUMP"
                 ws.Cells(r, 2).value = Nodes(i).RowIdx
                 ws.Cells(r, 3).value = Nodes(i).ColIdx
@@ -979,6 +1013,10 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
         End If
 NextNodeLog:
     Next i
+    ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ D: конец цикла записи — снимаем локальный
+    ' перехват ошибок до отладочного блока (у него своя On Error Resume Next).
+    On Error GoTo 0
+    Mod_Util.DebugLog "WriteLog-DIAG: цикл записи завершён, последняя строка записи r = " & r
 
     '---------- W-STRUCTURE-LOG-FIX ----------
     ' Дубли ("Тип|Номер") уже найдены (BuildDupKeyDict) и записаны
@@ -1067,6 +1105,10 @@ NextNodeLog:
     End If
 
     If lastRowLog >= 2 Then
+        ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ C: маркер перед ws.Range(...) с
+        ' динамическим адресом и Resize таблицы (обращение к loAnomDbg вне
+        ' отладочного блока).
+        Mod_Util.DebugLog "WriteLog-DIAG: перед Resize tblAnomalies на A1:H" & lastRowLog
         On Error Resume Next
         ws.ListObjects("tblAnomalies").Resize ws.Range("A1:H" & lastRowLog)
         If Err.Number <> 0 Then
@@ -1084,6 +1126,9 @@ NextNodeLog:
     ' "Столбец1...", означающие потерю структуры таблицы).
     ' W-FIX-ANOMALIES-EMPTY (блокер B): этот блок также находится внутри
     ' локальной обработки ошибок (On Error Resume Next), начатой выше.
+    ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ C: маркер перед блоком чтения loAnomDbg.*
+    ' после Resize (ListRows.Count / HeaderRange.Address / ws.Range(...)).
+    Mod_Util.DebugLog "WriteLog-DIAG: перед чтением loAnomDbg после Resize"
     ' W-REFACTOR-WRITELOG-VISIBILITY, ЧАСТЬ C: Err.Clear перед каждым
     ' обращением к свойствам ListObject (см. комментарий выше).
     If Not loAnomDbg Is Nothing Then
@@ -1128,7 +1173,24 @@ NextNodeLog:
     ' W-FIX-AUTOFIT-WRITELOG: AutoFit через SafeAutoFit — на скрытом листе
     ' прямой вызов падал с "Object doesn't support this property or method"
     ' и ронял всю сборку через Fail главной процедуры.
+    ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ B: маркеры до/после SafeAutoFit — по ним
+    ' видно, доходит ли выполнение до SafeAutoFit и выходит ли из него (если
+    ' "перед" есть, а "после" нет — падение внутри SafeAutoFit).
+    Mod_Util.DebugLog "WriteLog-DIAG: перед SafeAutoFit, cols=A:H"
     SafeAutoFit ws, "A:H"
+    Mod_Util.DebugLog "WriteLog-DIAG: после SafeAutoFit"
+    ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ E: подтверждение, что выполнение дошло
+    ' до конца WriteLog (после последнего SafeAutoFit).
+    Mod_Util.DebugLog "WriteLog-DIAG: финальный блок, перед Exit Sub"
+    Exit Sub
+
+    ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ D: локальный перехват ошибок цикла записи
+    ' с продолжением (Resume Next) — логируем каждую падающую операцию и идём
+    ' дальше, чтобы увидеть в журнале ВСЕ ошибки, а не только первую.
+DiagErr:
+    Mod_Util.DebugLog "WriteLog-DIAG: ОШИБКА " & Err.Number & " на строке " & i & ": " & Err.Description
+    Err.Clear
+    Resume Next
 End Sub
 
 '---------------- W-STRUCTURE-DUPLICATES-FIX, п.1: группировка дублей ---------
