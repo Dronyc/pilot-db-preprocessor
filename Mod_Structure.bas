@@ -52,7 +52,19 @@ Public Sub BuildFlatStructure()
     Dim fileName As String         ' единственный xlsx-файл схемы
     Dim f As String                ' текущий файл при поиске через Dir
     Dim resultsPath As String      ' папка 02_Подготовка схемы (результаты)
+    ' W-FIX-AUTOFIT-WRITELOG: сохранение состояния Excel ДО открытия книг,
+    ' чтобы в метке Fail и при успешном завершении восстановить его корректно
+    ' (раньше восстановление шло жёсткими True/False, что затирало настройки
+    ' пользователя и не спасало от утечки ресурсов при аварийном выходе).
+    Dim prevScreenUpdating As Boolean   ' прежнее значение ScreenUpdating
+    Dim prevDisplayAlerts As Boolean    ' прежнее значение DisplayAlerts
+    Dim prevStatusBar As Variant        ' прежнее значение StatusBar (Variant: может быть строкой или False)
     On Error GoTo Fail
+
+    ' Запомнить текущее состояние приложения до каких-либо изменений
+    prevScreenUpdating = Application.ScreenUpdating
+    prevDisplayAlerts = Application.DisplayAlerts
+    prevStatusBar = Application.StatusBar
 
     '---------- ИЗМЕНЕНИЕ 1: источник - фиксированная папка 01_Схема ----------
     path = Mod_Util.GetProjectRoot & "\01_Исходные данные\01_Схема"
@@ -374,18 +386,32 @@ Public Sub BuildFlatStructure()
         ' Закрыть книгу без сохранения
         On Error Resume Next
         wbOut.Close SaveChanges:=False
-        On Error GoTo Fail
-        Application.ScreenUpdating = True
-        Application.DisplayAlerts = True
+        Set wbOut = Nothing
+        ' W-FIX-AUTOFIT-WRITELOG: закрыть источник, если открывали его сами,
+        ' чтобы при аварийном выходе не оставалась лишняя открытая книга
+        If Not srcWasOpen And Not wbSrc Is Nothing Then
+            wbSrc.Windows(1).Visible = True
+            wbSrc.Close SaveChanges:=False
+            Set wbSrc = Nothing
+        End If
+        On Error GoTo 0
+        ' W-FIX-AUTOFIT-WRITELOG: восстановить состояние из prev-переменных,
+        ' а не жёсткими True (раньше это затирало настройки пользователя)
+        Application.ScreenUpdating = prevScreenUpdating
+        Application.DisplayAlerts = prevDisplayAlerts
+        Application.StatusBar = prevStatusBar
         Exit Sub
     End If
     
     ' 9. Закрыть книгу (сохранить уже не надо — только что сохранили)
     wbOut.Close SaveChanges:=False
+    Set wbOut = Nothing
     
     ' 10. Восстановить экран
-    Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
+    ' W-FIX-AUTOFIT-WRITELOG: восстановление прежнего состояния приложения
+    Application.ScreenUpdating = prevScreenUpdating
+    Application.DisplayAlerts = prevDisplayAlerts
+    Application.StatusBar = prevStatusBar
 
     '---------- 5. Финал ----------
     Mod_Util.WriteLog "BuildFlatStructure: узлов " & NodeCount
@@ -398,6 +424,7 @@ Public Sub BuildFlatStructure()
         wbSrc.Windows(1).Visible = True    ' вернуть видимость перед закрытием
         On Error GoTo Fail
         wbSrc.Close SaveChanges:=False
+        Set wbSrc = Nothing
     End If
     ' === КОНЕЦ ПРАВКИ B ===
     Exit Sub
@@ -423,13 +450,57 @@ OpenErr:                                    ' в книге нет первог�
         wbSrc.Name & """."
     MsgBox "Ошибка S004: не удалось получить лист из книги """ & wbSrc.Name & """.", _
            vbExclamation, "Схема"
-    If Not srcWasOpen And Not wbSrc Is Nothing Then wbSrc.Close SaveChanges:=False
+    ' W-FIX-AUTOFIT-WRITELOG: при открытии источника на запись закрываем его
+    ' без сохранения; если книга была открыта пользователем — только вернуть
+    ' видимость окна. Ошибки при уборке не должны ронять обработчик.
+    On Error Resume Next
+    If Not srcWasOpen And Not wbSrc Is Nothing Then
+        wbSrc.Windows(1).Visible = True
+        wbSrc.Close SaveChanges:=False
+        Set wbSrc = Nothing
+    ElseIf Not wbSrc Is Nothing Then
+        wbSrc.Windows(1).Visible = True
+    End If
+    ' На этом пути новые книги ещё не создавались, но на всякий случай
+    ' подстрахуемся и восстановим прежнее состояние приложения.
+    If Not wbOut Is Nothing Then wbOut.Close SaveChanges:=False
+    Set wbOut = Nothing
+    Application.ScreenUpdating = prevScreenUpdating
+    Application.DisplayAlerts = prevDisplayAlerts
+    Application.StatusBar = prevStatusBar
+    On Error GoTo 0
     Exit Sub
 
 Fail:                                       ' прочие ошибки (например, создание папки результатов)
+    ' W-FIX-AUTOFIT-WRITELOG: раньше сюда попадали без освобождения ресурсов —
+    ' открытые нами книги (wbOut, wbSrc) оставались висящими в памяти, а
+    ' ScreenUpdating/DisplayAlerts — изменёнными, из-за чего при закрытии файла
+    ' Excel предлагал сохранять лишние книги. Теперь Fail корректно убирает всё.
     Dim errDesc As String
     errDesc = Err.Description
     Err.Clear
+    ' Восстановить прежнее состояние приложения (через On Error Resume Next,
+    ' чтобы сбой восстановления не прерывал обработчик ошибок)
+    On Error Resume Next
+    Application.ScreenUpdating = prevScreenUpdating
+    Application.DisplayAlerts = prevDisplayAlerts
+    Application.StatusBar = prevStatusBar
+    ' Закрыть новую книгу результатов без сохранения, если она была создана
+    If Not wbOut Is Nothing Then
+        wbOut.Close SaveChanges:=False
+        Set wbOut = Nothing
+    End If
+    ' Закрыть источник без сохранения, ТОЛЬКО если открывали его сами;
+    ' если книга была открыта пользователем — не закрывать, лишь вернуть
+    ' видимость её окна (мы скрывали его на время сборки).
+    If Not srcWasOpen And Not wbSrc Is Nothing Then
+        wbSrc.Windows(1).Visible = True
+        wbSrc.Close SaveChanges:=False
+        Set wbSrc = Nothing
+    ElseIf Not wbSrc Is Nothing Then
+        wbSrc.Windows(1).Visible = True
+    End If
+    On Error GoTo 0
     ' W-FIX-ANOMALIES-EMPTY: раньше сюда попадали из-за ошибки отладочного
     ' логирования в WriteLog, но текст "Ошибка открытия файла схемы" маскировал
     ' реальную причину (ошибка выполнения, не связанная с открытием схемы).
@@ -710,9 +781,10 @@ NextNode:
         Mod_Util.DebugLog "WriteFlatTable: CreateSmartTable завершён"
     End If
     
-    Mod_Util.DebugLog "WriteFlatTable: вызов AutoFit"
-    ws.Columns("A:E").AutoFit
-    Mod_Util.DebugLog "WriteFlatTable: AutoFit завершён"
+    ' W-FIX-AUTOFIT-WRITELOG: AutoFit через SafeAutoFit — на скрытом/неотрисованном
+    ' листе прямой вызов мог падать с "Object doesn't support this property or
+    ' method" и ронять всю сборку через Fail главной процедуры.
+    SafeAutoFit ws, "A:E"
 End Sub
 '---------------- Лист 2: трассировка ----------------
 Private Sub WriteTraceability(ByVal wbOut As Workbook)
@@ -745,9 +817,25 @@ Private Sub WriteTraceability(ByVal wbOut As Workbook)
         Mod_Util.DebugLog "WriteTraceability: CreateSmartTable завершён"
     End If
     
-    Mod_Util.DebugLog "WriteTraceability: вызов AutoFit"
-    ws.Columns("A:H").AutoFit
-    Mod_Util.DebugLog "WriteTraceability: AutoFit завершён"
+    ' W-FIX-AUTOFIT-WRITELOG: AutoFit через SafeAutoFit (см. комментарий в WriteFlatTable)
+    SafeAutoFit ws, "A:H"
+End Sub
+
+'---------------- Вспомогательная процедура: безопасный AutoFit -------------
+' W-FIX-AUTOFIT-WRITELOG: AutoFit на скрытом или ещё не отрисованном листе
+' (wbOut.Windows(1).Visible = False на время сборки) в ряде конфигураций Excel
+' завершался ошибкой "Object doesn't support this property or method" (Err 438),
+' что прерывало WriteLog/WriteFlatTable/WriteTraceability и выводило сборку в
+' метку Fail главной процедуры. SafeAutoFit перехватывает такую ошибку локально:
+' ширина колонок — косметика, аварийное завершение сборки из-за неё недопустимо.
+Private Sub SafeAutoFit(ByVal ws As Worksheet, ByVal cols As String)
+    On Error Resume Next
+    ws.Columns(cols).AutoFit
+    If Err.Number <> 0 Then
+        Mod_Util.DebugLog "SafeAutoFit: ошибка AutoFit для колонок " & cols & ": " & Err.Description
+        Err.Clear
+    End If
+    On Error GoTo 0
 End Sub
 
 '---------------- Лист 3: аномалии схемы ----------------
@@ -998,7 +1086,10 @@ NextNodeLog:
     ' к прерыванию WriteLog и выходу в Fail главной процедуры.
     On Error GoTo 0
 
-    ws.Columns("A:H").AutoFit
+    ' W-FIX-AUTOFIT-WRITELOG: AutoFit через SafeAutoFit — на скрытом листе
+    ' прямой вызов падал с "Object doesn't support this property or method"
+    ' и ронял всю сборку через Fail главной процедуры.
+    SafeAutoFit ws, "A:H"
 End Sub
 
 '---------------- W-STRUCTURE-DUPLICATES-FIX, п.1: группировка дублей ---------
