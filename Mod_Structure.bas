@@ -885,6 +885,10 @@ End Sub
 ' явно по ссылке (ByRef ws), чтобы исключить повторный поиск через
 ' GetSheetNoClear и любые попытки переподготовки листа внутри процедуры.
 Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
+    ' W-REFACTOR-WRITELOG-FINAL: штатная обработка ошибок WriteLog — ошибка не
+    ' должна прерывать сборку; фиксируется в журнале и выполнение продолжается.
+    On Error GoTo WriteLogErr
+
     Mod_Util.WriteLog "Mod_Structure: узлов " & NodeCount
 
     ' W-DEBUG-ANOMALIES-EMPTY: отладочное логирование записи на лист
@@ -901,7 +905,7 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
     ' PrepareAnomaliesSheet до создания ListObject.
     If ws Is Nothing Then
         Mod_Util.DebugLog "WriteLog(лист): нет данных для записи (лист не передан)"
-        Exit Sub
+        GoTo WriteLogErr   ' штатный выход через обработчик (перед End Sub)
     End If
     If NodeCount <= 0 Then
         Mod_Util.DebugLog "WriteLog(лист): нет данных для записи (плоская структура пуста)"
@@ -996,7 +1000,6 @@ NextNodeLog:
     ' заголовки, т.е. < 2), Resize не выполняется и это фиксируется в журнале.
     Dim loAnomDbg As ListObject
     Dim loRowsBefore As Long
-    Dim hdrAddrDbg As String      ' W-FIX-ANOMALIES-EMPTY: адрес HeaderRange для журнала
     Set loAnomDbg = Nothing
     On Error Resume Next
     Set loAnomDbg = ws.ListObjects("tblAnomalies")
@@ -1006,13 +1009,15 @@ NextNodeLog:
     ' обработку ошибок — ошибка в отладочном логировании НЕ должна прерывать
     ' WriteLog и приводить к выходу в Fail главной процедуры BuildFlatStructure.
     On Error Resume Next
-    ' W-REFACTOR-WRITELOG-VISIBILITY, ЧАСТЬ C: каждое обращение к свойствам
-    ' ListObject (ListRows.Count, HeaderRange.Address, Rows.Count,
-    ' Columns.Count) теперь предваряется Err.Clear — так ошибка одного
-    ' обращения не «наследуется» следующей проверкой и не маскирует реальную
-    ' причину. Единый текст ошибки чтения заголовков соответствует заданию.
-    ' Весь блок по-прежнему работает под On Error Resume Next: ошибка чтения
-    ' заголовков НЕ прерывает запись лога.
+    ' W-REFACTOR-WRITELOG-FINAL, ЧАСТЬ C: обращения к loAnomDbg.HeaderRange
+    ' (Address / Rows.Count / Columns.Count) заменены на безопасные обращения
+    ' через ws.Range("A1:H1"): после Resize HeaderRange возвращал объект, у
+    ' которого эти свойства недоступны (ошибка 438). Заголовок таблицы всегда
+    ' находится в A1:H1 (8 колонок), поэтому ws.Range("A1:H1") — корректный и
+    ' безопасный эквивалент шапки tblAnomalies. Err.Clear перед каждым
+    ' обращением сохранён (наследие Части C задания c70928b): ошибка одного
+    ' обращения не «наследуется» следующей проверкой. Весь блок работает под
+    ' On Error Resume Next: ошибка чтения заголовков НЕ прерывает запись лога.
     If loAnomDbg Is Nothing Then
         Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): нет данных для записи или таблица отсутствует: " & _
@@ -1035,21 +1040,12 @@ NextNodeLog:
             Err.Clear
         End If
         ' Проверка сохранности заголовков перед Resize (Resize НЕ должен их
-        ' затирать): адрес и размер шапки таблицы + фактические тексты A1:H1.
-        ' W-FIX-ANOMALIES-EMPTY (блокер B): Address(False, False) заменён на
-        ' Address (без аргументов) — вызов с аргументами в ряде конфигураций
-        ' завершался ошибкой и ронял сборку через Fail главной процедуры.
+        ' затирать): адрес и размер шапки A1:H1 + фактические тексты A1:H1.
         Err.Clear
-        hdrAddrDbg = loAnomDbg.HeaderRange.Address
-        If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
-            Err.Clear
-        End If
-        Err.Clear
-        Mod_Util.DebugLog "WriteLog(лист): до Resize, HeaderRange = " & _
-                          hdrAddrDbg & _
-                          ", строк заголовка = " & loAnomDbg.HeaderRange.Rows.Count & _
-                          ", столбцов = " & loAnomDbg.HeaderRange.Columns.Count
+        Mod_Util.DebugLog "WriteLog(лист): до Resize, заголовки A1:H1 = " & _
+                          ws.Range("A1:H1").Address & _
+                          ", строк заголовка = " & ws.Range("A1:H1").Rows.Count & _
+                          ", столбцов = " & ws.Range("A1:H1").Columns.Count
         If Err.Number <> 0 Then
             Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
@@ -1082,10 +1078,8 @@ NextNodeLog:
     ' W-DEBUG-ANOMALIES-EMPTY: состояние ListObject ПОСЛЕ Resize (и проверка,
     ' что заголовки после Resize остались на месте — иначе видны дефолтные
     ' "Столбец1...", означающие потерю структуры таблицы).
-    ' W-FIX-ANOMALIES-EMPTY (блокер B): этот блок также находится внутри
-    ' локальной обработки ошибок (On Error Resume Next), начатой выше.
-    ' W-REFACTOR-WRITELOG-VISIBILITY, ЧАСТЬ C: Err.Clear перед каждым
-    ' обращением к свойствам ListObject (см. комментарий выше).
+    ' W-REFACTOR-WRITELOG-FINAL, ЧАСТЬ C: вместо HeaderRange — безопасные
+    ' обращения через ws.Range("A1:H1") (см. комментарий выше).
     If Not loAnomDbg Is Nothing Then
         Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): после Resize, ListObject строк = " & _
@@ -1095,16 +1089,10 @@ NextNodeLog:
             Err.Clear
         End If
         Err.Clear
-        hdrAddrDbg = loAnomDbg.HeaderRange.Address
-        If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
-            Err.Clear
-        End If
-        Err.Clear
-        Mod_Util.DebugLog "WriteLog(лист): после Resize, HeaderRange = " & _
-                          hdrAddrDbg & _
-                          ", строк заголовка = " & loAnomDbg.HeaderRange.Rows.Count & _
-                          ", столбцов = " & loAnomDbg.HeaderRange.Columns.Count
+        Mod_Util.DebugLog "WriteLog(лист): после Resize, заголовки A1:H1 = " & _
+                          ws.Range("A1:H1").Address & _
+                          ", строк заголовка = " & ws.Range("A1:H1").Rows.Count & _
+                          ", столбцов = " & ws.Range("A1:H1").Columns.Count
         If Err.Number <> 0 Then
             Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
@@ -1129,6 +1117,14 @@ NextNodeLog:
     ' прямой вызов падал с "Object doesn't support this property or method"
     ' и ронял всю сборку через Fail главной процедуры.
     SafeAutoFit ws, "A:H"
+
+    Exit Sub
+WriteLogErr:
+    ' W-REFACTOR-WRITELOG-FINAL, ЧАСТЬ B: штатная обработка ошибок WriteLog
+    ' (не диагностическая) — фиксируем ошибку в журнале и продолжаем выполнение.
+    Mod_Util.DebugLog "WriteLog: ошибка " & Err.Number & ": " & Err.Description
+    Err.Clear
+    Resume Next
 End Sub
 
 '---------------- W-STRUCTURE-DUPLICATES-FIX, п.1: группировка дублей ---------
