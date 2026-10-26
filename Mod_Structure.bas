@@ -1131,35 +1131,56 @@ NextNodeLog:
     Mod_Util.DebugLog "WriteLog-DIAG: перед чтением loAnomDbg после Resize"
     ' W-REFACTOR-WRITELOG-VISIBILITY, ЧАСТЬ C: Err.Clear перед каждым
     ' обращением к свойствам ListObject (см. комментарий выше).
+    ' W-REFACTOR-WRITELOG-DIAG3, ЧАСТЬ B: счётчик шагов промежутка. Инкремент
+    ' N выполняется ПЕРЕД каждой исполняемой инструкцией (маркер DIAG3 печатает
+    ' то же значение N), чтобы обработчик Diag3Err показывал точный шаг падения.
+    Dim N As Long
+    N = 0
+    ' W-REFACTOR-WRITELOG-DIAG3, ЧАСТЬ B: перехват ошибок промежутка от
+    ' "после Resize" до "перед SafeAutoFit" с продолжением (Resume Next) —
+    ' позволяет увидеть номер шага N, на котором падает 438.
+    On Error GoTo Diag3Err
     If Not loAnomDbg Is Nothing Then
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": Err.Clear"
         Err.Clear
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": DebugLog после Resize, ListObject строк (loAnomDbg.ListRows.Count)"
         Mod_Util.DebugLog "WriteLog(лист): после Resize, ListObject строк = " & _
                           loAnomDbg.ListRows.Count
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": If Err.Number <> 0 (после ListRows.Count)"
         If Err.Number <> 0 Then
             Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": Err.Clear"
         Err.Clear
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": hdrAddrDbg = loAnomDbg.HeaderRange.Address"
         hdrAddrDbg = loAnomDbg.HeaderRange.Address
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": If Err.Number <> 0 (после HeaderRange.Address)"
         If Err.Number <> 0 Then
             Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": Err.Clear"
         Err.Clear
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": DebugLog после Resize, HeaderRange (loAnomDbg.HeaderRange.Rows/Columns.Count)"
         Mod_Util.DebugLog "WriteLog(лист): после Resize, HeaderRange = " & _
                           hdrAddrDbg & _
                           ", строк заголовка = " & loAnomDbg.HeaderRange.Rows.Count & _
                           ", столбцов = " & loAnomDbg.HeaderRange.Columns.Count
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": If Err.Number <> 0 (после HeaderRange Rows/Columns)"
         If Err.Number <> 0 Then
             Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": Err.Clear"
         Err.Clear
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": DebugLog после Resize, заголовки A1:H1 (ws.Range(A1..H1).Value)"
         Mod_Util.DebugLog "WriteLog(лист): после Resize, заголовки A1:H1 = """ & _
                           CStr(ws.Range("A1").Value) & "|" & CStr(ws.Range("B1").Value) & _
                           "|" & CStr(ws.Range("C1").Value) & "|" & CStr(ws.Range("D1").Value) & _
                           "|" & CStr(ws.Range("E1").Value) & "|" & CStr(ws.Range("F1").Value) & _
                           "|" & CStr(ws.Range("G1").Value) & "|" & CStr(ws.Range("H1").Value) & """"
+        N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": If Err.Number <> 0 (после заголовков A1:H1)"
         If Err.Number <> 0 Then
             Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
@@ -1168,7 +1189,17 @@ NextNodeLog:
     ' W-FIX-ANOMALIES-EMPTY (блокер B): конец блока отладочного логирования —
     ' возвращаем стандартную обработку ошибок. Ошибки в этом блоке не приводят
     ' к прерыванию WriteLog и выходу в Fail главной процедуры.
-    On Error GoTo 0
+    ' W-REFACTOR-WRITELOG-DIAG3, ЧАСТЬ B: маркер перед снятием локального
+    ' обработчика перехвата промежутка. В VBA "On Error GoTo 0" внутри
+    ' активного обработчика (Diag3Err) сбрасывает ВСЮ обработку ошибок и
+    ' лишает Resume Next точки возврата — поэтому здесь применяется
+    ' On Error GoTo -1 (снятие только текущего обработчика с сохранением
+    ' возможности продолжить выполнение через Resume Next).
+    N = N + 1: Mod_Util.DebugLog "WriteLog-DIAG3: шаг " & N & ": снятие перехвата (On Error GoTo -1), промежуток пройден"
+    On Error GoTo -1
+    ' W-REFACTOR-WRITELOG-DIAG3, ЧАСТЬ B: промежуток пройден без ошибок —
+    ' выполнение продолжается штатно, к SafeAutoFit (ЧАСТЬ C: не тронут).
+    Mod_Util.DebugLog "WriteLog-DIAG3: промежуток пройден без ошибок, переход к SafeAutoFit"
 
     ' W-FIX-AUTOFIT-WRITELOG: AutoFit через SafeAutoFit — на скрытом листе
     ' прямой вызов падал с "Object doesn't support this property or method"
@@ -1176,6 +1207,8 @@ NextNodeLog:
     ' W-REFACTOR-WRITELOG-DIAG2, ЧАСТЬ B: маркеры до/после SafeAutoFit — по ним
     ' видно, доходит ли выполнение до SafeAutoFit и выходит ли из него (если
     ' "перед" есть, а "после" нет — падение внутри SafeAutoFit).
+    ' W-REFACTOR-WRITELOG-DIAG3, ЧАСТЬ C: вызов SafeAutoFit и маркеры вокруг
+    ' него НЕ тронуты — задача DIAG3 поймать падение ДО SafeAutoFit.
     Mod_Util.DebugLog "WriteLog-DIAG: перед SafeAutoFit, cols=A:H"
     SafeAutoFit ws, "A:H"
     Mod_Util.DebugLog "WriteLog-DIAG: после SafeAutoFit"
@@ -1189,6 +1222,15 @@ NextNodeLog:
     ' дальше, чтобы увидеть в журнале ВСЕ ошибки, а не только первую.
 DiagErr:
     Mod_Util.DebugLog "WriteLog-DIAG: ОШИБКА " & Err.Number & " на строке " & i & ": " & Err.Description
+    Err.Clear
+    Resume Next
+
+    ' W-REFACTOR-WRITELOG-DIAG3, ЧАСТЬ B: перехват ошибок промежутка от
+    ' "после Resize" до "перед SafeAutoFit" с продолжением (Resume Next) —
+    ' показывает точный номер шага N, на котором падает 438, и даёт выполнению
+    ' дойти до SafeAutoFit, чтобы продолжить локализацию.
+Diag3Err:
+    Mod_Util.DebugLog "WriteLog-DIAG3: ОШИБКА " & Err.Number & " на шаге " & N & ": " & Err.Description
     Err.Clear
     Resume Next
 End Sub
