@@ -6,9 +6,9 @@
 
 | Модуль | Назначение | Ключевые функции/процедуры |
 |---|---|---|
-| Mod_Util.bas | Журналирование, конфигурация, пути | WriteLog ("[i] <текст>"), WriteError ("ERROR [<код>]: <текст>"), WriteWarning ("[!] <текст>"), FormatMissingFile, FindConfigFile (.xml > .txt; только .pilotcfx — предупреждение), GetConfigValue, GetProjectRoot |
+| Mod_Util.bas | Журналирование, конфигурация, пути | WriteLog ("[i] <текст>"), WriteError ("ERROR [<код>]: <текст>"), WriteWarning ("[!] <текст>"), DebugLog (публичная, безопасное отладочное логирование: Immediate + файл-журнал, ошибки журналирования не роняют сборку), FormatMissingFile, FindConfigFile (.xml > .txt; только .pilotcfx — предупреждение), GetConfigValue, GetProjectRoot |
 | Mod_Folders.bas | Структура папок и проверка исходников | CreateProjectFolders (создаёт в т.ч. "01_Исходные данные\04_Дополнительные данные"), CheckSourceFolders (Схема .xlsx / Описание .docx / Конфигурация через FindConfigFile / сводка по доп. данным; возвращает True/False), GetStepFolder |
-| Mod_Structure.bas | Парсинг схемы ЖЦ ОКС в адаптированную структуру | BuildFlatStructure, WriteFlatTable (лист "Адаптированная_структура"), WriteLog (лист "Аномалии схемы"), WriteTraceability, CheckNumberDuplicates (дубли номеров/наименований — только предупреждения), BackupFlatTableSheet (бэкапы "Адаптированная_структура_bak_<YYYYMMDD_HHMMSS>", ротация 5), ArchiveOldSchemaArtifacts (архивация старых "Адаптированная_структура_*.xlsx" в "02_Подготовка схемы\Архив") |
+| Mod_Structure.bas | Парсинг схемы ЖЦ ОКС в адаптированную структуру | BuildFlatStructure (использует prevScreenUpdating / prevDisplayAlerts / prevStatusBar для восстановления состояния и корректно освобождает ресурсы — закрывает wbOut/wbSrc — во всех аварийных ветках Fail, OpenErr, saveErr), WriteFlatTable (лист "Адаптированная_структура"), WriteLog (лист "Аномалии схемы"; заголовки читаются через Worksheet.Range("A1:H1"), а не через ListObject.HeaderRange — из-за бага 438 после Resize), SafeAutoFit (приватная, безопасный AutoFit на скрытых листах: ошибки перехватываются локально, ширина колонок не роняет сборку), WriteTraceability, CheckNumberDuplicates (дубли номеров/наименований — только предупреждения), BackupFlatTableSheet (бэкапы "Адаптированная_структура_bak_<YYYYMMDD_HHMMSS>", ротация 5), ArchiveOldSchemaArtifacts (архивация старых "Адаптированная_структура_*.xlsx" в "02_Подготовка схемы\Архив") |
 | Mod_Prompt.bas | Генерация промтов | GenerateStepZeroPrompt (Промт №0; блокировка F005 при неготовых исходниках), MakeNextStepPrompt (промт шага + блок "ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА"; блокировка F005), MakeFixPrompt, ReadStepList (канонический разделитель "\|" из Шаги.txt), BuildExtraDataBlock, ListFolderFiles, DECOMPOSITION_RULES_V713 (алгоритм «анализ → прогноз +50% → шаги → формат NN\|Имя_папки») |
 | Mod_Assembler.bas | Сборка итоговых настроек | сборка файлов настроек по результатам шагов |
 | Mod_Docs.bas | Документация проекта | генерация отчётов/документов |
@@ -47,6 +47,11 @@
 - INFO:  `[i] <текст>`
 - Отсутствие обязательного файла: `[!] Отсутствует обязательный файл: <имя>`
 - Код F005: исходные данные не готовы — генерация промтов остановлена.
+
+## Известные подводные камни / соглашения VBA
+
+- ListObject.HeaderRange после Resize может выдавать ошибку 438. Для чтения заголовков использовать Worksheet.Range("A1:H1").
+- Внутри циклов `For i = 1 To N` в обработчиках ошибок использовать именованные метки (`Resume NextNodeLog`) вместо `Resume Next`, чтобы переходить к следующей итерации цикла, а не к следующей инструкции.
 
 ## templates/prompts (папка prompts/ в репозитории)
 
