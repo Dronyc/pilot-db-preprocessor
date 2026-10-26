@@ -133,11 +133,20 @@ Public Sub BuildFlatStructure()
     ' новая книга для результатов (не засоряем книгу инструмента листами)
     Set wbOut = Workbooks.Add
 
-    ' ЧАСТЬ A: скрыть окно wbOut на время работы
+    ' W-REFACTOR-WRITELOG-VISIBILITY, ЧАСТЬ A: окно книги результатов БОЛЬШЕ
+    ' НЕ скрывается (wbOut.Windows(1).Visible = False удалено). Скрытое окно
+    ' блокировало доступ к свойствам ListObject (например,
+    ' loAnomDbg.HeaderRange.Address) — Excel завершал обращение ошибкой 438
+    ' «Object doesn't support this property or method», что роняло WriteLog и
+    ' всю сборку через метку Fail. Книга wbOut остаётся видимой для объектной
+    ' модели Excel (по умолчанию Visible = xlSheetVisible). Против мерцания
+    ' экрана используется только безопасный стандарт Application.ScreenUpdating.
+    ' prevScreenUpdating сохранён в начале процедуры и восстанавливается при
+    ' любом выходе (успешный, OpenErr, Fail).
     Application.ScreenUpdating = False
-    On Error Resume Next
-    wbOut.Windows(1).Visible = False
-    On Error GoTo Fail
+    ' DisplayAlerts отключается только на время операций, которым это нужно
+    ' (перезапись файлов), и сразу включается обратно (см. ниже); на время
+    ' основной сборки оно остаётся в прежнем состоянии пользователя.
 
     '---------- 1. Легенда: цвет -> тип ----------
     Dim legCells(1 To 6) As String
@@ -352,12 +361,11 @@ Public Sub BuildFlatStructure()
     ' совместимость). В корне папки остаётся только последний сохранённый файл.
     ArchiveOldSchemaArtifacts resultsPath
     
-    ' 2. Показать окно ДО SaveAs (важно — так SaveAs записывает всё корректно)
-    On Error Resume Next
-    wbOut.Windows(1).Visible = True
-    On Error GoTo Fail
-    
-    ' 3. Дать Excel время на отрисовку
+    ' W-REFACTOR-WRITELOG-VISIBILITY, ЧАСТЬ A: блок принудительного показа окна
+    ' перед SaveAs (On Error Resume Next / wbOut.Windows(1).Visible = True /
+    ' On Error GoTo Fail) УДАЛЁН — окно книги результатов больше не скрывалось,
+    ' показывать стало нечего; SaveAs выполняется при видимой книге.
+    ' 2. Дать Excel время на отрисовку
     DoEvents
     
     ' 4. Показать пользователю, что идёт сохранение (в строке состояния)
@@ -823,14 +831,22 @@ End Sub
 
 '---------------- Вспомогательная процедура: безопасный AutoFit -------------
 ' W-FIX-AUTOFIT-WRITELOG: AutoFit на скрытом или ещё не отрисованном листе
-' (wbOut.Windows(1).Visible = False на время сборки) в ряде конфигураций Excel
-' завершался ошибкой "Object doesn't support this property or method" (Err 438),
-' что прерывало WriteLog/WriteFlatTable/WriteTraceability и выводило сборку в
-' метку Fail главной процедуры. SafeAutoFit перехватывает такую ошибку локально:
-' ширина колонок — косметика, аварийное завершение сборки из-за неё недопустимо.
+' в ряде конфигураций Excel завершался ошибкой "Object doesn't support this
+' property or method" (Err 438), что прерывало WriteLog/WriteFlatTable/
+' WriteTraceability и выводило сборку в метку Fail главной процедуры.
+' SafeAutoFit перехватывает такую ошибку локально: ширина колонок — косметика,
+' аварийное завершение сборки из-за неё недопустимо.
+' W-REFACTOR-WRITELOG-VISIBILITY, ЧАСТЬ B: тело SafeAutoFit приведено к
+' каноническому виду — перед AutoFit лист временно делается видимым
+' (Visible = xlSheetVisible) и после — возвращаются прежние настройки
+' видимости; ошибка AutoFit фиксируется в DebugLog и не прерывает запись.
 Private Sub SafeAutoFit(ByVal ws As Worksheet, ByVal cols As String)
+    Dim prevVisible As XlSheetVisibility
     On Error Resume Next
+    prevVisible = ws.Visible
+    If prevVisible <> xlSheetVisible Then ws.Visible = xlSheetVisible
     ws.Columns(cols).AutoFit
+    If prevVisible <> xlSheetVisible Then ws.Visible = prevVisible
     If Err.Number <> 0 Then
         Mod_Util.DebugLog "SafeAutoFit: ошибка AutoFit для колонок " & cols & ": " & Err.Description
         Err.Clear
@@ -990,22 +1006,32 @@ NextNodeLog:
     ' обработку ошибок — ошибка в отладочном логировании НЕ должна прерывать
     ' WriteLog и приводить к выходу в Fail главной процедуры BuildFlatStructure.
     On Error Resume Next
+    ' W-REFACTOR-WRITELOG-VISIBILITY, ЧАСТЬ C: каждое обращение к свойствам
+    ' ListObject (ListRows.Count, HeaderRange.Address, Rows.Count,
+    ' Columns.Count) теперь предваряется Err.Clear — так ошибка одного
+    ' обращения не «наследуется» следующей проверкой и не маскирует реальную
+    ' причину. Единый текст ошибки чтения заголовков соответствует заданию.
+    ' Весь блок по-прежнему работает под On Error Resume Next: ошибка чтения
+    ' заголовков НЕ прерывает запись лога.
     If loAnomDbg Is Nothing Then
+        Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): нет данных для записи или таблица отсутствует: " & _
                           "ListObject ""tblAnomalies"" не найден, Resize не выполняется"
         If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
     Else
+        Err.Clear
         loRowsBefore = loAnomDbg.ListRows.Count
         If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
+        Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): до Resize, ListObject строк = " & loRowsBefore
         If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
         ' Проверка сохранности заголовков перед Resize (Resize НЕ должен их
@@ -1013,26 +1039,29 @@ NextNodeLog:
         ' W-FIX-ANOMALIES-EMPTY (блокер B): Address(False, False) заменён на
         ' Address (без аргументов) — вызов с аргументами в ряде конфигураций
         ' завершался ошибкой и ронял сборку через Fail главной процедуры.
+        Err.Clear
         hdrAddrDbg = loAnomDbg.HeaderRange.Address
         If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
+        Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): до Resize, HeaderRange = " & _
                           hdrAddrDbg & _
                           ", строк заголовка = " & loAnomDbg.HeaderRange.Rows.Count & _
                           ", столбцов = " & loAnomDbg.HeaderRange.Columns.Count
         If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
+        Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): до Resize, заголовки A1:H1 = """ & _
                           CStr(ws.Range("A1").Value) & "|" & CStr(ws.Range("B1").Value) & _
                           "|" & CStr(ws.Range("C1").Value) & "|" & CStr(ws.Range("D1").Value) & _
                           "|" & CStr(ws.Range("E1").Value) & "|" & CStr(ws.Range("F1").Value) & _
                           "|" & CStr(ws.Range("G1").Value) & "|" & CStr(ws.Range("H1").Value) & """"
         If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
     End If
@@ -1040,6 +1069,10 @@ NextNodeLog:
     If lastRowLog >= 2 Then
         On Error Resume Next
         ws.ListObjects("tblAnomalies").Resize ws.Range("A1:H" & lastRowLog)
+        If Err.Number <> 0 Then
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
+            Err.Clear
+        End If
         On Error GoTo 0
     Else
         Mod_Util.DebugLog "WriteLog(лист): нет данных для записи (после обработки последняя строка = " & _
@@ -1051,33 +1084,39 @@ NextNodeLog:
     ' "Столбец1...", означающие потерю структуры таблицы).
     ' W-FIX-ANOMALIES-EMPTY (блокер B): этот блок также находится внутри
     ' локальной обработки ошибок (On Error Resume Next), начатой выше.
+    ' W-REFACTOR-WRITELOG-VISIBILITY, ЧАСТЬ C: Err.Clear перед каждым
+    ' обращением к свойствам ListObject (см. комментарий выше).
     If Not loAnomDbg Is Nothing Then
+        Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): после Resize, ListObject строк = " & _
                           loAnomDbg.ListRows.Count
         If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
+        Err.Clear
         hdrAddrDbg = loAnomDbg.HeaderRange.Address
         If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
+        Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): после Resize, HeaderRange = " & _
                           hdrAddrDbg & _
                           ", строк заголовка = " & loAnomDbg.HeaderRange.Rows.Count & _
                           ", столбцов = " & loAnomDbg.HeaderRange.Columns.Count
         If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
+        Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): после Resize, заголовки A1:H1 = """ & _
                           CStr(ws.Range("A1").Value) & "|" & CStr(ws.Range("B1").Value) & _
                           "|" & CStr(ws.Range("C1").Value) & "|" & CStr(ws.Range("D1").Value) & _
                           "|" & CStr(ws.Range("E1").Value) & "|" & CStr(ws.Range("F1").Value) & _
                           "|" & CStr(ws.Range("G1").Value) & "|" & CStr(ws.Range("H1").Value) & """"
         If Err.Number <> 0 Then
-            Mod_Util.DebugLog "WriteLog(лист): ошибка отладочного логирования: " & Err.Description
+            Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
         End If
     End If
