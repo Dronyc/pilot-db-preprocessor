@@ -905,7 +905,7 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
     ' PrepareAnomaliesSheet до создания ListObject.
     If ws Is Nothing Then
         Mod_Util.DebugLog "WriteLog(лист): нет данных для записи (лист не передан)"
-        GoTo WriteLogErr   ' штатный выход через обработчик (перед End Sub)
+        Exit Sub
     End If
     If NodeCount <= 0 Then
         Mod_Util.DebugLog "WriteLog(лист): нет данных для записи (плоская структура пуста)"
@@ -1122,9 +1122,11 @@ NextNodeLog:
 WriteLogErr:
     ' W-REFACTOR-WRITELOG-FINAL, ЧАСТЬ B: штатная обработка ошибок WriteLog
     ' (не диагностическая) — фиксируем ошибку в журнале и продолжаем выполнение.
+    ' Resume NextNodeLog: возврат в цикл For i = 1 To NodeCount на метку перед
+    ' Next i — ошибочная итерация пропускается, запись остальных узлов продолжается.
     Mod_Util.DebugLog "WriteLog: ошибка " & Err.Number & ": " & Err.Description
     Err.Clear
-    Resume Next
+    Resume NextNodeLog
 End Sub
 
 '---------------- W-STRUCTURE-DUPLICATES-FIX, п.1: группировка дублей ---------
