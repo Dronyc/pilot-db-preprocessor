@@ -1883,7 +1883,9 @@ Private Function LoadSettingValue(ByVal settingsPath As String, ByVal phName As 
     Dim i As Long
     Dim s As String
     Dim eqPos As Long
-    Dim keyName As String    LoadSettingValue = ""
+    Dim keyName As String
+
+    LoadSettingValue = ""
     On Error GoTo ErrHandler
 
     text = ReadTextFile(settingsPath)
@@ -2620,3 +2622,4 @@ Private Sub EnsureKnownPh()
     SPLIT_KNOWN_PH = Split(TEMPLATE_PLACEHOLDERS, ";")
     SPLIT_KNOWN_PH_READY = True
 End Sub
+
