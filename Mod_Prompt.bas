@@ -2368,6 +2368,11 @@ Private Sub GenerateStepZeroPrompt()
     Dim missingList As String           ' перечень отсутствующих входных файлов
     Dim template As String
     Dim result As String
+    ' W-PROMPT-00-KNOWN-GUIDS: подстановка {KNOWN_GUIDS_TABLE} из общих
+    ' настроек проекта (ключ {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}} файла project_settings.md)
+    Dim settingsPath As String
+    Dim settingsValues As Object
+    Dim guidsTable As String
 
     On Error GoTo ErrHandler
 
@@ -2456,6 +2461,22 @@ Private Sub GenerateStepZeroPrompt()
     result = ReplaceIfPresent(result, "{SCHEMA_FILENAME}", schemaName)
     result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descName)
     result = ReplaceIfPresent(result, "{CONFIG_FILENAME}", configName)
+    ' W-PROMPT-00-KNOWN-GUIDS: подстановка {KNOWN_GUIDS_TABLE} (раздел шаблона
+    ' «Известные GUID элементов БД»). Значение берётся из общих настроек
+    ' проекта (project_settings.md, ключ {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}) через
+    ' LoadProjectSettings - ВАЖНО: НЕ использовать LoadSettingValue (баг:
+    ' возвращает только последнюю строку многострочного значения). При пустом
+    ' значении подставляется текст-страховка, чтобы плейсхолдер не остался
+    ' в промте.
+    settingsPath = FindProjectSettingsPath(root)
+    Set settingsValues = CreateObject("Scripting.Dictionary")
+    settingsValues.CompareMode = vbBinaryCompare
+    LoadProjectSettings settingsValues, settingsPath
+    guidsTable = ""
+    If settingsValues.Exists("{{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}") Then _
+        guidsTable = CStr(settingsValues("{{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}"))
+    If Trim$(guidsTable) = "" Then guidsTable = "Таблица известных GUID не задана"
+    result = ReplaceIfPresent(result, "{KNOWN_GUIDS_TABLE}", guidsTable)
     ' W-PROMPT-00-REFINE, п.2/п.5: список файлов доп. данных (папка
     ' 01_Исходные данные\04_Дополнительные данные) подставляется в блок
     ' "Проверка файлов" шаблона; если папка пуста - плейсхолдер заменяется
