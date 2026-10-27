@@ -2164,7 +2164,50 @@ Public Sub MakeNextStepPrompt()
     If steps Is Nothing Then Exit Sub
     If steps.Count = 0 Then Exit Sub
 
-    ' 2. Текущий и следующий шаги
+    ' 2. Явное ветвление (W-PROMPT-NO-DUP-STEP-00): если папок Шаг_* в
+    '    01_По шагам ещё нет, ReadCurrentStep вернёт "" и следующий шаг
+    '    определяется неявно - проверяем наличие папок явно и берём ПЕРВЫЙ
+    '    шаг из Шаги.txt (ожидаемо "00").
+    Dim hasStepFolders As Boolean
+    hasStepFolders = (Dir(stepsPath & "\Шаг_*", vbDirectory) <> "")
+
+    If Not hasStepFolders Then
+        ' Ветка А: папок шагов НЕТ - промт для первого шага из Шаги.txt
+        nextNN = StepNumFromEntry(steps(1))
+        nextName = StepNameFromEntry(steps(1))
+
+        result = BuildPromptForStep(root, nextNN, nextName, hasTypes)
+        If result = "" Then
+            Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
+                " (проверен путь: " & promptsPath & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME & ")"
+            MsgBox "Ошибка P002: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
+                   " в папке 04_Промты\Шаблоны.", _
+                   vbCritical, "Промт следующего шага"
+            Exit Sub
+        End If
+
+        ' Папка шага создаётся только по факту формирования промта (раздел 3)
+        stepFolder = stepsPath & "\" & nextName
+        EnsureFolder stepFolder
+
+        ' Сохранение в 04_Промты\Промт_шаг_NN.md + копия в 04_Промты_готовые
+        ' (обратная совместимость: MakeFixPrompt/пользовательские ссылки)
+        EnsureFolder promptsPath
+        promptFile = promptsPath & "\Промт_шаг_" & nextNN & ".md"
+        SaveTextFileUtf8 promptFile, result
+        EnsureFolder readyPath
+        SaveTextFileUtf8 readyPath & "\Промт_шаг_" & nextNN & ".md", result
+
+        Mod_Util.WriteLog "MakeNextStepPrompt: папки Шаг_* отсутствуют - сформирован промт " & _
+            "первого шага " & nextNN & " из Шаги.txt" & _
+            IIf(hasTypes, "", " (ВНИМАНИЕ: блок 6 пуст - подставлен маркер-страховка)")
+        MsgBox "Сформирован промт первого шага " & nextNN & " (" & nextName & "):" & vbCrLf & _
+               promptFile & vbCrLf & vbCrLf & _
+               "Создана папка шага: " & stepFolder, vbInformation, "Промт следующего шага"
+        Exit Sub
+    End If
+
+    ' Ветка Б: папки шагов ЕСТЬ - текущий и следующий шаги
     current = ReadCurrentStep()
     nextNN = ReadNextStep()
 
@@ -2305,17 +2348,12 @@ End Sub
 '    подставляет {SCHEMA_FILENAME}, {DESCRIPTION_FILENAME},
 '    {CONFIG_FILENAME} и {Decomposition_Rules} (правила декомпозиции v7.13).
 ' 4. Сохраняет результат в 04_Промты\Промт_шаг_00_Декомпозиция.md.
-' W-PROMPT-INVARIANTS-CODE-2, ЧАСТЬ B: дополнительно формируется промт
-' шага 00 по НОВОМУ шаблону prompt_step_template_v1.md ОБЩЕЙ цепочкой
-' BuildPromptForStep (ApplyCorrectionsBlock ? FillAllPlaceholders) и
-' сохраняется как Промт_шаг_00.md в 04_Промты. Специфика шага 00
-' обеспечивается внутри цепочки:
-'  - реестры пусты - BuildRegistryBlock подставляет "Реестры пусты - первый
-'    шаг (P002 штатно)" (не "[РЕЕСТР НЕ НАЙДЕН]");
-'  - блок 6 - BuildStepTypeList с фильтром по шагу 00 из структуры;
-'  - корректировки - сохраняются из предыдущей версии Промт_шаг_00.md;
-'  - плейсхолдеры - FillAllPlaceholders (константы проекта - из
-'    project_settings.md, не из кода).
+' W-PROMPT-INVARIANTS-CODE-2 (ЧАСТЬ B - УДАЛЕНО): ранее дополнительно
+' формировался промт шага 00 по НОВОМУ шаблону prompt_step_template_v1.md
+' общей цепочкой BuildPromptForStep и сохранялся как Промт_шаг_00.md - это
+' приводило к дублированию Шага 00. Теперь процедура создаёт СТРОГО ОДИН
+' файл: Промт_шаг_00_Декомпозиция.md. Промт шага 00 по новому шаблону
+' формируется только через MakeNextStepPrompt (первый шаг из Шаги.txt).
 Private Sub GenerateStepZeroPrompt()
     Dim root As String
     Dim promptsPath As String
@@ -2330,8 +2368,6 @@ Private Sub GenerateStepZeroPrompt()
     Dim missingList As String           ' перечень отсутствующих входных файлов
     Dim template As String
     Dim result As String
-    Dim step0File As String             ' 04_Промты\Промт_шаг_00.md (новый шаблон)
-    Dim hasTypes As Boolean             ' заполнен ли блок 6 для шага 00
 
     On Error GoTo ErrHandler
 
@@ -2350,7 +2386,6 @@ Private Sub GenerateStepZeroPrompt()
     configFolder = root & "\01_Исходные данные\03_Конфигурация"
     templatePath = promptsPath & "\Шаблоны\" & TEMPLATE_STEP0_NAME
     outFile = promptsPath & "\" & STEP0_PROMPT_FILE
-    step0File = promptsPath & "\Промт_шаг_00.md"
 
     Mod_Util.WriteLog "GenerateStepZeroPrompt: Шаги.txt не найден, формирую Промт №0 (декомпозиция)"
 
@@ -2415,8 +2450,8 @@ Private Sub GenerateStepZeroPrompt()
 
     ' 4. Подстановка плейсхолдеров реальными именами файлов и правилами v7.13
     '    (устаревший путь сборки сохранён сознательно: этот промт содержит
-    '    правила декомпозиции и не заменяется новым шаблоном шага; новый
-    '    промт шага 00 формируется в п.4b общей цепочкой).
+    '    правила декомпозиции и не заменяется новым шаблоном шага; промт
+    '    шага 00 по новому шаблону формируется в MakeNextStepPrompt).
     result = template
     result = ReplaceIfPresent(result, "{SCHEMA_FILENAME}", schemaName)
     result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descName)
@@ -2434,24 +2469,7 @@ Private Sub GenerateStepZeroPrompt()
 
     Mod_Util.WriteLog "GenerateStepZeroPrompt: сохранён " & outFile
 
-    ' 4b/6. W-PROMPT-INVARIANTS-CODE-2: промт шага 00 по НОВОМУ шаблону -
-    '     та же общая цепочка, что и для остальных шагов (без дублирования
-    '     логики): BuildPromptForStep -> ApplyCorrectionsBlock ->
-    '     FillAllPlaceholders. Ошибка сборки нового промта НЕ блокирует
-    '     основной промт декомпозиции (запись в журнал + предупреждение).
-    Dim step0Result As String
-    step0Result = BuildPromptForStep(root, "00", "", hasTypes)
-    If step0Result <> "" Then
-        SaveTextFileUtf8 step0File, step0Result
-        Mod_Util.WriteLog "GenerateStepZeroPrompt: сохранён промт шага 00 (новый шаблон) " & _
-            step0File & IIf(hasTypes, "", " (блок 6 пуст - маркер-страховка)")
-    Else
-        Mod_Util.WriteWarning "P004", "GenerateStepZeroPrompt: не собран промт шага 00 по " & _
-            "новому шаблону (" & TEMPLATE_STEP_V1_NAME & " не найден или ошибка сборки). " & _
-            "Промт декомпозиции сохранён без изменений."
-    End If
-
-    ' 7. Инструкция пользователю
+    ' 6. Инструкция пользователю
     MsgBox "Файл Шаги.txt не найден. Сформирован Промт №0:" & vbCrLf & _
            outFile & vbCrLf & vbCrLf & _
            "Загрузите его в ИИ, получите Шаги.txt и сохраните в 04_Промты.", _
