@@ -5,12 +5,12 @@ Option Explicit
 ' Модуль промптов: формирование промптов для следующего шага и исправлений,
 ' чтение списка и текущей позиции шагов.
 ' Реализация W4 (разделы 2, 3, 8, 9, 13 спецификации Spec_Dispatcher.md).
-' Коды ошибок: P001 — нет Шаги.txt, P002 — ошибка формирования промта шага,
-' P003 — ошибка формирования промта исправления,
-' P004 — формирование Промта №0 (декомпозиция) при отсутствии Шаги.txt
+' Коды ошибок: P001 - нет Шаги.txt, P002 - ошибка формирования промта шага,
+' P003 - ошибка формирования промта исправления,
+' P004 - формирование Промта №0 (декомпозиция) при отсутствии Шаги.txt
 '      (W-PROMPT-GEN-STEP-00),
-' P005 — ошибка сохранения текстового файла в UTF-8 (W-UTF8-EXPORT),
-' P006 — предупреждение: ошибка/пустой результат чтения текстового файла
+' P005 - ошибка сохранения текстового файла в UTF-8 (W-UTF8-EXPORT),
+' P006 - предупреждение: ошибка/пустой результат чтения текстового файла
 '      с автоопределением кодировки (W-UTF8-READ).
 ' ============================================================================
 
@@ -27,6 +27,55 @@ Private Const STEP0_PROMPT_FILE As String = "Промт_шаг_00_Декомпо
 ' Плейсхолдер вместо ненайденного входного файла.
 Private Const STEP0_NOT_FOUND As String = "НЕ НАЙДЕН"
 
+' ---------------------------------------------------------------------------
+' КОНСТАНТЫ W-PROMPT-INVARIANTS-CODE (подстановка нового шаблона шага NN)
+' ---------------------------------------------------------------------------
+
+' Перечень плейсхолдеров нового шаблона prompt_step_template_v1.md
+' (раздел 4 "Легенда плейсхолдеров" отчёта аналитика; сверено с файлом).
+' Разделитель - ";". Плейсхолдеры, отсутствующие в конкретном шаблоне,
+' молча пропускаются при подстановке (FillPh проверяет наличие).
+Private Const TEMPLATE_PLACEHOLDERS As String = _
+    "{{NN}};{{ИМЯ_ШАГА}};{{ЗАДАЧА_ШАГА_ОСОБЕННОСТИ}};{{СТРУКТУРА_ФАЙЛ}};" & _
+    "{{ОПИСАНИЕ_ФАЙЛ}};{{КОНФИГУРАЦИЯ_ФАЙЛ}};{{ФАЙЛЫ_ДОП_ДАННЫХ}};{{ШАГИ_ФАЙЛ}};" & _
+    "{{СПИСОК_ВХОДОВ}};{{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}};{{РЕЕСТР_ТИПОВ}};{{РЕЕСТР_ПОКРЫТИЯ}};" & _
+    "{{СПИСОК_БАЗОВЫХ_ТИПОВ}};{{ПРАВИЛО_ОБЪЕКТА}};{{СПИСОК_ТИПОВ_ШАГА}};{{ТЕКУЩИЙ_ШАГ}};" & _
+    "{{ДЕКОМПОЗИЦИЯ_ШАГОВ}};{{ФОРМАТ_РЕЕСТРОВ}};{{ПРОТОКОЛ_ШАГА}};{{МАРКЕРЫ}}"
+
+' Массив известных плейсхолдеров для проверки "неизвестный {{...}} в шаблоне"
+' (инициализируется один раз из TEMPLATE_PLACEHOLDERS, см. EnsureKnownPh).
+Private SPLIT_KNOWN_PH() As Variant
+Private SPLIT_KNOWN_PH_READY As Boolean
+
+
+' Имя файла общих настроек проекта (константы промта: списки, правила,
+' форматы). Хранится рядом с книгой .xlsm или во внешней папке "Шаблоны";
+' формат строк: {{ИМЯ_ПЛЕЙСХОЛДЕРА}} = <значение>. Значения НЕ хардкодятся
+' в коде - только из этого файла (требование задания).
+Private Const PROJECT_SETTINGS_FILE As String = "project_settings.md"
+
+' Маркер-страховка задачи (ЧАСТЬ D п.7): подставляется в блок 2 вместо
+' постоянного текста задачи, если блок 6 пуст (типов шага нет).
+Private Const TASK_NOT_SET_MARKER As String = "ЗАДАЧА НЕ ЗАДАНА - генерация запрещена"
+
+' Заготовка блока 16 в новом шаблоне (плейсхолдер {{NN}} сохраняется до
+' общего прогона подстановки - сравнение идёт по этому тексту).
+Private Const CORRECTION_STUB_TEXT As String = "Корректировок для шага {{NN}} нет."
+
+' Тексты блоков 4.1/4.2 (ЧАСТЬ B п.3).
+Private Const REG_EMPTY_FIRST_STEP As String = "Реестры пусты - первый шаг (P002 штатно)"
+Private Const REG_NOT_FOUND As String = "[РЕЕСТР НЕ НАЙДЕН]"
+
+' Обязательные поля строки корректировки (ЧАСТЬ D п.6) и канон колонок
+' адаптированной структуры для фильтрации блока 6 (ЧАСТЬ B п.4).
+Private Const FIELD_STEP As String = "ШАГ:"
+Private Const FIELD_TYPE As String = "ТИП:"
+Private Const FIELD_COND As String = "УСЛОВИЕ:"
+Private Const FIELD_CLAR As String = "УТОЧНЕНИЕ:"
+Private Const COL_STEP As String = "Шаг"
+Private Const COL_SYS_NAME As String = "Тип"
+Private Const COL_VIS_NAME As String = "Отображаемое имя"
+
 ' W-PROMPT-00-SCHEMA-FIX: имя артефакта подготовки схемы (лист книги и
 ' префикс сохраняемого файла в папке 02_Подготовка схемы).
 Private Const SCHEMA_SHEET_NAME As String = "Адаптированная_структура"
@@ -36,9 +85,9 @@ Private Const SCHEMA_ARTIFACT_MASK As String = "Адаптированная_с�
 Private Const SCHEMA_ARCHIVE_SUBFOLDER As String = "Архив"
 
 ' Алгоритм декомпозиции (W-CORRECTION-PACK-1, п.4.1): заменяет старые
-' «Правила декомпозиции» v7.13 (пункты 10.1/10.4 и фиксированная сетка из
+' "Правила декомпозиции" v7.13 (пункты 10.1/10.4 и фиксированная сетка из
 ' 19 шагов удалены из шаблона Промта №0). Сетка шагов больше НЕ задаётся
-' заранее — ИИ строит её сам по алгоритму «анализ → прогноз → шаги».
+' заранее - ИИ строит её сам по алгоритму "анализ ? прогноз ? шаги".
 ' Строковая константа для подстановки в {Decomposition_Rules} шаблона
 ' prompt_step_00_template.md.
 Private Const DECOMPOSITION_RULES_V713 As String = _
@@ -91,19 +140,19 @@ End Sub
 ' Читает текстовый файл целиком в строку с автоопределением кодировки.
 ' Встроенный Open ... For Input читает в ANSI (Windows-1251), из-за чего
 ' файлы шаблонов / Шаги.txt / Реестры, сохранённые в UTF-8, превращаются
-' в «кракозябры». Поэтому сначала используется ADODB.Stream с
+' в "кракозябры". Поэтому сначала используется ADODB.Stream с
 ' Charset = "utf-8"; если чтение через UTF-8 не удалось или дало пустой
-' результат — fallback на Charset = "windows-1251" (ANSI), затем — на
-' стандартное Open ... For Input. При любой ошибке чтения — запись [WARN]
+' результат - fallback на Charset = "windows-1251" (ANSI), затем - на
+' стандартное Open ... For Input. При любой ошибке чтения - запись [WARN]
 ' в лог (код P006) и возврат пустой строки (без прерывания вызывающего).
-' Если файла нет — возвращает пустую строку (вызывающий сам решает,
+' Если файла нет - возвращает пустую строку (вызывающий сам решает,
 ' считать ли это ошибкой).
 Private Function SafeReadText(ByVal filePath As String) As String
     Dim res As String
 
     SafeReadText = ""
 
-    ' W-PROMPT-PATHS-REFACTOR: vbNormal — строгая проверка существования
+    ' W-PROMPT-PATHS-REFACTOR: vbNormal - строгая проверка существования
     ' именно файла (а не папки с таким же именем).
     If Len(Dir(filePath, vbNormal)) = 0 Then Exit Function
 
@@ -121,7 +170,7 @@ Private Function SafeReadText(ByVal filePath As String) As String
     stream.Close
     Set stream = Nothing
     If Err.Number <> 0 Then
-        ' поток мог остаться открытым — закрыть его, игнорируя ошибки
+        ' поток мог остаться открытым - закрыть его, игнорируя ошибки
         If Not stream Is Nothing Then
             Err.Clear
             stream.Close
@@ -132,7 +181,7 @@ Private Function SafeReadText(ByVal filePath As String) As String
     Err.Clear
 
     ' W-PROMPT-00-REFINE, п.4: ADODB.Stream при чтении UTF-8 возвращает
-    ' символом U+FEFF (BOM) в начале строки — удаляем, чтобы BOM не
+    ' символом U+FEFF (BOM) в начале строки - удаляем, чтобы BOM не
     ' переносился в генерируемые промты.
     If Left$(res, 1) = ChrW(&HFEFF) Then res = Mid$(res, 2)
 
@@ -182,7 +231,7 @@ Private Function SafeReadText(ByVal filePath As String) As String
     On Error GoTo 0
 
     ' Файл существует, но ни один из способов чтения не вернул текст либо
-    ' произошла ошибка — фиксируем предупреждение в журнале ([WARN] P006)
+    ' произошла ошибка - фиксируем предупреждение в журнале ([WARN] P006)
     ' и возвращаем пустую строку.
     If res = "" Then
         Mod_Util.WriteWarning "P006", "SafeReadText: файл пуст или не может " & _
@@ -214,35 +263,23 @@ Private Function ListFolderFiles(ByVal folderPath As String) As String
     ListFolderFiles = res
 End Function
 
-' Формирует блок "ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА" для подстановки в начало
-' промта (W-CORRECTION-PACK-1, п.4.3): если папка
-' "01_Исходные данные\04_Дополнительные данные" не пуста - перечисляет её
-' файлы; иначе возвращает "" (блок не добавляется).
-Private Function BuildExtraDataBlock(ByVal root As String) As String
-    Dim filesList As String
-
-    BuildExtraDataBlock = ""
-    filesList = ListFolderFiles(root & "\01_Исходные данные\04_Дополнительные данные")
-    If filesList = "" Then Exit Function
-
-    BuildExtraDataBlock = "### ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА" & vbCrLf & _
-        "В папке 04_Дополнительные данные найдены файлы:" & vbCrLf & _
-        filesList & vbCrLf & _
-        "Учитывай их при генерации, если они относятся к текущему шагу." & _
-        vbCrLf & vbCrLf & vbCrLf
-End Function
+' УСТАРЕЛО (W-PROMPT-INVARIANTS-CODE-2): функция BuildExtraDataBlock удалена -
+' старая сборка блока "ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА" для промта шага заменена на
+' BuildExtraDataListBlock (блок 3.4, вызывается из FillAllPlaceholders внутри
+' BuildPromptForStep). Для Промта №0 (декомпозиция) сохранён
+' BuildStepZeroExtraDataList.
 
 ' Формирует содержимое плейсхолдера {EXTRA_DATA_LIST} для Промта №0
 ' (W-PROMPT-00-REFINE, п.2/п.5; W-PROMPT-00-FORMAT-FIX, п.5): список
 ' имён и типов файлов из папки "01_Исходные данные\04_Дополнительные
-' данные" — он подставляется в раздел "Проверка файлов" шаблона
+' данные" - он подставляется в раздел "Проверка файлов" шаблона
 ' prompt_step_00_template.md на отдельной строке плейсхолдера.
 ' Заголовок "Найденные файлы доп. данных:" формируется ЗДЕСЬ (в шаблоне
 ' статичная строка с заголовком удалена), поэтому:
-' - если файлов нет (папка пуста или отсутствует) — возвращается пустая
+' - если файлов нет (папка пуста или отсутствует) - возвращается пустая
 '   строка "" без заголовка (в итоговом markdown не остаётся висящих
 '   заголовков и лишних пустых строк);
-' - если файлы есть — возвращается заголовок и имена файлов с отступом.
+' - если файлы есть - возвращается заголовок и имена файлов с отступом.
 Private Function BuildStepZeroExtraDataList(ByVal root As String) As String
     Dim filesList As String
 
@@ -255,7 +292,7 @@ Private Function BuildStepZeroExtraDataList(ByVal root As String) As String
 End Function
 
 ' Приводит текст к единым разделителям строк vbCrLf (W-UTF8-READ):
-' ADODB.Stream сохраняет исходные переводы строки файла — CRLF, LF или CR.
+' ADODB.Stream сохраняет исходные переводы строки файла - CRLF, LF или CR.
 Private Function NormalizeLineEndings(ByVal text As String) As String
     Dim res As String
     res = Replace(text, vbCrLf, vbLf)     ' CRLF -> LF
@@ -265,31 +302,68 @@ End Function
 
 ' Читает текстовый файл целиком в строку (W-UTF8-READ: делегирует
 ' SafeReadText с автоопределением UTF-8 / Windows-1251).
-' Если файла нет или чтение не удалось — возвращает пустую строку
+' Если файла нет или чтение не удалось - возвращает пустую строку
 ' (вызывающий сам решает, считать ли это ошибкой).
-' W-DOCS-README-UPDATE: Public — функция используется Mod_Docs.UpdateReadme
+' W-DOCS-README-UPDATE: Public - функция используется Mod_Docs.UpdateReadme
 ' для чтения шаблонов промтов при включении их текстов в Readme.
 Public Function ReadTextFile(ByVal filePath As String) As String
     ReadTextFile = SafeReadText(filePath)
 End Function
 
+' W-PROMPT-INVARIANTS-CODE: существование именно ФАЙЛА (не папки);
+' Dir(..., vbNormal) даёт ложный False для имён с кириллицей/пробелами,
+' поэтому проверка выполняется через GetAttr (ошибка 76 - файла нет).
+Private Function FileExistsSafe(ByVal filePath As String) As Boolean
+    Dim attrs As Long
+
+    FileExistsSafe = False
+    If Len(filePath) = 0 Then Exit Function
+    On Error Resume Next
+    Err.Clear
+    attrs = GetAttr(filePath)
+    If Err.Number = 0 Then
+        ' обычный файл: без атрибута vbDirectory и без vbVolume
+        If (attrs And vbDirectory) = 0 And (attrs And vbVolume) = 0 Then _
+            FileExistsSafe = True
+    End If
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+' W-PROMPT-INVARIANTS-CODE: существование папки (без ошибок Dir по
+' кириллическим путям).
+Private Function FolderExistsSafe(ByVal folderPath As String) As Boolean
+    Dim attrs As Long
+
+    FolderExistsSafe = False
+    If Len(folderPath) = 0 Then Exit Function
+    On Error Resume Next
+    Err.Clear
+    attrs = GetAttr(folderPath)
+    If Err.Number = 0 Then
+        If (attrs And vbDirectory) = vbDirectory Then FolderExistsSafe = True
+    End If
+    Err.Clear
+    On Error GoTo 0
+End Function
+
 ' Сохраняет строку в текстовый файл в кодировке UTF-8 БЕЗ BOM
 ' (W-UTF8-EXPORT, W-PROMPT-00-REFINE п.5). Перезаписывает существующий
 ' файл. Встроенный оператор Print # пишет в ANSI (Windows-1251), из-за
-' чего кириллица в промтах отображается как «кракозябры» в UTF-8
+' чего кириллица в промтах отображается как "кракозябры" в UTF-8
 ' редакторах и на GitHub. Поэтому используется ADODB.Stream с
 ' Charset = "utf-8". Стандартный WriteText через Charset="utf-8" может
 ' добавить заголовок EF BB BF (BOM); чтобы этого избежать, содержимое
 ' перед записью очищается от ведущего U+FEFF, а после сохранения файл
 ' перечитывается в байтовый поток и, при наличии BOM, перезаписывается
-' без первых трёх байт. При ошибке записи — запись в лог (код P005)
+' без первых трёх байт. При ошибке записи - запись в лог (код P005)
 ' и возврат без прерывания вызывающей процедуры.
 Private Sub SaveTextFileUtf8(ByVal filePath As String, ByVal content As String)
     On Error GoTo ErrHandler
 
     Dim stream As Object
 
-    ' Страховка: если содержимое начинается с BOM (U+FEFF) — убрать его,
+    ' Страховка: если содержимое начинается с BOM (U+FEFF) - убрать его,
     ' иначе ADODB.Stream сохранит удвоенный заголовок.
     If Left$(content, 1) = ChrW(&HFEFF) Then content = Mid$(content, 2)
 
@@ -338,7 +412,7 @@ Private Sub StripUtf8Bom(ByVal filePath As String)
         bin.Position = 0
         bytes = bin.Read(3)
         If bytes(0) = &HEF And bytes(1) = &HBB And bytes(2) = &HBF Then
-            ' Первые три байта — BOM: перечитываем тело без него.
+            ' Первые три байта - BOM: перечитываем тело без него.
             Dim body As Variant
             body = bin.Read(bin.Size - 3)
             bin.Close
@@ -408,7 +482,7 @@ Private Function StepNumToLong(ByVal nn As String) As Long
 End Function
 
 ' Возвращает имя последнего изменённого файла по указанной маске
-' в заданной папке. Если файлов нет — возвращает "".
+' в заданной папке. Если файлов нет - возвращает "".
 Private Function LastModifiedFile(ByVal folderPath As String, ByVal mask As String) As String
     Dim fName As String
     Dim best As String
@@ -430,7 +504,7 @@ Private Function LastModifiedFile(ByVal folderPath As String, ByVal mask As Stri
     LastModifiedFile = best
 End Function
 
-' Читает лист «Ошибки» книги сводной таблицы в текст
+' Читает лист "Ошибки" книги сводной таблицы в текст
 ' (строки через vbCrLf, колонки через " | ").
 ' Возвращает False, если лист не найден.
 Private Function ReadErrorsSheetText(ByVal wb As Workbook, ByRef outText As String) As Boolean
@@ -451,16 +525,16 @@ Private Function ReadErrorsSheetText(ByVal wb As Workbook, ByRef outText As Stri
         Exit Function
     End If
 
-    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).row
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
     If lastCol < 1 Then lastCol = 1
 
-    ' строка 1 — заголовки («Код», «Источник», «Сообщение»), строки 2+ — ошибки
+    ' строка 1 - заголовки ("Код", "Источник", "Сообщение"), строки 2+ - ошибки
     For r = 2 To lastRow
         lineText = ""
         For c = 1 To lastCol
             If c > 1 Then lineText = lineText & " | "
-            lineText = lineText & Trim(CStr(ws.Cells(r, c).Value))
+            lineText = lineText & Trim(CStr(ws.Cells(r, c).value))
         Next c
         If Trim(lineText) <> "" Then res = res & lineText & vbCrLf
     Next r
@@ -473,7 +547,7 @@ Private Function ReadErrorsSheetText(ByVal wb As Workbook, ByRef outText As Stri
 End Function
 
 ' Возвращает имя первого найденного файла по маске в папке (для Промта №0).
-' Если файлов нет — возвращает "". Временные файлы Office (~$) пропускаются.
+' Если файлов нет - возвращает "". Временные файлы Office (~$) пропускаются.
 Private Function FirstMatchFile(ByVal folderPath As String, ByVal mask As String) As String
     Dim fName As String
 
@@ -493,10 +567,10 @@ End Function
 ' W-PROMPT-00-SCHEMA-FIX: возвращает имя самого свежего файла артефакта
 ' "Адаптированная структура" (маска Адаптированная_структура_*.xlsx) в папке
 ' 02_Подготовка схемы. Файл выбирается по максимальной дате, встроенной в
-' имя (формат yyyy-mm-dd_hhnnss); если даты из имён извлечь не удалось —
+' имя (формат yyyy-mm-dd_hhnnss); если даты из имён извлечь не удалось -
 ' берётся файл с последней датой изменения на диске. Если подходящих
-' файлов несколько — возвращается последний (самый свежий), если ни одного
-' — пустая строка. Временные файлы Office (~$...) пропускаются.
+' файлов несколько - возвращается последний (самый свежий), если ни одного
+' - пустая строка. Временные файлы Office (~$...) пропускаются.
 Private Function GetNewestSchemaArtifactName(ByVal prepPath As String) As String
     Dim fName As String
     Dim best As String
@@ -524,7 +598,7 @@ Private Function GetNewestSchemaArtifactName(ByVal prepPath As String) As String
                 bestStamp = curStamp
                 bestDate = curDate
             Else
-                ' приоритет — дата в имени файла; при её отсутствии/равенстве —
+                ' приоритет - дата в имени файла; при её отсутствии/равенстве -
                 ' дата изменения на диске
                 If curStamp > bestStamp Or _
                    (curStamp = bestStamp And curDate > bestDate) Then
@@ -542,7 +616,7 @@ End Function
 ' W-PROMPT-00-SCHEMA-FIX: извлекает из имени файла подстроку вида
 ' yyyy-mm-dd_hhnnss (16 символов). Сравнивать такие подстроки как строки
 ' корректно, поскольку формат лексикографически упорядочен. Если шаблон в
-' имени не найден — возвращается "".
+' имени не найден - возвращается "".
 Private Function ExtractDateStampFromName(ByVal fileName As String) As String
     Dim i As Long
     Dim ok As Boolean
@@ -576,11 +650,11 @@ Private Function ExtractDateStampFromName(ByVal fileName As String) As String
     Next i
 End Function
 
-' Собирает фрагмент схемы из листа «Адаптированная_структура» книги, сохранённой
+' Собирает фрагмент схемы из листа "Адаптированная_структура" книги, сохранённой
 ' в папке 02_Подготовка схемы (W-PROMPT-00-SCHEMA-FIX: берётся самый свежий
 ' файл "Адаптированная_структура_*.xlsx"; поддержка старого имени
 ' "Плоская_таблица*" сохранена для книг, созданных до переименования).
-' Если файла/листа нет — возвращает "" и пишет предупреждение в лог.
+' Если файла/листа нет - возвращает "" и пишет предупреждение в лог.
 Private Function GetSchemaFragment() As String
     Dim root As String
     Dim prepPath As String
@@ -611,7 +685,7 @@ Private Function GetSchemaFragment() As String
     End If
 
     ' W-PROMPT-00-SCHEMA-FIX: ищем самый свежий файл артефакта
-    ' "Адаптированная_структура_*.xlsx"; если таких нет — старый
+    ' "Адаптированная_структура_*.xlsx"; если таких нет - старый
     ' "Плоская_таблица*" (обратная совместимость с книгами до переименования),
     ' затем любой xlsx/xlsm в папке.
     candidates(1) = SCHEMA_ARTIFACT_MASK
@@ -636,7 +710,7 @@ Private Function GetSchemaFragment() As String
     End If
 
     On Error Resume Next
-    ' W-AV-REFACTOR, п.1: AddToMru:=False — файлы шагов не попадают в список
+    ' W-AV-REFACTOR, п.1: AddToMru:=False - файлы шагов не попадают в список
     ' последних файлов Excel (массовое добавление в MRU воспринимается AV как
     ' подозрительное сканирование).
     Set wb = Workbooks.Open(prepPath & "\" & newest, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
@@ -663,7 +737,7 @@ Private Function GetSchemaFragment() As String
         Exit Function
     End If
 
-    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).row
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
     If lastCol < 1 Then lastCol = 1
 
@@ -671,7 +745,7 @@ Private Function GetSchemaFragment() As String
         lineText = ""
         For c = 1 To lastCol
             If c > 1 Then lineText = lineText & " | "
-            lineText = lineText & Trim(CStr(ws.Cells(r, c).Value))
+            lineText = lineText & Trim(CStr(ws.Cells(r, c).value))
         Next c
         If Trim(lineText) <> "" Then res = res & lineText & vbCrLf
     Next r
@@ -685,16 +759,1169 @@ Private Function GetSchemaFragment() As String
 End Function
 
 ' ---------------------------------------------------------------------------
+' W-PROMPT-INVARIANTS-CODE: СБОРКА ПРОМТА ШАГА ПОД НОВЫЙ ШАБЛОН
+' (prompt_step_template_v1.md, 17 блоков; инвариантное ядро 7-11 - жёсткий
+' текст шаблона, код его не генерирует)
+' ---------------------------------------------------------------------------
+
+' Заменяет плейсхолдер {{...}} в тексте на значение и возвращает True, если
+' замена выполнена. Если плейсхолдера нет в тексте - ничего не делает
+' (возвращает False). Если значение пустое - подставляет явный текст
+' "[НЕ ЗАПОЛНЕНО: <имя>]" и пишет WriteWarning с кодом и именем плейсхолдера
+' (требование ЧАСТИ A: незаполненный плейсхолдер не оставляется в промте
+' молча). Реализация через Split/Join - надёжнее встроенной Replace для
+' длинных текстов (защита от ошибки 6 "Permitted exception" при больших
+' строках).
+Private Function FillPh(ByVal text As String, ByVal phName As String, _
+                        ByVal value As String, ByRef outText As String) As Boolean
+    Dim parts() As String
+
+    FillPh = False
+    outText = text
+    If InStr(text, phName) = 0 Then Exit Function
+
+    If Trim$(value) = "" Then
+        value = "[НЕ ЗАПОЛНЕНО: " & phName & "]"
+        Mod_Util.WriteWarning "P002", "FillPh: плейсхолдер " & phName & _
+            " не удалось заполнить - подставлен явный маркер ""[НЕ ЗАПОЛНЕНО]""."
+    End If
+
+    parts = Split(text, phName)
+    outText = Join(parts, value)
+    FillPh = True
+End Function
+
+' Подставляет ВСЕ плейсхолдеры нового шаблона промта шага NN
+' (W-PROMPT-INVARIANTS-CODE, ЧАСТЬ A). Список соответствует реальному
+' содержимому prompt_step_template_v1.md; плейсхолдеры, отсутствующие в
+' шаблоне, молча пропускаются (FillPh проверяет InStr). Значения собираются
+' в словарь по имени плейсхолдера; отсутствующее в словаре значение
+' трактуется как незаполненное ("[НЕ ЗАПОЛНЕНО: ...]").
+' ВАЖНО (W-PROMPT-INVARIANTS-CODE-2): вызывается ПОСЛЕ ApplyCorrectionsBlock
+' - цепочка сборки: загрузка шаблона ? блоки 3.4/4.1/4.2/6 ? сохранение
+' секции 16 (ApplyCorrectionsBlock, работает с {{NN}} как есть) ?
+' FillAllPlaceholders (подстановку {{КОРРЕКТИРОВКИ_ШАГА_NN}} не выполняет:
+' такого плейсхолдера в новом шаблоне нет).
+' Возвращает True, если блок 6 ({СПИСОК_ТИПОВ_ШАГА}) заполнен хотя бы одним
+' типом шага (для маркер-страховки задачи, ЧАСТЬ D п.7).
+Private Function FillAllPlaceholders(ByVal templateText As String, _
+                                     ByVal nn As String, _
+                                     ByVal stepName As String, _
+                                     ByVal registriesPath As String, _
+                                     ByVal root As String, _
+                                     ByVal valuesPath As String, _
+                                     ByRef outResult As String, _
+                                     ByRef hasStepTypes As Boolean) As Boolean
+    Dim values As Object          ' Scripting.Dictionary: имя плейсхолдера -> текст
+    Dim pairs() As String
+    Dim i As Long
+    Dim phName As String
+    Dim filledCount As Long
+    Dim totalNames As Long
+    Dim tmp As String
+    Dim ok As Boolean
+    Dim dummy As Boolean
+
+    On Error GoTo ErrHandler
+
+    Set values = CreateObject("Scripting.Dictionary")
+    values.CompareMode = vbBinaryCompare
+
+    ' --- Variants: значения, зависящие от текущего шага --------------------
+    values("{{NN}}") = nn
+    values("{{ИМЯ_ШАГА}}") = stepName
+    ' Блок 3.1: артефакт адаптированной структуры (имя файла + назначение);
+    ' сам лист читается отдельно в блоке 6 (BuildStepTypeList).
+    values("{{СТРУКТУРА_ФАЙЛ}}") = BuildInputFileLine(root, "02_Подготовка схемы", _
+        SCHEMA_ARTIFACT_MASK, "Адаптированная структура (источник иерархии, полей ""Тип"" и аномалий)")
+    values("{{ОПИСАНИЕ_ФАЙЛ}}") = BuildInputFileLine(root, "01_Исходные данные\02_Описание", "*.docx", "Описание структуры ЖЦ ОКС (источник атрибутов и бизнес-логики)")
+    values("{{КОНФИГУРАЦИЯ_ФАЙЛ}}") = BuildConfigFileLine(root)
+    values("{{ФАЙЛЫ_ДОП_ДАННЫХ}}") = BuildExtraDataListBlock(root, nn)   ' блок 3.4
+    values("{{ШАГИ_ФАЙЛ}}") = BuildStepsFileLine(root)
+    values("{{РЕЕСТР_ТИПОВ}}") = BuildRegistryBlock(registriesPath, "Реестр_типов.txt", nn)     ' блок 4.1
+    values("{{РЕЕСТР_ПОКРЫТИЯ}}") = BuildRegistryBlock(registriesPath, "Реестр_покрытия.txt", nn) ' блок 4.2
+    values("{{СПИСОК_ТИПОВ_ШАГА}}") = BuildStepTypeList(root, nn)       ' блок 6
+    hasStepTypes = (Trim$(CStr(values("{{СПИСОК_ТИПОВ_ШАГА}}"))) <> "")
+
+    ' --- Константы проекта: из общих настроек (файл project_settings.md),
+    '     НЕ хардкодятся в коде (требование ЧАСТИ A / "НЕ хардкодить") -----
+    LoadProjectSettings values, valuesPath
+
+    ' Текст задачи шага: из настроек; если не задан и типов шага нет -
+    ' маркер-страховка (ЧАСТЬ D п.7): триггер в блоке 12 уже есть в шаблоне,
+    ' здесь меняем только текст задачи в блоке 2.
+    If values.Exists("{{ЗАДАЧА_ШАГА_ОСОБЕННОСТИ}}") Then
+        If Trim$(CStr(values("{{ЗАДАЧА_ШАГА_ОСОБЕННОСТИ}}"))) = "" Then _
+            values.RemoveKey "{{ЗАДАЧА_ШАГА_ОСОБЕННОСТИ}}"
+    End If
+    If Not hasStepTypes Then
+        values("{{ЗАДАЧА_ШАГА_ОСОБЕННОСТИ}}") = TASK_NOT_SET_MARKER
+    End If
+
+    ' --- Перечень плейсхолдеров нового шаблона -----------------------------
+    pairs = Split(TEMPLATE_PLACEHOLDERS, ";")
+    totalNames = UBound(pairs) - LBound(pairs) + 1
+
+    outResult = templateText
+    filledCount = 0
+    For i = LBound(pairs) To UBound(pairs)
+        phName = Trim$(pairs(i))
+        If phName <> "" Then
+            tmp = ""
+            If values.Exists(phName) Then tmp = CStr(values(phName))
+            ok = FillPh(outResult, phName, tmp, outResult)
+            If ok Then filledCount = filledCount + 1
+        End If
+    Next i
+
+    ' Проверка "Сверься с шаблоном": если в шаблоне остался необработанный
+    ' плейсхолдер {{...}} (одинарные { } - служебные метки комментариев) -
+    ' предупреждение в лог, генерацию не блокируем.
+    dummy = HasUnknownPlaceholder(outResult)
+
+    ' Если в шаблоне вообще не найдено ни одногоKnown-плейсхолдера -
+    ' вероятна подстановка старого шаблона: предупреждаем.
+    If filledCount = 0 Then
+        Mod_Util.WriteWarning "P002", "FillAllPlaceholders: в шаблоне не найдено " & _
+            "ни одного плейсхолдера нового формата ({" & totalNames & " имён}). " & _
+            "Проверьте, что в 04_Промты\Шаблоны лежит актуальный " & TEMPLATE_STEP_V1_NAME & "."
+    End If
+
+    FillAllPlaceholders = hasStepTypes
+    Exit Function
+
+ErrHandler:
+    Mod_Util.WriteError "P002", "FillAllPlaceholders: ошибка подстановки плейсхолдеров. " & _
+        "Ошибка: " & Err.Description
+    Err.Clear
+    If outResult = "" Then outResult = templateText
+    FillAllPlaceholders = hasStepTypes
+End Function
+
+' Пишет WriteWarning, если в собранном тексте остались плейсхолдеры {{...}},
+' не входящие в известный перечень (новый плейсхолдер в шаблоне - обработать
+' его в коде; пока - явный сигнал в журнале).
+Private Function HasUnknownPlaceholder(ByVal text As String) As Boolean
+    Dim pos As Long
+    Dim rest As String
+    Dim name As String
+    Dim endPos As Long
+    Dim known As Boolean
+    Dim i As Long
+
+    EnsureKnownPh
+    HasUnknownPlaceholder = False
+    rest = text
+    Do
+        pos = InStr(rest, "{{")
+        If pos = 0 Then Exit Do
+        endPos = InStr(pos + 2, rest, "}}")
+        If endPos = 0 Then Exit Do
+        name = Mid$(rest, pos, endPos - pos + 2)
+        known = False
+        For i = 0 To UBound(SPLIT_KNOWN_PH)
+            If SPLIT_KNOWN_PH(i) = name Then
+                known = True
+                Exit For
+            End If
+        Next i
+        If Not known Then
+            Mod_Util.WriteWarning "P002", "HasUnknownPlaceholder: в шаблоне найден " & _
+                "неизвестный плейсхолдер " & name & " - подстановка не выполнена, " & _
+                "требуется доработка кода (Сверка с шаблоном, ЧАСТЬ A)."
+            HasUnknownPlaceholder = True
+        End If
+        rest = Mid$(rest, endPos + 2)
+    Loop
+End Function
+
+' Читает файл общих настроек проекта (project_settings.md) и кладёт значения
+' плейсхолдеров в словарь values. Формат файла: строки вида
+'   {{ИМЯ_ПЛЕЙСХОЛДЕРА}} = <значение в одну строку>
+' Многострочное значение можно задать несколько раз - строки склеиваются
+' через vbCrLf. Строки-комментарии (начинаются с '#') и пустые пропускаются.
+' Если файл не найден - WriteWarning (константы проекта должны собираться из
+' общих настроек, а не хардкодиться); незаполненные плейсхолдеры позже
+' получат "[НЕ ЗАПОЛНЕНО: ...]".
+Private Sub LoadProjectSettings(ByVal values As Object, ByVal settingsPath As String)
+    Dim text As String
+    Dim lines() As String
+    Dim i As Long
+    Dim s As String
+    Dim eqPos As Long
+    Dim keyName As String
+    Dim valText As String
+
+    On Error GoTo ErrHandler
+
+    text = ReadTextFile(settingsPath)
+    If text = "" Then
+        If Not FileExistsSafe(settingsPath) Then
+            Mod_Util.WriteWarning "P002", "LoadProjectSettings: файл общих настроек " & _
+                "проекта не найден (" & settingsPath & "). Константы проекта " & _
+                "({{СПИСОК_ВХОДОВ}}, {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}, {{СПИСОК_БАЗОВЫХ_ТИПОВ}}, " & _
+                "{{ПРАВИЛО_ОБЪЕКТА}}, {{ДЕКОМПОЗИЦИЯ_ШАГОВ}}, {{ФОРМАТ_РЕЕСТРОВ}}, " & _
+                "{{ПРОТОКОЛ_ШАГА}}, {{МАРКЕРЫ}}) будут помечены ""[НЕ ЗАПОЛНЕНО]""."
+        Else
+            Mod_Util.WriteWarning "P002", "LoadProjectSettings: файл общих настроек " & _
+                "проекта пуст или не читается: " & settingsPath
+        End If
+        Exit Sub
+    End If
+
+    lines = Split(NormalizeLineEndings(text), vbCrLf)
+    For i = LBound(lines) To UBound(lines)
+        s = Trim$(lines(i))
+        If Left$(s, 1) = "#" Then GoTo NextSettingLine   ' комментарий
+        If s <> "" Then
+            eqPos = InStr(s, "=")
+            If eqPos > 1 Then
+                keyName = Trim$(Left$(s, eqPos - 1))
+                valText = Trim$(Mid$(s, eqPos + 1))
+                If Left$(keyName, 2) = "{{" And Right$(keyName, 2) = "}}" Then
+                    If values.Exists(keyName) Then
+                        values(keyName) = CStr(values(keyName)) & vbCrLf & valText
+                    Else
+                        values.Add keyName, valText
+                    End If
+                End If
+            End If
+        End If
+NextSettingLine:
+    Next i
+
+    Mod_Util.WriteLog "LoadProjectSettings: загружено значений настроек: " & values.Count
+    Exit Sub
+
+ErrHandler:
+    Mod_Util.WriteError "P002", "LoadProjectSettings: ошибка чтения общих настроек. " & _
+        "Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' Блок 3.4 ({{ФАЙЛЫ_ДОП_ДАННЫХ}}): перечень файлов папки
+' 01_Исходные данные\04_Дополнительные данные в формате
+' "<имя файла> - <назначение в одну строку>". Назначение берётся из общего
+' файла назначений "Назначения_доп_данных.txt" (строки вида
+' "<имя файла> = <назначение>", регистр имён не значим); если назначение не
+' задано - только имя файла. При отсутствии файлов - заготовка
+' "Дополнительных данных для шага {{NN}} нет" (плейсхолдер {{NN}} сохраняется
+' и будет заменён общим прогоном подстановки).
+Private Function BuildExtraDataListBlock(ByVal root As String, ByVal nn As String) As String
+    Dim folder As String
+    Dim mapPath As String
+    Dim fName As String
+    Dim lineText As String
+    Dim res As String
+    Dim purpose As String
+    Dim assignedDict As Object
+
+    On Error GoTo ErrHandler
+
+    folder = root & "\01_Исходные данные\04_Дополнительные данные"
+    BuildExtraDataListBlock = ""
+    If Not FolderExistsSafe(folder) Then Exit Function
+
+    ' Карта назначений (необязательный общий файл)
+    Set assignedDict = CreateObject("Scripting.Dictionary")
+    assignedDict.CompareMode = vbTextCompare
+    mapPath = folder & "\Назначения_доп_данных.txt"
+    If FileExistsSafe(mapPath) Then
+        Dim mapLines() As String
+        Dim mi As Long
+        Dim ms As String
+        Dim meq As Long
+        mapLines = Split(NormalizeLineEndings(ReadTextFile(mapPath)), vbCrLf)
+        For mi = LBound(mapLines) To UBound(mapLines)
+            ms = Trim$(mapLines(mi))
+            meq = InStr(ms, "=")
+            If meq > 1 Then
+                assignedDict(Trim$(Left$(ms, meq - 1))) = Trim$(Mid$(ms, meq + 1))
+            End If
+        Next mi
+    End If
+
+    fName = Dir(folder & "\*")
+    Do While fName <> ""
+        If Left$(fName, 2) <> "~$" Then                 ' временные файлы Office
+            If StrComp(fName, "Назначения_доп_данных.txt", vbTextCompare) <> 0 Then
+                If Not FolderEntryIsDirectory(folder & "\" & fName) Then
+                    purpose = ""
+                    If assignedDict.Exists(fName) Then purpose = CStr(assignedDict(fName))
+                    If res <> "" Then res = res & vbCrLf
+                    If purpose <> "" Then
+                        res = res & fName & " - " & purpose
+                    Else
+                        res = res & fName               ' только имя файла
+                    End If
+                End If
+            End If
+        End If
+        fName = Dir()
+    Loop
+
+    If res = "" Then
+        BuildExtraDataListBlock = "Дополнительных данных для шага {{NN}} нет"
+    Else
+        BuildExtraDataListBlock = res
+    End If
+    Exit Function
+
+ErrHandler:
+    Mod_Util.WriteError "P002", "BuildExtraDataListBlock: ошибка перечня доп. данных. " & _
+        "Ошибка: " & Err.Description
+    Err.Clear
+End Function
+
+' Элемент пути - папка? (без ошибок Dir по кириллическим путям)
+Private Function FolderEntryIsDirectory(ByVal fullPath As String) As Boolean
+    Dim attrs As Long
+    FolderEntryIsDirectory = False
+    On Error Resume Next
+    Err.Clear
+    attrs = GetAttr(fullPath)
+    If Err.Number = 0 Then
+        If (attrs And vbDirectory) = vbDirectory Then FolderEntryIsDirectory = True
+    End If
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+' Строка вида "<имя файла> - <назначение>" для входного файла из папки srcRel
+' (поиск по маске mask). Если файл не найден - "[НЕ НАЙДЕН: <папка>\<маска>]".
+Private Function BuildInputFileLine(ByVal root As String, ByVal srcRel As String, _
+                                    ByVal mask As String, ByVal purpose As String) As String
+    Dim folder As String
+    Dim fName As String
+
+    folder = root & "\" & srcRel
+    fName = FirstMatchFile(folder, mask)
+    If fName = "" Then
+        BuildInputFileLine = "[НЕ НАЙДЕН: " & srcRel & "\" & mask & "]"
+        Exit Function
+    End If
+    BuildInputFileLine = fName & " - " & purpose
+End Function
+
+' Строка для {{КОНФИГУРАЦИЯ_ФАЙЛ}}: имя файла конфигурации через
+' Mod_Util.FindConfigFile (.xml > .txt; только .pilotcfx - предупреждение).
+Private Function BuildConfigFileLine(ByVal root As String) As String
+    Dim cfgFolder As String
+    Dim cfgFull As String
+    Dim cfgName As String
+
+    cfgFolder = root & "\01_Исходные данные\03_Конфигурация"
+    cfgFull = Mod_Util.FindConfigFile(cfgFolder)
+    If cfgFull = "" Then
+        BuildConfigFileLine = "[НЕ НАЙДЕН: 01_Исходные данные\03_Конфигурация\*.xml или *.txt]"
+        Exit Function
+    End If
+    cfgName = Mid$(cfgFull, InStrRev(cfgFull, "\") + 1)
+    BuildConfigFileLine = cfgName & " - Конфигурация Pilot-BIM (примеры XML ""Дополнительных параметров"", справочник базовых типов)"
+End Function
+
+' Строка для {{ШАГИ_ФАЙЛ}}: путь к Шаги.txt (он же источник сетки шагов).
+Private Function BuildStepsFileLine(ByVal root As String) As String
+    Dim stepsFile As String
+
+    stepsFile = root & "\04_Промты\Шаги.txt"
+    If Not FileExistsSafe(stepsFile) Then
+        BuildStepsFileLine = "[НЕ НАЙДЕН: 04_Промты\Шаги.txt]"
+        Exit Function
+    End If
+    BuildStepsFileLine = "04_Промты\Шаги.txt - сетка шагов декомпозиции (формат строк NN|Имя_папки)"
+End Function
+
+' Блоки 4.1/4.2 ({{РЕЕСТР_ТИПОВ}}, {{РЕЕСТР_ПОКРЫТИЯ}}):
+'  - шаг 00 - заготовка "Реестры пусты - первый шаг (P002 штатно)";
+'  - шаг > 00 - содержимое накопленного файла реестра;
+'  - файл отсутствует на шаге > 00 - WriteWarning (P002) и явный текст
+'    "[РЕЕСТР НЕ НАЙДЕН]" (а не пустая строка).
+Private Function BuildRegistryBlock(ByVal registriesPath As String, _
+                                    ByVal fileName As String, _
+                                    ByVal nn As String) As String
+    Dim filePath As String
+    Dim content As String
+
+    BuildRegistryBlock = ""
+    If StepNumToLong(nn) = 0 Then
+        BuildRegistryBlock = REG_EMPTY_FIRST_STEP
+        Exit Function
+    End If
+
+    filePath = registriesPath & "\" & fileName
+    If Not FileExistsSafe(filePath) Then
+        Mod_Util.WriteWarning "P002", Mod_Util.FormatMissingFile(fileName) & _
+            " (папка 03_Результаты генерации\03_Реестры, шаг " & nn & _
+            ") - подставлен текст "" & REG_NOT_FOUND & ""."
+        BuildRegistryBlock = REG_NOT_FOUND
+        Exit Function
+    End If
+
+    content = NormalizeLineEndings(ReadTextFile(filePath))
+    If Trim$(content) = "" Then
+        Mod_Util.WriteWarning "P002", "BuildRegistryBlock: " & fileName & _
+            " пуст на шаге " & nn & " - подставлен текст "" & REG_NOT_FOUND & ""."
+        BuildRegistryBlock = REG_NOT_FOUND
+        Exit Function
+    End If
+    BuildRegistryBlock = content
+End Function
+
+' Блок 6 ({{СПИСОК_ТИПОВ_ШАГА}}): типы шага NN из артефакта адаптированной
+' структуры (02_Подготовка схемы\Адаптированная_структура_*.xlsx, лист
+' "Адаптированная_структура"; читается через GetSchemaArtifactWorkbook -
+' книга открывается только для чтения и сразу закрывается).
+' Колонки берутся по ЗАГОЛОВКАМ (канон: "Шаг", "Системное имя типа",
+' "Видимое имя типа"; обратная совместимость со старыми книгами:
+' "Тип"/"Отображаемое имя"). Фильтрация по колонке "Шаг": совпадение числа
+' (NN) или диапазона "NN/MM", "NN-MM". Порядок строк - как в структуре
+' (без сортировки). Формат вывода: "<Видимое имя типа> | <Тип>"; системное
+' имя типа в блок 6 НЕ выводится (вторая колонка - значение поля "Тип"
+' адаптированной структуры, напр. "Папка", "Проект").
+' Если колонки "Шаг" в структуре нет - WriteWarning и пустая строка
+' (плейсхолдер получит маркер "[НЕ ЗАПОЛНЕНО]", блок 2 - маркер-страховку).
+Private Function BuildStepTypeList(ByVal root As String, ByVal nn As String) As String
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim openedHere As Boolean
+    Dim lastRow As Long
+    Dim lastCol As Long
+    Dim r As Long
+    Dim c As Long
+    Dim colStep As Long
+    Dim colSys As Long
+    Dim colVis As Long
+    Dim colType As Long
+    Dim headerName As String
+    Dim stepVal As String
+    Dim visName As String
+    Dim sysName As String
+    Dim typeVal As String
+    Dim res As String
+
+    On Error GoTo ErrHandler
+
+    BuildStepTypeList = ""
+
+    Set wb = GetSchemaArtifactWorkbook(root, openedHere)
+    If wb Is Nothing Then Exit Function
+
+    On Error Resume Next
+    Set ws = wb.Worksheets(SCHEMA_SHEET_NAME)
+    If ws Is Nothing Then
+        ' обратная совместимость: книги, созданные до переименования
+        Err.Clear
+        Set ws = wb.Worksheets("Плоская_таблица")
+    End If
+    On Error GoTo ErrHandler
+    If ws Is Nothing Then
+        Mod_Util.WriteWarning "P002", "BuildStepTypeList: в файле схемы '" & _
+            wb.name & "' нет листа '" & SCHEMA_SHEET_NAME & "' - блок 6 не собран."
+        GoTo CleanExit
+    End If
+
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).row
+    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+    If lastCol < 1 Then lastCol = 1
+
+    ' 1. Индексы колонок по заголовкам (строка 1)
+    colStep = -1
+    colSys = -1
+    colVis = -1
+    colType = -1
+    For c = 1 To lastCol
+        headerName = Trim$(CStr(ws.Cells(1, c).value))
+        Select Case headerName
+            Case COL_STEP: colStep = c
+            Case "Системное имя типа": colSys = c
+            Case "Видимое имя типа": colVis = c
+            Case COL_SYS_NAME: colSys = c          ' старый заголовок "Тип"
+            Case COL_VIS_NAME: colVis = c          ' старый "Отображаемое имя"
+            Case "Тип": colType = c
+        End Select
+    Next c
+
+    If colVis < 0 Or (colSys < 0 And colType < 0) Then
+        Mod_Util.WriteWarning "P002", "BuildStepTypeList: в структуре не найдены " & _
+            "колонки ""Видимое имя типа"" и ""Системное имя типа""/""Тип"" - блок 6 не собран."
+        GoTo CleanExit
+    End If
+    If colStep < 0 Then
+        Mod_Util.WriteWarning "P002", "BuildStepTypeList: в структуре нет колонки """ & _
+            COL_STEP & """ (фильтрация типов по шагу невозможна) - блок 6 не собран."
+        GoTo CleanExit
+    End If
+
+    ' 2. Отбор строк шага NN в порядке структуры (без сортировки)
+    For r = 2 To lastRow
+        stepVal = Trim$(CStr(ws.Cells(r, colStep).value))
+        If StepValueMatches(stepVal, nn) Then
+            visName = Trim$(CStr(ws.Cells(r, colVis).value))
+            If colType >= 0 Then
+                typeVal = Trim$(CStr(ws.Cells(r, colType).value))
+            Else
+                typeVal = ""
+            End If
+            If typeVal = "" And colSys >= 0 Then
+                ' запасной вариант: поле "Тип" пустое - берём системное имя
+                typeVal = Trim$(CStr(ws.Cells(r, colSys).value))
+            End If
+            If visName <> "" And typeVal <> "" Then
+                If res <> "" Then res = res & vbCrLf
+                res = res & visName & " | " & typeVal
+            End If
+        End If
+    Next r
+
+CleanExit:
+    ' Аварийный выход обязан закрыть книгу, которую открыли сами
+    If openedHere And Not wb Is Nothing Then
+        On Error Resume Next
+        wb.Close SaveChanges:=False
+        On Error GoTo 0
+    End If
+    BuildStepTypeList = res
+    Exit Function
+
+ErrHandler:
+    Mod_Util.WriteError "P002", "BuildStepTypeList: ошибка сборки блока 6. " & _
+        "Ошибка: " & Err.Description
+    Err.Clear
+    If openedHere And Not wb Is Nothing Then
+        On Error Resume Next
+        wb.Close SaveChanges:=False
+        On Error GoTo 0
+    End If
+    BuildStepTypeList = res
+End Function
+
+' W-PROMPT-INVARIANTS-CODE-2: открывает самый свежий артефакт адаптированной
+' структуры (02_Подготовка схемы) для чтения. Возвращает Workbook; если
+' книга уже была открыта пользователем/кодом - возвращается она же
+' (openedHere=False, закрывать нельзя); иначе openedHere=True и вызывающий
+' обязан закрыть книгу (требование к аварийным выходам). При отсутствии
+' файла/ошибке открытия - WriteWarning и Nothing.
+Private Function GetSchemaArtifactWorkbook(ByVal root As String, _
+                                           ByRef openedHere As Boolean) As Workbook
+    Dim prepPath As String
+    Dim fileName As String
+    Dim fullName As String
+    Dim wb As Workbook
+
+    Set GetSchemaArtifactWorkbook = Nothing
+    openedHere = False
+
+    On Error Resume Next
+    Err.Clear
+    prepPath = NormPath(root) & "\02_Подготовка схемы"
+    fileName = GetNewestSchemaArtifactName(prepPath)
+    If fileName = "" Then
+        Mod_Util.WriteWarning "P002", "GetSchemaArtifactWorkbook: артефакт " & _
+            SCHEMA_ARTIFACT_MASK & " не найден в 02_Подготовка схемы - блок 6 не собран."
+        Err.Clear
+        On Error GoTo 0
+        Exit Function
+    End If
+    fullName = prepPath & "\" & fileName
+
+    ' если книга уже открыта - не открываем повторно и не закрываем
+    For Each wb In Workbooks
+        If StrComp(wb.name, fileName, vbTextCompare) = 0 Then
+            Set GetSchemaArtifactWorkbook = wb
+            openedHere = False
+            On Error GoTo 0
+            Exit Function
+        End If
+    Next wb
+
+    ' W-AV-REFACTOR, п.1: AddToMru:=False - файлы шагов не попадают в список
+    ' последних файлов Excel.
+    Set wb = Workbooks.Open(fullName, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
+    If Err.Number <> 0 Then
+        Mod_Util.WriteWarning "P002", "GetSchemaArtifactWorkbook: не удалось открыть " & _
+            "файл схемы '" & fileName & "'. Ошибка: " & Err.Description
+        Err.Clear
+        On Error GoTo 0
+        Set GetSchemaArtifactWorkbook = Nothing
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    openedHere = True
+    Set GetSchemaArtifactWorkbook = wb
+End Function
+
+' Совпадает ли значение колонки "Шаг" с номером NN: точное число ("05"),
+' либо диапазон с префиксом ("05/06", "5-6"). leading zero не значим.
+Private Function StepValueMatches(ByVal stepVal As String, ByVal nn As String) As Boolean
+    Dim plainNN As String
+    Dim plainVal As String
+    Dim sepPos As Long
+
+    StepValueMatches = False
+    plainNN = CStr(StepNumToLong(nn))
+    If plainNN = "" Then Exit Function
+    If stepVal = "" Then Exit Function
+
+    plainVal = CStr(StepNumToLong(stepVal))
+    If plainVal = plainNN Then
+        StepValueMatches = True
+        Exit Function
+    End If
+
+    ' диапазоны "NN/MM" и "NN-MM": принадлежность, если NN - граница
+    sepPos = 0
+    If InStr(stepVal, "/") > 0 Then sepPos = InStr(stepVal, "/")
+    If sepPos = 0 And InStr(stepVal, "-") > 0 Then sepPos = InStr(stepVal, "-")
+    If sepPos > 1 Then
+        If CStr(StepNumToLong(Left$(stepVal, sepPos - 1))) = plainNN Then StepValueMatches = True
+        If CStr(StepNumToLong(Mid$(stepVal, sepPos + 1))) = plainNN Then StepValueMatches = True
+    End If
+End Function
+
+' ---------------------------------------------------------------------------
+' БЛОК 16: КОРРЕКТИРОВКИ (W-PROMPT-INVARIANTS-CODE, ЧАСТИ C и D)
+' ---------------------------------------------------------------------------
+
+' Удаляет из текста HTML-комментарии <!-- ... --> (многострочные включительно).
+Private Function StripHtmlComments(ByVal text As String) As String
+    Dim openPos As Long
+    Dim closePos As Long
+    Dim res As String
+    Dim startPos As Long
+
+    StripHtmlComments = text
+    Do
+        openPos = InStr(startPos + 1, text, "<!--")
+        If openPos = 0 Then Exit Do
+        closePos = InStr(openPos + 4, text, "-->")
+        If closePos = 0 Then Exit Do           ' незакрытый комментарий - оставляем как есть
+        res = res & Mid$(text, startPos + 1, openPos - startPos - 1)
+        startPos = closePos + 3
+    Loop
+    res = res & Mid$(text, startPos + 1)
+    StripHtmlComments = res
+End Function
+
+' Извлекает содержимое секции 16 из текста промта: всё между заголовком
+' "## 16. …" и следующим заголовком верхнего уровня "## " (или концом файла).
+' Возвращает "" , если секция не найдена.
+Private Function ExtractSection16(ByVal promptText As String) As String
+    Dim lines() As String
+    Dim i As Long
+    Dim s As String
+    Dim inSec As Boolean
+    Dim res As String
+
+    ExtractSection16 = ""
+    If promptText = "" Then Exit Function
+
+    lines = Split(NormalizeLineEndings(promptText), vbCrLf)
+    inSec = False
+    For i = LBound(lines) To UBound(lines)
+        s = lines(i)
+        If Not inSec Then
+            If Left$(Trim$(s), 6) = "## 16." Then inSec = True
+        Else
+            If Left$(Trim$(s), 3) = "## " Then Exit For
+            If res = "" Then res = s Else res = res & vbCrLf & s
+        End If
+    Next i
+    ExtractSection16 = res
+End Function
+
+' Валидация одной строки корректировки (ЧАСТЬ D п.6): должна начинаться с
+' "- " и содержать обязательные поля ШАГ:, ТИП:, УСЛОВИЕ:, УТОЧНЕНИЕ:.
+Private Function IsCorrectionLineValid(ByVal lineText As String) As Boolean
+    Dim s As String
+    IsCorrectionLineValid = False
+    s = Trim$(lineText)
+    If Left$(s, 2) <> "- " Then Exit Function
+    If InStr(s, FIELD_STEP) = 0 Then Exit Function
+    If InStr(s, FIELD_TYPE) = 0 Then Exit Function
+    If InStr(s, FIELD_COND) = 0 Then Exit Function
+    If InStr(s, FIELD_CLAR) = 0 Then Exit Function
+    IsCorrectionLineValid = True
+End Function
+
+' Извлекает значение поля "ШАГ: X" из строки корректировки (до "|" или конца
+' строки). Возвращает "" при отсутствии/некорректности поля.
+Private Function CorrectionStepValue(ByVal lineText As String) As String
+    Dim s As String
+    Dim p As Long
+    Dim tail As String
+    Dim pipePos As Long
+
+    CorrectionStepValue = ""
+    s = lineText
+    p = InStr(s, FIELD_STEP)
+    If p = 0 Then Exit Function
+    tail = Mid$(s, p + Len(FIELD_STEP))
+    pipePos = InStr(tail, "|")
+    If pipePos > 0 Then tail = Left$(tail, pipePos - 1)
+    CorrectionStepValue = Trim$(tail)
+End Function
+
+' Извлекает пользовательские корректировки из произвольного текста (секции 16
+' предыдущей версии промта или файла corrections.md): строки, начинающиеся
+' с "- ", проходят валидацию скоупа (ЧАСТЬ D п.6): чужие шаги (ШАГ ? nn) и
+' некорректные по формату - отбрасываются с логом; если после фильтрации не
+' осталось ни одной корректной и были отброшенные - WriteWarning.
+' Заготовка "Корректировок для шага NN нет." пользовательской не является.
+Private Function CollectValidCorrections(ByVal sectionText As String, _
+                                         ByVal nn As String, _
+                                         ByRef droppedCount As Long) As String
+    Dim cleaned As String
+    Dim lines() As String
+    Dim i As Long
+    Dim s As String
+    Dim res As String
+    Dim corrStep As String
+
+    droppedCount = 0
+    CollectValidCorrections = ""
+    If Trim$(sectionText) = "" Then Exit Function
+
+    cleaned = StripHtmlComments(sectionText)
+    lines = Split(NormalizeLineEndings(cleaned), vbCrLf)
+
+    For i = LBound(lines) To UBound(lines)
+        s = Trim$(lines(i))
+        If Left$(s, 2) = "- " Then
+            If Not IsCorrectionLineValid(s) Then
+                droppedCount = droppedCount + 1
+                Mod_Util.WriteWarning "P002", "CollectValidCorrections: отброшена " & _
+                    "некорректная по формату корректировка (нужны " - " и поля " & _
+                    FIELD_STEP & " " & FIELD_TYPE & " " & FIELD_COND & " " & FIELD_CLAR & _
+                    "): """ & s & """"
+            Else
+                corrStep = CorrectionStepValue(s)
+                If StrComp(CStr(StepNumToLong(corrStep)), CStr(StepNumToLong(nn)), vbBinaryCompare) <> 0 Then
+                    droppedCount = droppedCount + 1
+                    Mod_Util.WriteWarning "P002", "CollectValidCorrections: отброшена " & _
+                        "корректировка чужого шага: ШАГ=" & corrStep & ", ожидался " & nn
+                Else
+                    If res <> "" Then res = res & vbCrLf
+                    res = res & s
+                End If
+            End If
+        End If
+    Next i
+
+    If res = "" And droppedCount > 0 Then
+        Mod_Util.WriteWarning "P002", "CollectValidCorrections: после фильтрации " & _
+            "скоупа не осталось ни одной корректной корректировки шага " & nn & _
+            " (отброшено записей: " & droppedCount & ")."
+    End If
+
+    CollectValidCorrections = res
+End Function
+
+' Содержимое секции 16 после удаления заготовки и комментариев (для проверки
+' "были ли пользовательские строки").
+Private Function Section16WithoutStub(ByVal sectionText As String) As String
+    Dim cleaned As String
+    Dim lines() As String
+    Dim i As Long
+    Dim s As String
+    Dim res As String
+
+    Section16WithoutStub = ""
+    cleaned = StripHtmlComments(sectionText)
+    lines = Split(NormalizeLineEndings(cleaned), vbCrLf)
+    For i = LBound(lines) To UBound(lines)
+        s = Trim$(lines(i))
+        If s <> "" Then
+            If s <> CORRECTION_STUB_TEXT Then
+                If res = "" Then res = s Else res = res & vbCrLf & s
+            End If
+        End If
+    Next i
+End Function
+
+' Сборка блока 16 (ЧАСТЬ C п.5):
+'  1. предыдущая версия промта того же шага (файлы Промт_шаг_NN.md ищутся в
+'     04_Промты и 03_Результаты генерации\04_Промты_готовые);
+'  2. из её секции 16 извлекаются пользовательские корректировки (с валидацией
+'     скоупа); дополнительно перечитывается свежий файл 04_Промты\corrections.md
+'     (пользователь мог дополнить корректировки после прошлой генерации);
+'  3. если пользовательских строк нет - остаётся заготовка шаблона
+'     "Корректировок для шага {{NN}} нет." ({{NN}} затем превратится в NN);
+'  4. если есть - заготовка заменяется списком корректировок (без дублирования).
+' Вызывается ДО FillAllPlaceholders - плейсхолдер {{NN}} в тексте ещё жив.
+Private Sub ApplyCorrectionsBlock(ByRef resultText As String, ByVal nn As String, ByVal root As String)
+    Dim prevText As String
+    Dim prevSection As String
+    Dim userCorr As String
+    Dim droppedPrev As Long
+    Dim droppedFile As Long
+    Dim corrFileText As String
+    Dim corrSection As String
+    Dim stubPos As Long
+    Dim nextHeadPos As Long
+    Dim beforeStub As String
+    Dim afterStub As String
+    Dim candidates(1 To 4) As String
+    Dim ci As Long
+    Dim foundPath As String
+
+    On Error GoTo ErrHandler
+
+    ' --- 1. Предыдущая версия промта шага NN --------------------------------
+    candidates(1) = root & "\04_Промты\Промт_шаг_" & nn & ".md"
+    candidates(2) = root & "\04_Промты\Промт_шаг_" & Right$("0" & nn, 2) & ".md"
+    candidates(3) = root & "\03_Результаты генерации\04_Промты_готовые\Промт_шаг_" & nn & ".md"
+    candidates(4) = root & "\03_Результаты генерации\04_Промты_готовые\Промт_шаг_" & Right$("0" & nn, 2) & ".md"
+    prevText = ""
+    foundPath = ""
+    For ci = 1 To 4
+        If FileExistsSafe(candidates(ci)) Then
+            prevText = ReadTextFile(candidates(ci))
+            If prevText <> "" Then
+                foundPath = candidates(ci)
+                Exit For
+            End If
+        End If
+    Next ci
+
+    userCorr = ""
+    If prevText <> "" Then
+        prevSection = ExtractSection16(prevText)
+        If Section16WithoutStub(prevSection) <> "" Then
+            ' в предыдущей версии есть что-то кроме заготовки/комментариев
+            userCorr = CollectValidCorrections(prevSection, nn, droppedPrev)
+            If userCorr = "" Then
+                Mod_Util.WriteLog "ApplyCorrectionsBlock: в предыдущей версии промта " & _
+                    "(" & foundPath & ") пользовательских корректировок шага " & nn & _
+                    " после валидации не осталось - используется заготовка шаблона."
+            End If
+        End If
+    End If
+
+    ' --- 2. Внешний файл корректировок (04_Промты\corrections.md) ----------
+    corrFileText = ReadTextFile(root & "\04_Промты\corrections.md")
+    If corrFileText <> "" Then
+        corrSection = ExtractSection16(corrFileText)
+        If corrSection = "" Then corrSection = corrFileText   ' файл без заголовка - весь текст
+        Dim fromFile As String
+        fromFile = CollectValidCorrections(corrSection, nn, droppedFile)
+        If fromFile <> "" Then
+            If userCorr = "" Then
+                userCorr = fromFile
+            ElseIf InStr(userCorr, fromFile) = 0 Then
+                userCorr = userCorr & vbCrLf & fromFile       ' без дублирования
+            End If
+        End If
+    End If
+
+    If userCorr = "" Then
+        Mod_Util.WriteLog "ApplyCorrectionsBlock: корректировок шага " & nn & _
+            " нет - оставлена заготовка шаблона (блок 16)."
+        Exit Sub
+    End If
+
+    ' --- 3. Замена заготовки на скорректированный список --------------------
+    ' Ищем строку заготовки (плейсхолдер {{NN}} ещё не подставлен).
+    stubPos = InStr(resultText, CORRECTION_STUB_TEXT)
+    If stubPos = 0 Then
+        ' заготовка изменена вручную в шаблоне - вставляем список перед
+        ' следующим заголовком "## " после начала секции 16
+        Dim sec16Pos As Long
+        sec16Pos = InStr(resultText, "## 16.")
+        If sec16Pos = 0 Then
+            Mod_Util.WriteWarning "P002", "ApplyCorrectionsBlock: секция 16 не найдена " & _
+                "в шаблоне - корректировки НЕ вставлены."
+            Exit Sub
+        End If
+        nextHeadPos = InStr(sec16Pos + 6, resultText, vbCrLf & "## ")
+        If nextHeadPos = 0 Then nextHeadPos = Len(resultText) + 1
+        resultText = Left$(resultText, nextHeadPos - 1) & vbCrLf & userCorr & Mid$(resultText, nextHeadPos)
+        Exit Sub
+    End If
+
+    ' конец строки заготовки
+    Dim lineEnd As Long
+    lineEnd = InStr(stubPos, resultText, vbCrLf)
+    If lineEnd = 0 Then lineEnd = Len(resultText) + 1
+    beforeStub = Left$(resultText, stubPos - 1)
+    afterStub = Mid$(resultText, lineEnd)
+    resultText = beforeStub & userCorr & afterStub
+
+    Mod_Util.WriteLog "ApplyCorrectionsBlock: в блок 16 вставлены пользовательские " & _
+        "корректировки шага " & nn & " (предыдущая версия: " & _
+        IIf(foundPath <> "", foundPath, "нет") & ")."
+    Exit Sub
+
+ErrHandler:
+    Mod_Util.WriteError "P002", "ApplyCorrectionsBlock: ошибка сохранения секции 16. " & _
+        "Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' Мини-IIf по образцу Mod_Assembler/Mod_Structure (проект использует IIf из
+' VBA-библиотеки; локальный дубль гарантирует работу модуля без ссылки).
+Private Function IIf(cond As Boolean, byTrue As String, byFalse As String) As String
+    If cond Then IIf = byTrue Else IIf = byFalse
+End Function
+
+' ---------------------------------------------------------------------------
+' W-PROMPT-INVARIANTS-CODE-2: ОБЩАЯ ЦЕПОЧКА СБОРКИ ПРОМТА ШАГА
+' ---------------------------------------------------------------------------
+
+' Полный путь к файлу общих настроек проекта (project_settings.md).
+' Поиск без хардкода одного места (как механизм Mod_Folders для шаблонов):
+' 1) 04_Промты\Шаблоны (внутренняя папка шаблонов, куда копируется внешняя
+'    папка "Шаблоны"); 2) рядом с книгой .xlsm; 3) внешняя папка "Шаблоны";
+' 4) корень 04_Промты. Если ничего не найдено - возвращается путь варианта 1
+'   (LoadProjectSettings сам пишет WriteWarning "файл не найден").
+Private Function FindProjectSettingsPath(ByVal root As String) As String
+    Dim candidates(1 To 4) As String
+    Dim i As Long
+
+    candidates(1) = root & "\04_Промты\Шаблоны\" & PROJECT_SETTINGS_FILE
+    candidates(2) = root & "\" & PROJECT_SETTINGS_FILE
+    candidates(3) = root & "\Шаблоны\" & PROJECT_SETTINGS_FILE
+    candidates(4) = root & "\04_Промты\" & PROJECT_SETTINGS_FILE
+    For i = 1 To 4
+        If FileExistsSafe(candidates(i)) Then
+            FindProjectSettingsPath = candidates(i)
+            Exit Function
+        End If
+    Next i
+    FindProjectSettingsPath = candidates(1)
+End Function
+
+' Убирает из текста промта незаполненные маркеры "[НЕ ЗАПОЛНЕНО: {{ТЕКУЩИЙ_ШАГ}}]"
+' и им подобные (строку с маркером целиком). Используется точечно: когда
+' соответствующая секция уже заполнена локальным блоком (например, сеткой
+' шагов из Шаги.txt), чтобы в готовом промте не оставался служебный маркер.
+Private Function RemoveUnfilledMarkerLines(ByVal text As String, ByVal phName As String) As String
+    Dim marker As String
+    Dim lines() As String
+    Dim i As Long
+    Dim res As String
+
+    RemoveUnfilledMarkerLines = text
+    marker = "[НЕ ЗАПОЛНЕНО: " & phName & "]"
+    If InStr(text, marker) = 0 Then Exit Function
+
+    lines = Split(NormalizeLineEndings(text), vbCrLf)
+    For i = LBound(lines) To UBound(lines)
+        If InStr(lines(i), marker) = 0 Then
+            If res = "" Then res = lines(i) Else res = res & vbCrLf & lines(i)
+        End If
+    Next i
+    RemoveUnfilledMarkerLines = res
+End Function
+
+' Блок {{ДЕКОМПОЗИЦИЯ_ШАГОВ}}: сетка шагов из Шаги.txt (формат NN|Имя_папки)
+' в виде markdown-таблицы. Для Промта №0 (декомпозиция) Шаги.txt ещё нет -
+' возвращается заготовка "Сетка шагов будет определена на этом шаге."
+Private Function BuildDecompositionBlock(ByVal root As String) As String
+    Dim steps As Collection
+    Dim i As Long
+    Dim nn As String
+    Dim nm As String
+    Dim res As String
+
+    On Error Resume Next
+    Set steps = ReadStepList()
+    On Error GoTo 0
+    If steps Is Nothing Then
+        BuildDecompositionBlock = ""
+        Exit Function
+    End If
+    If steps.Count = 0 Then
+        BuildDecompositionBlock = "Сетка шагов будет определена на этом шаге (декомпозиция)."
+        Exit Function
+    End If
+
+    res = "| Шаг | Название |" & vbCrLf & "|---|---|"
+    For i = 1 To steps.Count
+        nn = StepNumFromEntry(steps(i))
+        nm = StepNameFromEntry(steps(i))
+        res = res & vbCrLf & "| " & nn & " | " & nm & " |"
+    Next i
+    BuildDecompositionBlock = res
+End Function
+
+' Общая цепочка сборки промта шага по новому шаблону prompt_step_template_v1.md
+' (W-PROMPT-INVARIANTS-CODE-2, ЧАСТЬ B п.4; дублирование между
+' MakeNextStepPrompt и GenerateStepZeroPrompt исключено). Порядок:
+'  1. загрузка шаблона из 04_Промты\Шаблоны (путь через существующий
+'     механизм Mod_Folders.CopyPromptTemplates - внешняя папка "Шаблоны"
+'     копируется туда при создании структуры; путь не хардкодится);
+'  2. ApplyCorrectionsBlock - сохранение пользовательских корректировок из
+'     предыдущей версии промта шага + corrections.md (валидация скоупа
+'     IsCorrectionLineValid/CollectValidCorrections внутри; работает ДО
+'     подстановки, пока {{NN}} в тексте жив);
+'  3. FillAllPlaceholders - блоки 3.1-3.5 (BuildInputFileLine/
+'     BuildExtraDataListBlock/BuildStepsFileLine), 4.1/4.2
+'     (BuildRegistryBlock), 6 (BuildStepTypeList), константы проекта
+'     (LoadProjectSettings ? project_settings.md) и маркер-страховка
+'     "ЗАДАЧА НЕ ЗАДАНА" в блок 2 при пустом блоке 6;
+'  4. локальные дополнения {{ТЕКУЩИЙ_ШАГ}}/{{ДЕКОМПОЗИЦИЯ_ШАГОВ}} (если
+'     общие настройки их не задали) и очистка служебных маркеров.
+' Возвращает собранный текст промта; Empty - при фатальной ошибке (шаблон
+' не найден/не читается; вызывающий пишет P002/P004 и останавливает работу).
+' hasStepTypes - результат проверки блока 6 (для логов точек входа).
+Private Function BuildPromptForStep(ByVal root As String, _
+                                    ByVal nn As String, _
+                                    ByVal stepName As String, _
+                                    ByRef hasStepTypes As Boolean) As String
+    Dim templatePath As String
+    Dim settingsPath As String
+    Dim registriesPath As String
+    Dim template As String
+    Dim result As String
+    Dim tmp As String
+    Dim curVal As String
+    Dim decVal As String
+
+    On Error GoTo ErrHandler
+
+    hasStepTypes = False
+
+    ' --- 1. Шаблон prompt_step_template_v1.md из 04_Промты\Шаблоны ---------
+    templatePath = root & "\04_Промты\Шаблоны\" & TEMPLATE_STEP_V1_NAME
+    Mod_Util.WriteLog "[i] Поиск шаблона шага по пути: " & templatePath
+    template = ReadTextFile(templatePath)
+    If template = "" Then
+        ' Diagnostics-before-fix: фиксируем, какие альтернативные пути
+        ' проверены (внешняя папка "Шаблоны" рядом с книгой).
+        Mod_Util.DebugLog "BuildPromptForStep: шаблон не найден/пуст по пути " & _
+            templatePath & "; проверен альтернативный путь: " & _
+            root & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME
+        If FileExistsSafe(root & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME) Then
+            template = ReadTextFile(root & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME)
+        End If
+    End If
+    If template = "" Then
+        BuildPromptForStep = ""
+        Exit Function
+    End If
+    template = NormalizeLineEndings(template)
+
+    ' --- 2. Сохранение корректировок (блок 16) ДО подстановки --------------
+    result = template
+    ApplyCorrectionsBlock result, nn, root
+
+    ' --- 3. Подстановка всех плейсхолдеров ---------------------------------
+    registriesPath = root & "\03_Результаты генерации\03_Реестры"
+    settingsPath = FindProjectSettingsPath(root)
+    Mod_Util.DebugLog "BuildPromptForStep: общие настройки проекта - " & settingsPath
+    ' ВАЖНО: ByRef-аргументы FillAllPlaceholders должны быть РАЗНЫМИ
+    ' переменными (иначе в VBA один и тот же параметр, переданный по ссылке
+    ' дважды, интерпретируется как one-element array - ошибка 13/449).
+    Dim filled As Boolean
+    Dim typesOk As Boolean
+    filled = FillAllPlaceholders(result, nn, stepName, _
+                                 registriesPath, root, settingsPath, _
+                                 result, typesOk)
+    hasStepTypes = typesOk
+    If Not filled Then
+        ' Блок 6 пуст: маркер-страховка "ЗАДАЧА НЕ ЗАДАНА" уже подставлен в
+        ' блок 2 внутри FillAllPlaceholders (ЧАСТЬ D п.7); дополнительно -
+        ' явная запись в журнал.
+        Mod_Util.WriteWarning "P002", "BuildPromptForStep: блок 6 (типы шага " & _
+            nn & ") пуст - в блок 2 подставлен маркер-страховка """ & _
+            TASK_NOT_SET_MARKER & """."
+    End If
+
+    ' --- 4. Локальные дополнения (если общие настройки не задали) ----------
+    ' {{ТЕКУЩИЙ_ШАГ}}: статус сетки шагов относительно NN.
+    If InStr(result, "{{ТЕКУЩИЙ_ШАГ}}") > 0 Then
+        curVal = ""
+        If Trim$(CStr(LoadSettingValue(settingsPath, "{{ТЕКУЩИЙ_ШАГ}}"))) <> "" Then _
+            curVal = CStr(LoadSettingValue(settingsPath, "{{ТЕКУЩИЙ_ШАГ}}"))
+        If curVal = "" Then
+            If StepNumToLong(nn) = 0 Then
+                curVal = "Текущий шаг: 00 (декомпозиция). Шаги ещё не распределены;" & _
+                         " результатом этого шага станет файл Шаги.txt."
+            Else
+                curVal = "Текущий шаг: " & nn & " из сетки Шаги.txt. Все шаги с номером " & _
+                         "меньше " & nn & " считаются выполненными."
+            End If
+        End If
+        tmp = result
+        If FillPh(tmp, "{{ТЕКУЩИЙ_ШАГ}}", curVal, result) Then result = tmp
+    End If
+
+    ' {{ДЕКОМПОЗИЦИЯ_ШАГОВ}}: сетка шагов из Шаги.txt (markdown-таблица).
+    If InStr(result, "{{ДЕКОМПОЗИЦИЯ_ШАГОВ}}") > 0 Then
+        decVal = ""
+        If Trim$(CStr(LoadSettingValue(settingsPath, "{{ДЕКОМПОЗИЦИЯ_ШАГОВ}}"))) <> "" Then _
+            decVal = CStr(LoadSettingValue(settingsPath, "{{ДЕКОМПОЗИЦИЯ_ШАГОВ}}"))
+        If decVal = "" Then decVal = BuildDecompositionBlock(root)
+        tmp = result
+        If FillPh(tmp, "{{ДЕКОМПОЗИЦИЯ_ШАГОВ}}", decVal, result) Then result = tmp
+    End If
+
+    ' Очистка строк со служебными маркерами незаполненности для блоков,
+    ' которые мы уже заполнили локально (чтобы в промте не висел [НЕ ЗАПОЛНЕНО]).
+    result = RemoveUnfilledMarkerLines(result, "{{ТЕКУЩИЙ_ШАГ}}")
+    result = RemoveUnfilledMarkerLines(result, "{{ДЕКОМПОЗИЦИЯ_ШАГОВ}}")
+
+    BuildPromptForStep = result
+    Exit Function
+
+ErrHandler:
+    Mod_Util.WriteError "P002", "BuildPromptForStep: ошибка сборки промта шага " & _
+        nn & ". Ошибка: " & Err.Description
+    Err.Clear
+    BuildPromptForStep = ""
+End Function
+
+' Читает из файла общих настроек проекта ОДНО значение плейсхолдера
+' (последнее определение ключа). Используется точечно в BuildPromptForStep
+' для проверки: задал ли пользователь значение {{ТЕКУЩИЙ_ШАГ}} /
+' {{ДЕКОМПОЗИЦИЯ_ШАГОВ}} вручную. Пустая строка - значение не задано.
+Private Function LoadSettingValue(ByVal settingsPath As String, ByVal phName As String) As String
+    Dim text As String
+    Dim lines() As String
+    Dim i As Long
+    Dim s As String
+    Dim eqPos As Long
+    Dim keyName As String
+
+    LoadSettingValue = ""
+    On Error GoTo ErrHandler
+
+    text = ReadTextFile(settingsPath)
+    If text = "" Then Exit Function
+
+    lines = Split(NormalizeLineEndings(text), vbCrLf)
+    For i = LBound(lines) To UBound(lines)
+        s = Trim$(lines(i))
+        If Left$(s, 1) <> "#" And s <> "" Then
+            eqPos = InStr(s, "=")
+            If eqPos > 1 Then
+                keyName = Trim$(Left$(s, eqPos - 1))
+                If keyName = phName Then
+                    LoadSettingValue = Trim$(Mid$(s, eqPos + 1))
+                End If
+            End If
+        End If
+    Next i
+    Exit Function
+
+ErrHandler:
+    LoadSettingValue = ""
+    Err.Clear
+End Function
+
+' ---------------------------------------------------------------------------
 ' ПУБЛИЧЕСКИЕ ПРОЦЕДУРЫ И ФУНКЦИИ
 ' ---------------------------------------------------------------------------
 
 ' Читает список шагов (<корень>\04_Промты\Шаги.txt) и возвращает его
-' коллекцией. Каждая запись — строка вида "NN|Имя_папки".
+' коллекцией. Каждая запись - строка вида "NN|Имя_папки".
 ' W-UTF8-READ: файл читается целиком через SafeReadText (автоопределение
 ' UTF-8 / Windows-1251), затем разбивается на строки Split(text, vbCrLf);
 ' пустые строки пропускаются.
-' W-CORRECTION-PACK-1, п.4.4: основной формат строки — "NN|Имя_папки"
-' (разделитель — pipe). Устаревший вариант "NN = Имя_папки" принимается с
+' W-CORRECTION-PACK-1, п.4.4: основной формат строки - "NN|Имя_папки"
+' (разделитель - pipe). Устаревший вариант "NN = Имя_папки" принимается с
 ' предупреждением в логе; каждая запись нормализуется к виду "NN|Имя_папки".
 ' При отсутствии файла: ошибка P001, MsgBox, пустая коллекция.
 ' При ошибке чтения: [WARN] P006 в лог, пустая коллекция без прерывания.
@@ -732,7 +1959,7 @@ Public Function ReadStepList() As Collection
     ' W-UTF8-READ: чтение всего файла с автоопределением кодировки
     text = SafeReadText(filePath)
     If text = "" Then
-        ' SafeReadText уже записал [WARN] в лог — здесь только предупреждаем
+        ' SafeReadText уже записал [WARN] в лог - здесь только предупреждаем
         ' пользователя и возвращаем пустую коллекцию (без прерывания).
         MsgBox "Предупреждение P006: не удалось прочитать файл Шаги.txt " & _
                "(ошибки кодировки отсутствуют, но файл пуст или недоступен)." & _
@@ -757,7 +1984,7 @@ Public Function ReadStepList() As Collection
                 nm = Trim(Mid(s, posPipe + 1))
                 If nn <> "" And nm <> "" Then col.Add nn & "|" & nm
             Else
-                ' устаревший формат "NN = Имя_папки" — принимаем с
+                ' устаревший формат "NN = Имя_папки" - принимаем с
                 ' предупреждением, чтобы старые Шаги.txt не ломали работу
                 posEq = InStr(s, "=")
                 If posEq > 0 Then
@@ -778,7 +2005,7 @@ Public Function ReadStepList() As Collection
     Exit Function
 
 ErrHandler:
-    ' Любая ошибка чтения — [WARN] в лог, пустая коллекция без прерывания.
+    ' Любая ошибка чтения - [WARN] в лог, пустая коллекция без прерывания.
     Mod_Util.WriteWarning "P006", "ReadStepList: ошибка чтения Шаги.txt. Ошибка: " & Err.Description
     MsgBox "Предупреждение P006: не удалось прочитать файл Шаги.txt." & vbCrLf & Err.Description, _
            vbExclamation, "Промты"
@@ -786,9 +2013,9 @@ ErrHandler:
     Set ReadStepList = col
 End Function
 
-' Возвращает номер текущего шага — последней существующей папки Шаг_*
+' Возвращает номер текущего шага - последней существующей папки Шаг_*
 ' в 03_Результаты генерации\01_По шагам\ согласно порядку из Шаги.txt.
-' Если папок нет — возвращает "".
+' Если папок нет - возвращает "".
 Public Function ReadCurrentStep() As String
     Dim steps As Collection
     Dim root As String
@@ -832,8 +2059,8 @@ ErrHandler:
 End Function
 
 ' Возвращает номер следующего шага (шаг из Шаги.txt, идущий сразу за
-' текущим). Если текущего шага нет — первый шаг из Шаги.txt.
-' Если следующий не найден — возвращает "".
+' текущим). Если текущего шага нет - первый шаг из Шаги.txt.
+' Если следующий не найден - возвращает "".
 Public Function ReadNextStep() As String
     Dim steps As Collection
     Dim current As String
@@ -849,13 +2076,13 @@ Public Function ReadNextStep() As String
 
     current = ReadCurrentStep()
 
-    ' текущего шага нет — возвращаем первый шаг из Шаги.txt
+    ' текущего шага нет - возвращаем первый шаг из Шаги.txt
     If current = "" Then
         ReadNextStep = StepNumFromEntry(steps(1))
         Exit Function
     End If
 
-    ' следующий — запись, идущая сразу за текущей
+    ' следующий - запись, идущая сразу за текущей
     For i = 1 To steps.Count - 1
         If StepNumFromEntry(steps(i)) = current Then
             ReadNextStep = StepNumFromEntry(steps(i + 1))
@@ -876,24 +2103,36 @@ ErrHandler:
 End Function
 
 ' Формирует промпт для выполнения следующего шага (разделы 9 и 13).
+' W-PROMPT-INVARIANTS-CODE-2, ЧАСТЬ A: старая логика сборки заменена на
+' общую цепочку BuildPromptForStep (ApplyCorrectionsBlock ?
+' FillAllPlaceholders) по новому шаблону prompt_step_template_v1.md.
+' Заменённые старые вызовы (удалены из тела процедуры):
+'  - ReadTextFile(registriesPath\Реестр_типов.txt / _покрытия.txt) +
+'    WriteWarning "подставлена пустая строка"  ? BuildRegistryBlock
+'    (внутри FillAllPlaceholders; шаг 00 - "Реестры пусты…", отсутствие
+'    файла на шаге >00 - WriteWarning P002 + "[РЕЕСТР НЕ НАЙДЕН]");
+'  - GetSchemaFragment() + ReplaceIfPresent "{SCHEMA}" ? блок 6 собирает
+'    BuildStepTypeList (фильтрация по шагу NN прямо из артефакта структуры),
+'    {{СТРУКТУРА_ФАЙЛ}} - BuildInputFileLine;
+'  - BuildExtraDataBlock(root) & template + ReplaceIfPresent "{NN}",
+'    "{STEP_NAME}", "{REGISTRY_TYPES}", "{REGISTRY_COVERAGE}", "{SCHEMA}" ?
+'    FillAllPlaceholders (плейсхолдеры {{...}} нового шаблона);
+'  - сохранение в 04_Промты_готовые ? сохранение в 04_Промты\Промт_шаг_NN.md
+'    (как требует задание; копия в 04_Промты_готовые оставлена для
+'    обратной совместимости MakeFixPrompt/пользовательских ссылок).
 Public Sub MakeNextStepPrompt()
     Dim root As String
     Dim steps As Collection
     Dim stepsPath As String
     Dim promptsPath As String
     Dim readyPath As String
-    Dim registriesPath As String
     Dim current As String
     Dim nextNN As String
     Dim nextName As String
-    Dim template As String
-    Dim regTypes As String
-    Dim regCoverage As String
-    Dim schema As String
     Dim result As String
     Dim stepFolder As String
     Dim promptFile As String
-    Dim templatePath As String   ' W-PROMPT-PATH-FIX: полный путь к шаблону промта шага
+    Dim hasTypes As Boolean
     Dim i As Long
     Dim j As Long
 
@@ -911,9 +2150,8 @@ Public Sub MakeNextStepPrompt()
     stepsPath = root & "\03_Результаты генерации\01_По шагам"
     promptsPath = root & "\04_Промты"
     readyPath = root & "\03_Результаты генерации\04_Промты_готовые"
-    registriesPath = root & "\03_Результаты генерации\03_Реестры"
 
-    ' 0. W-PROMPT-GEN-STEP-00: если Шаги.txt отсутствует — вместо промта
+    ' 0. W-PROMPT-GEN-STEP-00: если Шаги.txt отсутствует - вместо промта
     '    следующего шага формируем Промт №0 (декомпозиция) и выходим.
     If Len(Dir(promptsPath & "\Шаги.txt", vbNormal)) = 0 Then
         GenerateStepZeroPrompt
@@ -931,6 +2169,9 @@ Public Sub MakeNextStepPrompt()
     nextNN = ReadNextStep()
 
     ' 3. Следующего шага нет ? финальный аудит (раздел 9)
+    '    NB: старый путь сборки аудита по шаблону {NN}/{STEP_NAME}/... удалён
+    '    (устарело, заменено на BuildPromptForStep); аудит формируется той же
+    '    цепочкой по шаблону prompt_step_template_v1.md для шага 99.
     If nextNN = "" Then
         ' проверка: нет ли папки с номером больше текущего (неожиданная декомпозиция)
         If current <> "" Then
@@ -943,7 +2184,7 @@ Public Sub MakeNextStepPrompt()
                     i = InStr(folderNN, "_")
                     If i > 0 Then folderNN = Left(folderNN, i - 1)
                     ' сверяем папку со списком Шаги.txt: если её там нет и
-                    ' номер больше текущего — unexpected step (раздел 9)
+                    ' номер больше текущего - unexpected step (раздел 9)
                     Dim inList As Boolean
                     inList = False
                     For j = 1 To steps.Count
@@ -964,42 +2205,16 @@ Public Sub MakeNextStepPrompt()
             Loop
         End If
 
-        ' читаем шаблон того же уровня (04_Промты\Шаблоны\prompt_step_template_v1.md)
-        ' W-PROMPT-PATH-FIX: шаблон лежит в подпапке "Шаблоны", а не в корне "04_Промты".
-        templatePath = promptsPath & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME
-        Mod_Util.WriteLog "[i] Поиск шаблона шага по пути: " & templatePath
-        If Len(Dir(templatePath, vbNormal)) = 0 Then
-            template = ""
-        Else
-            template = ReadTextFile(templatePath)
-        End If
-        If template = "" Then
+        ' новая цепочка: ApplyCorrectionsBlock ? FillAllPlaceholders (шаг 99)
+        result = BuildPromptForStep(root, "99", "Шаг_99_Финал", hasTypes)
+        If result = "" Then
             Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
-                " (проверен путь: " & templatePath & ")"
+                " (проверен путь: " & promptsPath & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME & ")"
             MsgBox "Ошибка P002: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
                    " в папке 04_Промты\Шаблоны.", _
                    vbCritical, "Промт следующего шага"
             Exit Sub
         End If
-
-        ' реестры и фрагмент схемы (при отсутствии — пустая строка и предупреждение)
-        regTypes = ReadTextFile(registriesPath & "\Реестр_типов.txt")
-        If regTypes = "" Then
-            Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Реестр_типов.txt не найден или пуст, подставлена пустая строка."
-        End If
-        regCoverage = ReadTextFile(registriesPath & "\Реестр_покрытия.txt")
-        If regCoverage = "" Then
-            Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Реестр_покрытия.txt не найден или пуст, подставлена пустая строка."
-        End If
-        schema = GetSchemaFragment()
-
-        ' W-CORRECTION-PACK-1, п.4.3: блок доп. данных перед текстом промта
-        result = BuildExtraDataBlock(root) & template
-        result = ReplaceIfPresent(result, "{NN}", "99")
-        result = ReplaceIfPresent(result, "{STEP_NAME}", "Шаг_99_Финал")
-        result = ReplaceIfPresent(result, "{REGISTRY_TYPES}", regTypes)
-        result = ReplaceIfPresent(result, "{REGISTRY_COVERAGE}", regCoverage)
-        result = ReplaceIfPresent(result, "{SCHEMA}", schema)
 
         EnsureFolder stepsPath & "\Шаг_99_Финал"
         EnsureFolder readyPath
@@ -1027,60 +2242,43 @@ Public Sub MakeNextStepPrompt()
         Exit Sub
     End If
 
-    ' 5. Шаблон промта шага (04_Промты\Шаблоны\prompt_step_template_v1.md)
-    ' W-PROMPT-PATH-FIX: шаблон лежит в подпапке "Шаблоны", а не в корне "04_Промты".
-    templatePath = promptsPath & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME
-    Mod_Util.WriteLog "[i] Поиск шаблона шага по пути: " & templatePath
-    If Len(Dir(templatePath, vbNormal)) = 0 Then
-        template = ""
-    Else
-        template = ReadTextFile(templatePath)
-    End If
-    If template = "" Then
+    ' 5. Сборка промта новой цепочкой (W-PROMPT-INVARIANTS-CODE-2):
+    '    шаблон prompt_step_template_v1.md ? ApplyCorrectionsBlock (блок 16,
+    '    сохранение корректировок предыдущей версии + corrections.md с
+    '    валидацией скоупа IsCorrectionLineValid/CollectValidCorrections) ?
+    '    FillAllPlaceholders (блоки 3.4 - BuildExtraDataListBlock,
+    '    4.1/4.2 - BuildRegistryBlock, 6 - BuildStepTypeList, константы -
+    '    project_settings.md, маркер-страховка "ЗАДАЧА НЕ ЗАДАНА" при пустом
+    '    блоке 6). Старые вызовы ReadTextFile реестров / GetSchemaFragment /
+    '    BuildExtraDataBlock / ReplaceIfPresent("{NN}"...) удалены (устарело,
+    '    заменено на BuildPromptForStep).
+    result = BuildPromptForStep(root, nextNN, nextName, hasTypes)
+    If result = "" Then
         Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
-            " (проверен путь: " & templatePath & ")"
+            " (проверен путь: " & promptsPath & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME & ")"
         MsgBox "Ошибка P002: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
                " в папке 04_Промты\Шаблоны.", _
                vbCritical, "Промт следующего шага"
         Exit Sub
     End If
 
-    ' 6. Реестры из 03_Реестры (при отсутствии — пустая строка и предупреждение)
-    regTypes = ReadTextFile(registriesPath & "\Реестр_типов.txt")
-    If regTypes = "" Then
-        Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Реестр_типов.txt не найден или пуст, подставлена пустая строка."
-    End If
-    regCoverage = ReadTextFile(registriesPath & "\Реестр_покрытия.txt")
-    If regCoverage = "" Then
-        Mod_Util.WriteWarning "P002", "MakeNextStepPrompt: Реестр_покрытия.txt не найден или пуст, подставлена пустая строка."
-    End If
-
-    ' 7. Фрагмент схемы из 02_Подготовка схемы (Адаптированная_структура_*.xlsx, если есть)
-    schema = GetSchemaFragment()
-
-    ' 8. Подстановка плейсхолдеров (только тех, что есть в шаблоне).
-    '    W-CORRECTION-PACK-1, п.4.3: если папка 04_Дополнительные данные не
-    '    пуста — в начало промта вставляется блок "ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА".
-    result = BuildExtraDataBlock(root) & template
-    result = ReplaceIfPresent(result, "{NN}", nextNN)
-    result = ReplaceIfPresent(result, "{STEP_NAME}", nextName)
-    result = ReplaceIfPresent(result, "{REGISTRY_TYPES}", regTypes)
-    result = ReplaceIfPresent(result, "{REGISTRY_COVERAGE}", regCoverage)
-    result = ReplaceIfPresent(result, "{SCHEMA}", schema)
-
-    ' 9. Папка шага создаётся только по факту формирования промта (раздел 3)
+    ' 6. Папка шага создаётся только по факту формирования промта (раздел 3)
     stepFolder = stepsPath & "\" & nextName
-    ' Создаём папку шага как маркер для ReadCurrentStep,
-    ' сам промт сохраняется в readyPath.
+    ' Создаём папку шага как маркер для ReadCurrentStep.
     EnsureFolder stepFolder
 
-    ' 10. Сохранение готового промта в 04_Промты_готовые
-    ' (централизованное хранение готовых промтов)
-    EnsureFolder readyPath
-    promptFile = readyPath & "\Промт_шаг_" & nextNN & ".md"
+    ' 7. Сохранение готового промта в 04_Промты\Промт_шаг_NN.md (требование
+    '    задания) + копия в 04_Промты_готовые (обратная совместимость:
+    '    централизованное хранение готовых промтов, источник для
+    '    ApplyCorrectionsBlock при повторной генерации).
+    EnsureFolder promptsPath
+    promptFile = promptsPath & "\Промт_шаг_" & nextNN & ".md"
     SaveTextFileUtf8 promptFile, result
+    EnsureFolder readyPath
+    SaveTextFileUtf8 readyPath & "\Промт_шаг_" & nextNN & ".md", result
 
-    Mod_Util.WriteLog "MakeNextStepPrompt: сформирован промт шага " & nextNN
+    Mod_Util.WriteLog "MakeNextStepPrompt: сформирован промт шага " & nextNN & _
+        IIf(hasTypes, "", " (ВНИМАНИЕ: блок 6 пуст - подставлен маркер-страховка)")
     MsgBox "Сформирован промт шага " & nextNN & " (" & nextName & "):" & vbCrLf & _
            promptFile & vbCrLf & vbCrLf & _
            "Создана папка шага: " & stepFolder, vbInformation, "Промт следующего шага"
@@ -1098,15 +2296,26 @@ End Sub
 ' 1. Собирает пути к папкам 02_Подготовка схемы / 01_Исходные данные\02_Описание /
 '    03_Конфигурация и находит реальные имена файлов через Dir по маскам
 '    (Адаптированная_структура_*.xlsx; *.docx; *.xml или *.pilotcfx).
-' 2. Если файла нет — MsgBox "Отсутствует файл в папке X", [WARN] в лог,
+' 2. Если файла нет - MsgBox "Отсутствует файл в папке X", [WARN] в лог,
 '    в промт подставляется плейсхолдер "НЕ НАЙДЕН", работа продолжается.
 '    ИСКЛЮЧЕНИЕ (W-PROMPT-00-SCHEMA-FIX): Схема (адаптированная структура)
-'    является обязательной — если в 02_Подготовка схемы нет ни одного файла
+'    является обязательной - если в 02_Подготовка схемы нет ни одного файла
 '    "Адаптированная_структура_*.xlsx", генерация Промта №0 останавливается.
 ' 3. Читает шаблон prompt_step_00_template.md из 04_Промты\Шаблоны,
 '    подставляет {SCHEMA_FILENAME}, {DESCRIPTION_FILENAME},
 '    {CONFIG_FILENAME} и {Decomposition_Rules} (правила декомпозиции v7.13).
 ' 4. Сохраняет результат в 04_Промты\Промт_шаг_00_Декомпозиция.md.
+' W-PROMPT-INVARIANTS-CODE-2, ЧАСТЬ B: дополнительно формируется промт
+' шага 00 по НОВОМУ шаблону prompt_step_template_v1.md ОБЩЕЙ цепочкой
+' BuildPromptForStep (ApplyCorrectionsBlock ? FillAllPlaceholders) и
+' сохраняется как Промт_шаг_00.md в 04_Промты. Специфика шага 00
+' обеспечивается внутри цепочки:
+'  - реестры пусты - BuildRegistryBlock подставляет "Реестры пусты - первый
+'    шаг (P002 штатно)" (не "[РЕЕСТР НЕ НАЙДЕН]");
+'  - блок 6 - BuildStepTypeList с фильтром по шагу 00 из структуры;
+'  - корректировки - сохраняются из предыдущей версии Промт_шаг_00.md;
+'  - плейсхолдеры - FillAllPlaceholders (константы проекта - из
+'    project_settings.md, не из кода).
 Private Sub GenerateStepZeroPrompt()
     Dim root As String
     Dim promptsPath As String
@@ -1121,6 +2330,8 @@ Private Sub GenerateStepZeroPrompt()
     Dim missingList As String           ' перечень отсутствующих входных файлов
     Dim template As String
     Dim result As String
+    Dim step0File As String             ' 04_Промты\Промт_шаг_00.md (новый шаблон)
+    Dim hasTypes As Boolean             ' заполнен ли блок 6 для шага 00
 
     On Error GoTo ErrHandler
 
@@ -1139,17 +2350,18 @@ Private Sub GenerateStepZeroPrompt()
     configFolder = root & "\01_Исходные данные\03_Конфигурация"
     templatePath = promptsPath & "\Шаблоны\" & TEMPLATE_STEP0_NAME
     outFile = promptsPath & "\" & STEP0_PROMPT_FILE
+    step0File = promptsPath & "\Промт_шаг_00.md"
 
     Mod_Util.WriteLog "GenerateStepZeroPrompt: Шаги.txt не найден, формирую Промт №0 (декомпозиция)"
 
     ' 1. Реальные имена входных файлов:
     '    W-PROMPT-00-SCHEMA-FIX: схема (адаптированная структура) берётся из
-    '    папки 02_Подготовка схемы — самый свежий файл по дате в имени
-    '    (при равенстве/отсутствии даты в имени — по дате изменения); если
-    '    файлов несколько, берётся последний; если файлов нет — ошибка и
+    '    папки 02_Подготовка схемы - самый свежий файл по дате в имени
+    '    (при равенстве/отсутствии даты в имени - по дате изменения); если
+    '    файлов несколько, берётся последний; если файлов нет - ошибка и
     '    остановка генерации.
-    '    описание — *.docx; конфигурация — через FindConfigFile
-    '    (валидны .xml и .txt; если только .pilotcfx — предупреждение от
+    '    описание - *.docx; конфигурация - через FindConfigFile
+    '    (валидны .xml и .txt; если только .pilotcfx - предупреждение от
     '    FindConfigFile, генерация НЕ блокируется).
     schemaName = GetNewestSchemaArtifactName(prepFolder)
 
@@ -1172,7 +2384,7 @@ Private Sub GenerateStepZeroPrompt()
     configName = Mod_Util.FindConfigFile(configFolder)
     If configName <> "" Then configName = Mid$(configName, InStrRev(configName, "\") + 1)
 
-    ' 2. Отсутствующие файлы — MsgBox + [!] (FormatMissingFile) + плейсхолдер
+    ' 2. Отсутствующие файлы - MsgBox + [!] (FormatMissingFile) + плейсхолдер
     '    "НЕ НАЙДЕН"; формирование Промта №0 при этом НЕ прерывается
     If descName = "" Then
         Mod_Util.WriteWarning "P004", Mod_Util.FormatMissingFile("01_Исходные данные\02_Описание\*.docx")
@@ -1202,13 +2414,16 @@ Private Sub GenerateStepZeroPrompt()
     End If
 
     ' 4. Подстановка плейсхолдеров реальными именами файлов и правилами v7.13
+    '    (устаревший путь сборки сохранён сознательно: этот промт содержит
+    '    правила декомпозиции и не заменяется новым шаблоном шага; новый
+    '    промт шага 00 формируется в п.4b общей цепочкой).
     result = template
     result = ReplaceIfPresent(result, "{SCHEMA_FILENAME}", schemaName)
     result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descName)
     result = ReplaceIfPresent(result, "{CONFIG_FILENAME}", configName)
     ' W-PROMPT-00-REFINE, п.2/п.5: список файлов доп. данных (папка
     ' 01_Исходные данные\04_Дополнительные данные) подставляется в блок
-    ' "Проверка файлов" шаблона; если папка пуста — плейсхолдер заменяется
+    ' "Проверка файлов" шаблона; если папка пуста - плейсхолдер заменяется
     ' на пустую строку.
     result = ReplaceIfPresent(result, "{EXTRA_DATA_LIST}", BuildStepZeroExtraDataList(root))
     result = ReplaceIfPresent(result, "{Decomposition_Rules}", DECOMPOSITION_RULES_V713)
@@ -1219,7 +2434,24 @@ Private Sub GenerateStepZeroPrompt()
 
     Mod_Util.WriteLog "GenerateStepZeroPrompt: сохранён " & outFile
 
-    ' 6. Инструкция пользователю
+    ' 4b/6. W-PROMPT-INVARIANTS-CODE-2: промт шага 00 по НОВОМУ шаблону -
+    '     та же общая цепочка, что и для остальных шагов (без дублирования
+    '     логики): BuildPromptForStep -> ApplyCorrectionsBlock ->
+    '     FillAllPlaceholders. Ошибка сборки нового промта НЕ блокирует
+    '     основной промт декомпозиции (запись в журнал + предупреждение).
+    Dim step0Result As String
+    step0Result = BuildPromptForStep(root, "00", "", hasTypes)
+    If step0Result <> "" Then
+        SaveTextFileUtf8 step0File, step0Result
+        Mod_Util.WriteLog "GenerateStepZeroPrompt: сохранён промт шага 00 (новый шаблон) " & _
+            step0File & IIf(hasTypes, "", " (блок 6 пуст - маркер-страховка)")
+    Else
+        Mod_Util.WriteWarning "P004", "GenerateStepZeroPrompt: не собран промт шага 00 по " & _
+            "новому шаблону (" & TEMPLATE_STEP_V1_NAME & " не найден или ошибка сборки). " & _
+            "Промт декомпозиции сохранён без изменений."
+    End If
+
+    ' 7. Инструкция пользователю
     MsgBox "Файл Шаги.txt не найден. Сформирован Промт №0:" & vbCrLf & _
            outFile & vbCrLf & vbCrLf & _
            "Загрузите его в ИИ, получите Шаги.txt и сохраните в 04_Промты.", _
@@ -1263,7 +2495,7 @@ Public Sub MakeFixPrompt()
     current = ReadCurrentStep()
     If current = "" Then
         Mod_Util.WriteError "P003", "MakeFixPrompt: текущий шаг не определён (нет папок Шаг_* в 01_По шагам)"
-        MsgBox "Ошибка P003: текущий шаг не определён — в 03_Результаты генерации\01_По шагам " & _
+        MsgBox "Ошибка P003: текущий шаг не определён - в 03_Результаты генерации\01_По шагам " & _
                "нет ни одной папки шага.", vbCritical, "Промт исправления"
         Exit Sub
     End If
@@ -1276,7 +2508,7 @@ Public Sub MakeFixPrompt()
         Exit Sub
     End If
 
-    ' фиксированное имя последней сводной; если его нет — последний xlsx по дате
+    ' фиксированное имя последней сводной; если его нет - последний xlsx по дате
     fileName = Dir(summaryPath & "\zhc_okks_gost_FINAL.xlsx")
     If fileName = "" Then
         fileName = LastModifiedFile(summaryPath, "*.xlsx")
@@ -1291,7 +2523,7 @@ Public Sub MakeFixPrompt()
 
     Set wb = Nothing
     On Error Resume Next
-    ' W-AV-REFACTOR, п.1: AddToMru:=False — см. комментарий выше (Mod_Assembler).
+    ' W-AV-REFACTOR, п.1: AddToMru:=False - см. комментарий выше (Mod_Assembler).
     Set wb = Workbooks.Open(finalFile, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
     On Error GoTo ErrHandler
     If wb Is Nothing Then
@@ -1301,7 +2533,7 @@ Public Sub MakeFixPrompt()
         Exit Sub
     End If
 
-    ' 3. Лист «Ошибки»
+    ' 3. Лист "Ошибки"
     errorsText = ""
     If Not ReadErrorsSheetText(wb, errorsText) Then
         Mod_Util.WriteError "P003", "MakeFixPrompt: в сводной не найден лист 'Ошибки': " & finalFile
@@ -1312,7 +2544,7 @@ Public Sub MakeFixPrompt()
     End If
     wb.Close SaveChanges:=False
 
-    ' 4. Ошибок нет — ничего не формируем (раздел 13)
+    ' 4. Ошибок нет - ничего не формируем (раздел 13)
     If errorsText = "" Then
         Mod_Util.WriteLog "MakeFixPrompt: ошибок нет"
         MsgBox "Ошибок нет, исправлять нечего.", vbInformation, "Промт исправления"
@@ -1328,7 +2560,7 @@ Public Sub MakeFixPrompt()
         Exit Sub
     End If
 
-    ' 6. Оба реестра (при отсутствии — пустая строка и предупреждение)
+    ' 6. Оба реестра (при отсутствии - пустая строка и предупреждение)
     regTypes = ReadTextFile(registriesPath & "\Реестр_типов.txt")
     If regTypes = "" Then
         Mod_Util.WriteWarning "P003", "MakeFixPrompt: Реестр_типов.txt не найден или пуст, подставлена пустая строка."
@@ -1365,3 +2597,11 @@ ErrHandler:
            Err.Description, vbCritical, "Промт исправления"
     Err.Clear
 End Sub
+
+' Разовая инициализация массива известных плейсхолдеров.
+Private Sub EnsureKnownPh()
+    If SPLIT_KNOWN_PH_READY Then Exit Sub
+    SPLIT_KNOWN_PH = Split(TEMPLATE_PLACEHOLDERS, ";")
+    SPLIT_KNOWN_PH_READY = True
+End Sub
+
