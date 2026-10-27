@@ -131,49 +131,65 @@ DialogCaption, DialogHint, InputHint, ItemLinesCount, ShowInHistory.
 
 10.2. Строка (Kind="Enum" и Kind="Object").
 
-а) Enum — справочник перечислений:
+а) Enum — справочник перечислений. Корневой тег — Configuration,
+внутри него — Attr Kind="Enum", внутри Attr — теги Item:
+<Configuration>
 <Attr Kind="Enum" IsEditable="True" DefaultItemIndex="1">
 <Item>Значение 1</Item>
 <Item>Значение 2</Item>
 </Attr>
-DefaultItemIndex — 1-based (1 = первый). Без него — значение по умолчанию
-не задано.
+</Configuration>
+DefaultItemIndex — 1-based (1 = первый элемент списка). Параметр
+«Defaultindex» не существует — использовать только DefaultItemIndex.
+Без DefaultItemIndex — значение по умолчанию не задано.
+Item — по одному значению на тег; значения на кириллице, дословно.
+Закрыть каждый тег явно; голых <Item> вне Attr быть не должно.
 
-б) Object — объектный справочник:
+б) Object — объектный справочник. Корневой тег — Configuration,
+внутри него — Attr Kind="Object":
+<Configuration>
 <Attr Kind="Object" Source="[GUID]" IsEditable="True" StringFormat="{name}" EditorType="Dialog" ElementsTypes="…" CreateLink="True"/>
+</Configuration>
 
 Две сущности:
-- ElementsTypes — ТИП ЭКЗЕМПЛЯРА, на который ссылаемся (из контекста
-  атрибута и Схемы). НЕ корень справочника, НЕ фиксированный список.
+- ElementsTypes — КОНТЕКСТНЫЙ ТИП ЭКЗЕМПЛЯРА, на который ссылаемся
+  (берётся из контекста атрибута, Схемы и Конфигурации). НЕ фиксированный
+  список, НЕ корень справочника (reference_* в ElementsTypes НЕ ставить).
   Примеры:
-    * ссылка на «Договор» → ElementsTypes="договор";
-    * ссылка на «Приказ» внутри контрагента → ElementsTypes="приказ";
+    * ссылка на «Договор» → ElementsTypes="dogovor";
+    * ссылка на «Приказ» внутри контрагента → ElementsTypes="prikaz";
     * ссылка на контрагента → ElementsTypes="contractor" (или
       contractor,individual_entrepreneur,physical_person — если ссылаемся
       на любого из них).
-- Source — GUID КОНТЕЙНЕРА, где лежит тип из ElementsTypes.
-  Определяется по Схеме (поле «Входит в»):
-    1) если тип сам — справочник из {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}} (колонка
-       «Тип справочника») → Source = его собственный GUID;
-    2) если тип дочерний (любого уровня) к справочнику R из
-       {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}} → Source = GUID БЛИЖАЙШЕГО такого
-       предка R (наименьшая глубина; если предков несколько на одной
-       глубине — первого по порядку таблицы);
+- Source — GUID КОНТЕЙНЕРА (справочника), в котором лежит тип из
+  ElementsTypes. GUID НЕ берётся из Конфигурации — Конфигурация GUID
+  НЕ содержит. Единственный источник Source — {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}
+  (блок 4); fallback — корень БД.
+  Определяется по дереву «Входит в» (Схема, пункт 3.1):
+    1) если тип сам является справочником из {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}
+       (совпадение с колонкой «Тип справочника») → Source = его
+       собственный GUID;
+    2) если тип является дочерним (любого уровня) к справочнику R из
+       {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}} → Source = GUID БЛИЖАЙШЕГО предка-
+       справочника R (наименьшая глубина по «Входит в»; если нескольких
+       предков на одной глубине — первого по порядку таблицы);
     3) иначе → Source = "00000001-0001-0001-0001-000000000001" (корень БД).
-       Это валидное значение, пометок не требуется.
-  Конфигурация GUID НЕ содержит — единственный источник Source — таблица
-  (или корень БД как fallback). Выдумывать GUID запрещено.
-- Тип справочника (колонка «Тип справочника» в таблице GUID) — системное
-  имя КОРНЕВОГО элемента (reference_contractors и т.п.); используется
-  только для определения Source по правилу 1/2, но НЕ как ElementsTypes.
+       Это валидное значение, пометки «временный» не ставятся.
+  Выдумывать GUID запрещено.
+- Колонка «Тип справочника» в {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}} — системное имя
+  КОРНЕВОГО элемента справочника (reference_contractors и т.п.);
+  используется ТОЛЬКО для нахождения Source по правилам 1/2 и НЕ
+  подставляется в ElementsTypes.
+Маппинг «справочник → типы» не требуется: ElementsTypes определяется
+контекстом атрибута, Схемой и Конфигурацией.
 
 Правила:
 - Контрагенты (Source="bca77be0-726d-4ae6-9699-ff465db5ba01"):
   ElementsTypes — по контексту (contractor / individual_entrepreneur /
   physical_person / их перечисление).
-- Новые справочники v9.1: Source = GUID ближайшего предка из таблицы или
-  корень БД; ElementsTypes = тип экземпляра из Конфигурации
-  (individual_entrepreneur, physical_person).
+- Новые справочники v9.1: Source = GUID ближайшего предка-справочника из
+  {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}} либо корень БД; ElementsTypes = тип экземпляра
+  из Конфигурации (individual_entrepreneur, physical_person).
 - Если тип экземпляра не найден в Конфигурации — пометь «ElementsTypes
   не определён: нет в Конфигурации», не выдумывай.
 
@@ -197,14 +213,20 @@ DefaultValue, DefaultValueFormat, DefaultDaysCount, AutoFill
 
 10.6. Состояние.
 <Configuration ShowInListView="true" EnablePopupCommands="false" />
-StateMachineId НЕ указывать (даже если был ранее). Поле необязательное.
+StateMachineId НЕ указывать (даже если он был в исходных примерах).
+Поле необязательное.
 
 10.7. Справочник элементов.
+Корневой тег — Configuration, внутри него — ElementBook (сам ElementBook
+корневым быть НЕ может):
 <Configuration>
 <ElementBook Source="[GUID]" StringFormat="{name}" AllowMultiSelect="false" CreateLink="true" AutoFill="true"/>
 </Configuration>
-Параметры ElementBook: Source ("00000001-0001-0001-0001-000000000001" =
-папка Начало, все элементы БД), StringFormat, AllowMultiSelect,
+Source — по тем же правилам, что и для Attr Kind="Object" (пункт 10.2):
+только из {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}} (ближайший предок-справочник по
+дереву «Входит в»), иначе корень БД
+"00000001-0001-0001-0001-000000000001" (папка Начало, все элементы БД).
+Параметры ElementBook: Source, StringFormat, AllowMultiSelect,
 ElementsTypes, ShowInListView, EnablePopupCommands, CreateLink, AutoFill.
 AttachmentToTaskAutoFill — НЕ использовать (задания не создаются).
 
@@ -227,9 +249,13 @@ AttachmentToTaskAutoFill — НЕ использовать (задания не 
 10.12. Запреты.
 - GUID — только из {{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}} или корень БД (fallback).
   Конфигурация GUID не содержит.
-- ElementsTypes — только из Конфигурации (типы-источники) по правилам 10.2.
-- Корневой тег — только из образцов; не выдумывать.
+- ElementsTypes — только из Конфигурации (типы-источники) по правилам 10.2;
+  reference_* (корни справочников) в ElementsTypes запрещены.
+- Корневой тег — только из образцов; не выдумывать. Для Enum, Object и
+  ElementBook корневой тег — Configuration (Attr и ElementBook — вложенные).
 - Устаревшие: Attr Kind="OrgUnit", Attr Kind="Type" — не использовать.
+- Параметр «Defaultindex» — не использовать; только DefaultItemIndex.
+- StateMachineId для «Состояние» — не использовать.
 - Обратные кавычки, Mask — запрещены.
 
 ## 11. Дедупликация
