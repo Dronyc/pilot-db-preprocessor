@@ -1,6 +1,6 @@
 # Карта проекта (Project Map)
 
-Обновлено: 2026-10-22 (W-CORRECTION-PACK-1).
+Обновлено: 2026-10-27 (W-DOCS-UPDATE: актуализация карты проекта под новую архитектуру генерации промтов — prompt_step_template_v1.md, BuildPromptForStep, механизм корректировок).
 
 ## VBA-модули (корень репозитория, формат .bas)
 
@@ -9,7 +9,7 @@
 | Mod_Util.bas | Журналирование, конфигурация, пути | WriteLog ("[i] <текст>"), WriteError ("ERROR [<код>]: <текст>"), WriteWarning ("[!] <текст>"), DebugLog (публичная, безопасное отладочное логирование: Immediate + файл-журнал, ошибки журналирования не роняют сборку), FormatMissingFile, FindConfigFile (.xml > .txt; только .pilotcfx — предупреждение), GetConfigValue, GetProjectRoot |
 | Mod_Folders.bas | Структура папок и проверка исходников | CreateProjectFolders (создаёт в т.ч. "01_Исходные данные\04_Дополнительные данные"), CheckSourceFolders (Схема .xlsx / Описание .docx / Конфигурация через FindConfigFile / сводка по доп. данным; возвращает True/False), GetStepFolder |
 | Mod_Structure.bas | Парсинг схемы ЖЦ ОКС в адаптированную структуру | BuildFlatStructure (использует prevScreenUpdating / prevDisplayAlerts / prevStatusBar для восстановления состояния и корректно освобождает ресурсы — закрывает wbOut/wbSrc — во всех аварийных ветках Fail, OpenErr, saveErr), WriteFlatTable (лист "Адаптированная_структура"), WriteLog (лист "Аномалии схемы"; заголовки читаются через Worksheet.Range("A1:H1"), а не через ListObject.HeaderRange — из-за бага 438 после Resize), SafeAutoFit (приватная, безопасный AutoFit на скрытых листах: ошибки перехватываются локально, ширина колонок не роняет сборку), WriteTraceability, CheckNumberDuplicates (дубли номеров/наименований — только предупреждения), BackupFlatTableSheet (бэкапы "Адаптированная_структура_bak_<YYYYMMDD_HHMMSS>", ротация 5), ArchiveOldSchemaArtifacts (архивация старых "Адаптированная_структура_*.xlsx" в "02_Подготовка схемы\Архив") |
-| Mod_Prompt.bas | Генерация промтов | GenerateStepZeroPrompt (Промт №0; блокировка F005 при неготовых исходниках), MakeNextStepPrompt (промт шага + блок "ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА"; блокировка F005), MakeFixPrompt, ReadStepList (канонический разделитель "\|" из Шаги.txt), BuildExtraDataBlock, ListFolderFiles, DECOMPOSITION_RULES_V713 (алгоритм «анализ → прогноз +50% → шаги → формат NN\|Имя_папки») |
+| Mod_Prompt.bas | Генерация промтов по новому шаблону prompt_step_template_v1.md | **BuildPromptForStep** (общая цепочка сборки промта шага по новому шаблону: загрузка шаблона → ApplyCorrectionsBlock → FillAllPlaceholders → локальные дополнения/очистка маркеров), **ApplyCorrectionsBlock** (сохранение пользовательских корректировок предыдущей версии промта и corrections.md в блоке 16 «Точечные корректировки и уточнения шага»; работает ДО подстановки плейсхолдеров, пока {{NN}} в тексте жив), **FillAllPlaceholders** (подстановка плейсхолдеров `{{...}}` нового шаблона: блоки 3.1–3.5, 4.1/4.2, 6, константы проекта из project_settings.md; BuildExtraDataListBlock формирует блок 3.4 с назначениями доп. файлов), **GenerateStepZeroPrompt** (теперь генерирует ТОЛЬКО Промт Декомпозиции №0 по шаблону prompt_step_00_template.md — вызывается из MakeNextStepPrompt при отсутствии Шаги.txt; блокировка F005 при неготовых исходниках), **MakeNextStepPrompt** (управляет ветвлением: создание папок Шаг_*, шаг 00 при отсутствии Шаги.txt, обычный промт следующего шага, финальный аудит — все через BuildPromptForStep), MakeFixPrompt, ReadStepList (канонический разделитель "\|" из Шаги.txt), ListFolderFiles, DECOMPOSITION_RULES_V713 (алгоритм «анализ → прогноз +50% → шаги → формат NN\|Имя_папки»). Устаревшая функция BuildExtraDataBlock удалена (W-PROMPT-INVARIANTS-CODE-2); её заменяет BuildExtraDataListBlock (блок 3.4) внутри FillAllPlaceholders |
 | Mod_Assembler.bas | Сборка итоговых настроек | сборка файлов настроек по результатам шагов |
 | Mod_Docs.bas | Документация проекта | генерация отчётов/документов |
 | Mod_Registry.bas | Реестры | Реестр_типов.txt, Реестр_покрытия.txt |
@@ -52,13 +52,16 @@
 
 - ListObject.HeaderRange после Resize может выдавать ошибку 438. Для чтения заголовков использовать Worksheet.Range("A1:H1").
 - Внутри циклов `For i = 1 To N` в обработчиках ошибок использовать именованные метки (`Resume NextNodeLog`) вместо `Resume Next`, чтобы переходить к следующей итерации цикла, а не к следующей инструкции.
+- В VBA строковые литералы с кавычками внутри требуют экранирования (""), иначе Syntax error. Проверять компиляцию (Debug -> Compile) перед коммитом.
+- При присвоении результата Split() динамическому массиву использовать Variant (Private arr As Variant), иначе ошибка компиляции.
+- Все Private Const должны находиться до первой процедуры Sub/Function в модуле.
 
 ## templates/prompts (папка prompts/ в репозитории)
 
 | Файл | Назначение |
 |---|---|
 | prompt_step_00_template.md | Шаблон Промта №0 (декомпозиция): алгоритм декомпозиции, проверка файлов (.xml/.txt; .pilotcfx не принимается ИИ), вывод `NN|Имя_папки` |
-| prompt_step_template_v1.md | Шаблон промта следующего шага ({NN}, {STEP_NAME}, {REGISTRY_TYPES}, {REGISTRY_COVERAGE}, {SCHEMA}) |
+| prompt_step_template_v1.md | Шаблон промта следующего шага: **17 блоков** (инвариантное ядро — блоки 7–11: алгоритм, правила листов «Типы»/«Атрибуты», типы атрибутов, дедупликация; блок 16 — точечные корректировки и уточнения шага, заполняется ApplyCorrectionsBlock). Использует плейсхолдеры формата `{{...}}` ({{NN}}, {{ИМЯ_ШАГА}}, {{СТРУКТУРА_ФАЙЛ}}, {{ФАЙЛЫ_ДОП_ДАННЫХ}}, {{РЕЕСТР_ТИПОВ}}, {{РЕЕСТР_ПОКРЫТИЯ}}, {{СПИСОК_ТИПОВ_ШАГА}} и др.), которые подставляет FillAllPlaceholders внутри цепочки BuildPromptForStep |
 | prompt_fix_v1.0.md | Шаблон промта исправления (MakeFixPrompt) |
 | prompt_generator_v7.13.md | Общая версия генератора промтов |
 | prompt_settings_template.md | Шаблон настроек |
