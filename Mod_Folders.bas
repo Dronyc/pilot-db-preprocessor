@@ -165,6 +165,13 @@ Public Sub CreateProjectFolders()
     Exit Sub
 
 ErrHandler:
+    Dim errFolder As String
+    errFolder = "неизвестно"
+    On Error Resume Next
+    If i > LBound(relList) And i <= UBound(relList) Then
+        errFolder = root & "\" & CStr(relList(i))
+    End If
+    On Error GoTo 0
     ' пишем ошибку с указанием конкретной папки, в которой произошёл сбой
     Mod_Util.WriteError "F002", "CreateProjectFolders: ошибка создания папки """ & _
                                 root & "\" & CStr(relList(i)) & """. Ошибка: " & Err.Description
@@ -220,53 +227,64 @@ End Sub
 '   * ошибки отдельных FileCopy/MkDir пишутся в лог (F003), но не прерывают
 '     обход. Результаты накапливаются в gTplCopied/gTplFailed.
 Private Sub CopyTemplateTree(ByVal srcDir As String, ByVal dstDir As String)
-    Dim entryName As String           ' имя файла или подпапки
-    Dim attrs As Long                 ' атрибуты элемента (для отличия папок)
-    Dim hadErrors As Boolean          ' были ли ошибки чтения атрибутов
+    Dim entryName As String
+    Dim attrs As Long
+    Dim hadErrors As Boolean
+    Dim subDirs As Collection
+    Dim files As Collection
+    Dim i As Long
 
-    ' --- Файлы текущего уровня ---------------------------------------------
+    Set subDirs = New Collection
+    Set files = New Collection
+
+    ' --- 1. Собираем файлы и папки в коллекции (без рекурсии) ---------------
     On Error Resume Next
-    entryName = Dir(srcDir & "\*")
+    entryName = Dir(srcDir & "\*", vbDirectory)
     Do While entryName <> ""
-        ' Пропускаем временные файлы Office (~$) — сохраняем прежнее поведение.
-        If Left$(entryName, 2) <> "~$" Then
+        If entryName <> "." And entryName <> ".." Then
+            attrs = 0
+            hadErrors = False
             Err.Clear
-            FileCopy srcDir & "\" & entryName, dstDir & "\" & entryName
-            If Err.Number <> 0 Then
-                gTplFailed = gTplFailed + 1
-                Mod_Util.WriteError "F003", "CopyPromptTemplates: не удалось скопировать файл """ & _
-                                            entryName & """ в """ & dstDir & """. Ошибка: " & Err.Description
-                Err.Clear
-            Else
-                gTplCopied = gTplCopied + 1
+            attrs = GetAttr(srcDir & "\" & entryName)
+            If Err.Number <> 0 Then hadErrors = True: Err.Clear
+            
+            If Not hadErrors Then
+                If (attrs And vbDirectory) = vbDirectory Then
+                    subDirs.Add entryName
+                Else
+                    If Left$(entryName, 2) <> "~$" Then
+                        files.Add entryName
+                    End If
+                End If
             End If
         End If
         entryName = Dir()
     Loop
     On Error GoTo 0
+    Err.Clear ' Очищаем возможные скрытые ошибки от GetAttr
 
-    ' --- Подпапки: рекурсия (вложенность любого уровня) --------------------
-    entryName = Dir(srcDir & "\*", vbDirectory)
-    Do While entryName <> ""
-        If entryName <> "." And entryName <> ".." Then
-            ' Dir(..., vbDirectory) может вернуть и файлы - проверяем атрибуты.
-            attrs = 0
-            hadErrors = False
-            On Error Resume Next
-            attrs = GetAttr(srcDir & "\" & entryName)
-            If Err.Number <> 0 Then hadErrors = True: Err.Clear
-            On Error GoTo 0
-            If (Not hadErrors) And (attrs And vbDirectory) = vbDirectory Then
-                ' Создаём такую же подпапку в приёмнике (если её ещё нет).
-                EnsureFolder dstDir & "\" & entryName
-                ' Копируем содержимое подпапки рекурсивно.
-                CopyTemplateTree srcDir & "\" & entryName, dstDir & "\" & entryName
-            End If
+    ' --- 2. Копируем файлы --------------------------------------------------
+    For i = 1 To files.Count
+        entryName = files(i)
+        Err.Clear
+        FileCopy srcDir & "\" & entryName, dstDir & "\" & entryName
+        If Err.Number <> 0 Then
+            gTplFailed = gTplFailed + 1
+            Mod_Util.WriteError "F003", "CopyPromptTemplates: не удалось скопировать файл """ & _
+                                        entryName & """ в """ & dstDir & """. Ошибка: " & Err.Description
+            Err.Clear
+        Else
+            gTplCopied = gTplCopied + 1
         End If
-        entryName = Dir()
-    Loop
-End Sub
+    Next i
 
+    ' --- 3. Обрабатываем подпапки (рекурсия) --------------------------------
+    For i = 1 To subDirs.Count
+        entryName = subDirs(i)
+        EnsureFolder dstDir & "\" & entryName
+        CopyTemplateTree srcDir & "\" & entryName, dstDir & "\" & entryName
+    Next i
+End Sub
 ' Проверяет наличие исходных папок и файлов в них (W-CORRECTION-PACK-1,
 ' п.2.2 — переписана под унифицированные форматы сообщений):
 '   * 01_Схема          - требуется .xlsx; нет -> WriteError(FormatMissingFile), False;
@@ -456,5 +474,4 @@ ErrHandler:
     Err.Clear
     CreateStepFolder = ""
 End Function
-
 
