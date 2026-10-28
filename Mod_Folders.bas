@@ -36,6 +36,13 @@ Private Const FOLDER_PROMPTS As String = "04_Промты"
 Private Const FOLDER_PROMPT_TEMPLATES As String = "04_Промты\Шаблоны"   ' папка шаблонов промтов
 Private Const FOLDER_EXTERNAL_TEMPLATES As String = "Шаблоны"           ' внешняя папка рядом с .xlsm
 
+' Счётчики результатов копирования шаблонов (W-FOLDERS-RECURSIVE-COPY):
+' общие для всего рекурсивного обхода дерева папки "Шаблоны".
+' Объявлены на уровне модуля в самом верху — до первой процедуры (Sub/Function),
+' как того требует VBA.
+Private gTplCopied As Long            ' успешно скопировано файлов
+Private gTplFailed As Long            ' файлов скопировано с ошибкой
+
 ' Папка существует?
 Private Function FolderExists(ByVal fullPath As String) As Boolean
     FolderExists = (Dir(fullPath, vbDirectory) <> "")
@@ -165,11 +172,6 @@ ErrHandler:
            vbCritical, "Папки проекта"
     Err.Clear
 End Sub
-
-' Счётчики результатов копирования шаблонов (W-FOLDERS-RECURSIVE-COPY):
-' общие для всего рекурсивного обхода дерева папки "Шаблоны".
-Private gTplCopied As Long            ' успешно скопировано файлов
-Private gTplFailed As Long            ' файлов скопировано с ошибкой
 
 ' Копирует ВСЕ файлы из внешней папки "Шаблоны" (в корне проекта, рядом с
 ' .xlsm) во внутреннюю папку "04_Промты\Шаблоны" РЕКУРСИВНО (W-FOLDERS-RECURSIVE-COPY):
