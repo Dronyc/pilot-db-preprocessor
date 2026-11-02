@@ -2,7 +2,7 @@ Attribute VB_Name = "Mod_Assembler"
 Option Explicit
 
 ' ============================================================
-' ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+' Р“Р›РћР‘РђР›Р¬РќР«Р• РџР•Р Р•РњР•РќРќР«Р•
 ' ============================================================
 Private colErrors As Collection
 Private colWarnings As Collection
@@ -20,270 +20,572 @@ Private attrsProblemsDict As Object
 Private sourceFolderPath As String
 Private wsLog As Worksheet
 Private isSoftMode As Boolean
-Private uncoveredTypesCount As Long     ' НОВОЕ: типов без атрибутов
-Private orphanCoverageCount As Long     ' НОВОЕ: покрытие без типа в Реестре
+Private uncoveredTypesCount As Long     ' РќРћР’РћР•: С‚РёРїРѕРІ Р±РµР· Р°С‚СЂРёР±СѓС‚РѕРІ
+Private orphanCoverageCount As Long     ' РќРћР’РћР•: РїРѕРєСЂС‹С‚РёРµ Р±РµР· С‚РёРїР° РІ Р РµРµСЃС‚СЂРµ
 
 ' ============================================================
-' ГЛАВНАЯ ПРОЦЕДУРА
-' softMode:=True  — промежуточный прогон (forward-ссылки и пустое "Состоит из" = предупреждения)
-' softMode:=False — финальный прогон по склеенной таблице (полный контроль)
+' РЎРћРЎРўРћРЇРќРР• РЎР•РЎРЎРР (СЂР°Р·РґРµР»РµРЅРѕ РїРѕ СЌС‚Р°РїР°Рј, OPT-10)
+' ============================================================
+Private wbOut As Workbook           ' РёС‚РѕРіРѕРІР°СЏ РєРЅРёРіР°
+Private wsTypes As Worksheet        ' Р»РёСЃС‚ "РўРёРїС‹"
+Private wsAttrs As Worksheet        ' Р»РёСЃС‚ "РђС‚СЂРёР±СѓС‚С‹"
+Private wsErrors As Worksheet       ' Р»РёСЃС‚ "РћС€РёР±РєРё"
+Private wsWarnings As Worksheet     ' Р»РёСЃС‚ "РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ"
+Private wsReg As Worksheet          ' Р»РёСЃС‚ "Р РµРµСЃС‚СЂС‹"
+Private wsReport As Worksheet       ' Р»РёСЃС‚ "РЎРІРѕРґРєР°"
+Private rTypes As Long              ' СЃР»РµРґСѓСЋС‰Р°СЏ СЃРІРѕР±РѕРґРЅР°СЏ СЃС‚СЂРѕРєР° РЅР° Р»РёСЃС‚Рµ "РўРёРїС‹"
+Private rAttrs As Long              ' СЃР»РµРґСѓСЋС‰Р°СЏ СЃРІРѕР±РѕРґРЅР°СЏ СЃС‚СЂРѕРєР° РЅР° Р»РёСЃС‚Рµ "РђС‚СЂРёР±СѓС‚С‹"
+Private rLog As Long                ' СЃР»РµРґСѓСЋС‰Р°СЏ СЃРІРѕР±РѕРґРЅР°СЏ СЃС‚СЂРѕРєР° РЅР° Р»РёСЃС‚Рµ "Р›РѕРі РґСѓР±Р»РёРєР°С‚РѕРІ"
+Private outputFile As String        ' РїСѓС‚СЊ РёС‚РѕРіРѕРІРѕРіРѕ С„Р°Р№Р»Р°
+
+' ============================================================
+' Р“Р›РђР’РќРђРЇ РџР РћР¦Р•Р”РЈР Рђ вЂ” С‚РѕРЅРєР°СЏ РѕР±С‘СЂС‚РєР° РЅР°Рґ С€РµСЃС‚СЊСЋ СЌС‚Р°РїР°РјРё (OPT-10)
+' softMode:=True  вЂ” РїСЂРѕРјРµР¶СѓС‚РѕС‡РЅС‹Р№ РїСЂРѕРіРѕРЅ (forward-СЃСЃС‹Р»РєРё Рё РїСѓСЃС‚РѕРµ "РЎРѕСЃС‚РѕРёС‚ РёР·" = РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ)
+' softMode:=False вЂ” С„РёРЅР°Р»СЊРЅС‹Р№ РїСЂРѕРіРѕРЅ РїРѕ СЃРєР»РµРµРЅРЅРѕР№ С‚Р°Р±Р»РёС†Рµ (РїРѕР»РЅС‹Р№ РєРѕРЅС‚СЂРѕР»СЊ)
 ' ============================================================
 Sub ValidateAndAssemble(Optional softMode As Boolean = False)
-    Dim fd As FileDialog
-    Dim folderPath As String
-    Dim fName As String
-    Dim wbSrc As Workbook
-    Dim wbOut As Workbook
-    Dim wsTypes As Worksheet
-    Dim wsAttrs As Worksheet
-    Dim wsErrors As Worksheet
-    Dim wsWarnings As Worksheet
-    Dim wsReg As Worksheet          ' НОВОЕ
-    Dim wsReport As Worksheet
-    Dim rTypes As Long
-    Dim rAttrs As Long
-    Dim rLog As Long
-    Dim rSrc As Long
-    Dim lastRow As Long
-    Dim wsSrc As Worksheet
-    Dim j As Long
-    Dim sysName As String
-    Dim attrName As String
-    Dim outputFile As String
-    
+    ' W-AV-REFACTOR, Рї.5 (Guard Pattern): СЃРѕС…СЂР°РЅСЏРµРј РёСЃС…РѕРґРЅС‹Рµ Р·РЅР°С‡РµРЅРёСЏ С„Р»Р°РіРѕРІ
+    ' Application, С‡С‚РѕР±С‹ РІРѕСЃСЃС‚Р°РЅРѕРІРёС‚СЊ РўРћР§РќРћ РёС… (Р° РЅРµ РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ True),
+    ' Рё РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ РїСЂРѕС…РѕРґРёРј С‡РµСЂРµР· РјРµС‚РєСѓ CleanExit РїСЂРё Р»СЋР±РѕРј РІС‹С…РѕРґРµ.
+    Dim oldScreenUpdating As Boolean
+    Dim oldDisplayAlerts As Boolean
+    oldScreenUpdating = Application.ScreenUpdating
+    oldDisplayAlerts = Application.DisplayAlerts
+
+    On Error GoTo ErrHandler
+
+    ' Р›РѕРіРёСЂРѕРІР°РЅРёРµ СЃС‚Р°СЂС‚Р° СЃР±РѕСЂРєРё: РІРёРґРЅРѕ РІ Р»РѕРіРµ, РєРѕРіРґР° РёРјРµРЅРЅРѕ РЅР°С‡Р°Р»Р°СЃСЊ СЃР±РѕСЂРєР°
+    ' Рё РІ РєР°РєРѕРј СЂРµР¶РёРјРµ РѕРЅР° С€Р»Р° (С‡РµСЂРЅРѕРІРёРє / СЃС‚СЂРѕРіР°СЏ РїСЂРѕРІРµСЂРєР°).
+    Mod_Util.WriteLog "РЎС‚Р°СЂС‚ РѕРїРµСЂР°С†РёРё: РЎР±РѕСЂРєР° С‚РёРїРѕРІ Рё Р°С‚СЂРёР±СѓС‚РѕРІ (СЂРµР¶РёРј: " & IIf(softMode, "С‡РµСЂРЅРѕРІРёРє", "СЃС‚СЂРѕРіР°СЏ") & ")"
+
+    Call InitSession(softMode)
+    Call LoadAllTypes
+    Call LoadAllAttributes
+    Call ValidateHierarchy
+    Call BuildReports
+    Call SaveResult
+
+    GoTo CleanExit
+ErrHandler:
+    ' РСЃРєР»СЋС‡РµРЅРёРµ СЌС‚Р°РїР° СЃР±РѕСЂРєРё: С„РёРєСЃРёСЂСѓРµРј Рё РїРѕРєР°Р·С‹РІР°РµРј РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ
+    Mod_Util.WriteError "F005", "ValidateAndAssemble: РѕС€РёР±РєР° РІС‹РїРѕР»РЅРµРЅРёСЏ СЌС‚Р°РїР°: " & Err.Description
+    MsgBox "РћС€РёР±РєР° РїСЂРё СЃР±РѕСЂРєРµ: " & Err.Description, vbCritical, "Р’Р°Р»РёРґР°С†РёСЏ РїСЂРµСЂРІР°РЅР°"
+    Err.Clear
+CleanExit:
+    ' Guard Pattern: РµРґРёРЅР°СЏ С‚РѕС‡РєР° РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ СЃРѕСЃС‚РѕСЏРЅРёСЏ Excel
+    Application.ScreenUpdating = oldScreenUpdating
+    Application.DisplayAlerts = oldDisplayAlerts
+End Sub
+
+' ============================================================
+' Р­РўРђРџ 1: РРќРР¦РРђР›РР—РђР¦РРЇ РЎР•РЎРЎРР (OPT-10)
+' РћС‡РёСЃС‚РєР° СЃРѕСЃС‚РѕСЏРЅРёСЏ, СЃР»РѕРІР°СЂРё, С„РёРєСЃРёСЂРѕРІР°РЅРЅР°СЏ РІС…РѕРґРЅР°СЏ РїР°РїРєР°, СЃРѕР·РґР°РЅРёРµ Р»РёСЃС‚РѕРІ
+' ============================================================
+Private Sub InitSession(ByVal softMode As Boolean)
+    On Error GoTo ErrHandler
+
     isSoftMode = softMode
     uncoveredTypesCount = 0
     orphanCoverageCount = 0
-    
-    Set colErrors = New Collection
-    Set colWarnings = New Collection
-    Set colInfos = New Collection
-    Set knownTypes = CreateObject("Scripting.Dictionary")
-    Set attrDict = CreateObject("Scripting.Dictionary")
-    Set attrSourceRow = CreateObject("Scripting.Dictionary")
-    Set groupDict = CreateObject("Scripting.Dictionary")
-    Set attrTypesDict = CreateObject("Scripting.Dictionary")
-    Set uniqDict = CreateObject("Scripting.Dictionary")
-    Set boolValuesDict = CreateObject("Scripting.Dictionary")
-    Set baseTypesDict = CreateObject("Scripting.Dictionary")
-    Set typesProblemsDict = CreateObject("Scripting.Dictionary")
-    Set attrsProblemsDict = CreateObject("Scripting.Dictionary")
-    
+
+    ' РЇРІРЅР°СЏ РѕС‡РёСЃС‚РєР° СЃР»РѕРІР°СЂРµР№ Рё РєРѕР»Р»РµРєС†РёР№ РїРµСЂРµРґ Р·Р°РїРѕР»РЅРµРЅРёРµРј (OPT-09)
     Call InitDictionaries
-    
-    Set fd = Application.FileDialog(msoFileDialogFolderPicker)
-    fd.Title = "Выберите папку с xlsx-файлами этапов (zhc_okks_gost_etap_N_*.xlsx)"
-    If fd.Show <> -1 Then Exit Sub
-    folderPath = fd.SelectedItems(1)
-    If Right(folderPath, 1) <> "\" Then folderPath = folderPath & "\"
-    sourceFolderPath = folderPath
-    
+
+    ' Р”РёР°Р»РѕРі РІС‹Р±РѕСЂР° РїР°РїРєРё Р·Р°РјРµРЅС‘РЅ С„РёРєСЃРёСЂРѕРІР°РЅРЅРѕР№ РїР°РїРєРѕР№ РїСЂРѕРµРєС‚Р° (OPT-10)
+    sourceFolderPath = Mod_Util.GetProjectRoot & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\01_РџРѕ С€Р°РіР°Рј"
+    If Right(sourceFolderPath, 1) <> "\" Then sourceFolderPath = sourceFolderPath & "\"
+
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
-    
+
     Set wbOut = Workbooks.Add
     Set wsTypes = wbOut.Sheets(1)
-    wsTypes.Name = "Типы"
+    wsTypes.Name = "РўРёРїС‹"
     Set wsAttrs = wbOut.Sheets.Add(After:=wsTypes)
-    wsAttrs.Name = "Атрибуты"
+    wsAttrs.Name = "РђС‚СЂРёР±СѓС‚С‹"
     Set wsErrors = wbOut.Sheets.Add(After:=wsAttrs)
-    wsErrors.Name = "Ошибки"
+    wsErrors.Name = "РћС€РёР±РєРё"
     Set wsWarnings = wbOut.Sheets.Add(After:=wsErrors)
-    wsWarnings.Name = "Предупреждения"
+    wsWarnings.Name = "РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ"
     Set wsLog = wbOut.Sheets.Add(After:=wsWarnings)
-    wsLog.Name = "Лог дубликатов"
-    Set wsReg = wbOut.Sheets.Add(After:=wsLog)      ' НОВОЕ
-    wsReg.Name = "Реестры"                            ' НОВОЕ
+    wsLog.Name = "Р›РѕРі РґСѓР±Р»РёРєР°С‚РѕРІ"
+    Set wsReg = wbOut.Sheets.Add(After:=wsLog)      ' РќРћР’РћР•
+    wsReg.Name = "Р РµРµСЃС‚СЂС‹"                            ' РќРћР’РћР•
     Set wsReport = wbOut.Sheets.Add(After:=wsReg)
-    wsReport.Name = "Сводка"
-    
+    wsReport.Name = "РЎРІРѕРґРєР°"
+
     Call WriteHeaders(wsTypes, wsAttrs, wsErrors, wsWarnings, wsLog)
-    
+
     rTypes = 2
     rAttrs = 2
     rLog = 2
-    
-    ' ============================================================
-    ' ФАЗА 1: ЗАГРУЗКА ВСЕХ ТИПОВ
-    ' ============================================================
-    colInfos.Add "=== ФАЗА 1: Загрузка типов ==="
-    fName = Dir(folderPath & "*_types.xlsx")
+
+    Exit Sub
+ErrHandler:
+    ' РћС€РёР±РєР° РёРЅРёС†РёР°Р»РёР·Р°С†РёРё СЃРµСЃСЃРёРё РЅРµ РґРѕР»Р¶РЅР° РїСЂРµСЂС‹РІР°С‚СЊ РєРЅРёРіСѓ Р±РµР· СЂР°Р·Р±РѕСЂР°
+    AddError "F005", "InitSession: РЅРµ СѓРґР°Р»РѕСЃСЊ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°С‚СЊ СЃРµСЃСЃРёСЋ СЃР±РѕСЂРєРё. РћС€РёР±РєР°: " & Err.Description
+    Err.Clear
+End Sub
+
+' ============================================================
+' Р Р•РљРЈР РЎРР’РќР«Р™ РЎР‘РћР  Р¤РђР™Р›РћР’ РЁРђР“РћР’ РџРћ РњРђРЎРљР• (W-ASSEMBLER-NESTED-SEARCH)
+' Р“РµРЅРµСЂР°С‚РѕСЂ СЃРѕР·РґР°С‘С‚ С„Р°Р№Р»С‹ *_types.xlsx / *_attributes.xlsx РІ РїРѕРґРїР°РїРєР°С…
+' РїР°РїРєРё "01_РџРѕ С€Р°РіР°Рј" (РЁР°Рі_00_..., РЁР°Рі_01_...), РїРѕСЌС‚РѕРјСѓ РїСЂРѕСЃС‚РѕРіРѕ Dir()
+' РІ РєРѕСЂРЅРµ РЅРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ. РћР±С…РѕРґ: СЃРЅР°С‡Р°Р»Р° С„Р°Р№Р»С‹ РІ С‚РµРєСѓС‰РµР№ РїР°РїРєРµ, Р·Р°С‚РµРј вЂ”
+' РІРѕ РІСЃРµС… РµС‘ РїРѕРґРїР°РїРєР°С… (СЂРµРєСѓСЂСЃРёРІРЅРѕ). Р РµР·СѓР»СЊС‚Р°С‚ СЃРєР»Р°РґС‹РІР°РµС‚СЃСЏ РІ colFiles
+' РІ РІРёРґРµ РџРћР›РќР«РҐ РїСѓС‚РµР№ Рє С„Р°Р№Р»Р°Рј.
+' W-AV-REFACTOR, Рї.1: Scripting.FileSystemObject РїРѕР»РЅРѕСЃС‚СЊСЋ СѓРґР°Р»С‘РЅ вЂ”
+' СЂРµРєСѓСЂСЃРёРІРЅС‹Р№ РѕР±С…РѕРґ СЂРµР°Р»РёР·РѕРІР°РЅ РЅР°С‚РёРІРЅС‹РјРё СЃСЂРµРґСЃС‚РІР°РјРё VBA: Dir() СЃ
+' Р°С‚СЂРёР±СѓС‚РѕРј vbDirectory РґР»СЏ РїРµСЂРµС‡РёСЃР»РµРЅРёСЏ РїРѕРґРїР°РїРѕРє Рё GetAttr() РґР»СЏ
+' РїСЂРѕРІРµСЂРєРё, С‡С‚Рѕ СЌР»РµРјРµРЅС‚ СЏРІР»СЏРµС‚СЃСЏ РїР°РїРєРѕР№. Р­С‚Рѕ СЃРЅРёРјР°РµС‚ Р»РѕР¶РЅС‹Рµ СЃСЂР°Р±Р°С‚С‹РІР°РЅРёСЏ
+' Р°РЅС‚РёРІРёСЂСѓСЃРѕРІ РЅР° CreateObject("Scripting.FileSystemObject").
+' ============================================================
+Private Sub CollectStepFiles(ByVal folderPath As String, _
+                             ByVal mask As String, _
+                             ByVal colFiles As Collection)
+    Dim fName As String
+    Dim subName As String
+    Dim attr As Long
+    ' РљРѕР»-РІРѕ РїРѕРґРїР°РїРѕРє РѕРіСЂР°РЅРёС‡РёРІР°РµРј Р·Р°СЂР°РЅРµРµ: РїРѕРІС‚РѕСЂРЅС‹Р№ РІС‹Р·РѕРІ Dir() РІРЅСѓС‚СЂРё
+    ' С†РёРєР»Р° РїРѕ РїРѕРґРїР°РїРєР°Рј РїРµСЂРµР·Р°РїСѓСЃРєР°РµС‚ РїРѕРёСЃРє С„Р°Р№Р»РѕРІ, РїРѕСЌС‚РѕРјСѓ СЃРїРёСЃРѕРє
+    ' РїРѕРґРїР°РїРѕРє СЃРЅР°С‡Р°Р»Р° СЃРѕР±РёСЂР°РµС‚СЃСЏ РІ РјР°СЃСЃРёРІ.
+    Dim subFolders() As String
+    Dim subCount As Long
+    Dim i As Long
+
+    ' a) РС‰РµРј С„Р°Р№Р»С‹ РІ С‚РµРєСѓС‰РµР№ РїР°РїРєРµ (РЅР°С‚РёРІРЅС‹Р№ Dir РїРѕ РјР°СЃРєРµ).
+    fName = Dir(folderPath & mask)
     Do While fName <> ""
-        colInfos.Add "Файл типов: " & fName
-        
-        On Error Resume Next
-        Set wbSrc = Workbooks.Open(folderPath & fName, ReadOnly:=True, UpdateLinks:=0)
-        If Err.Number <> 0 Then
-            AddError "F001", "Не удалось открыть файл: " & fName & ". Ошибка: " & Err.Description
+        colFiles.Add folderPath & fName
+        fName = Dir()
+    Loop
+
+    ' b) РЎРѕР±РёСЂР°РµРј СЃРїРёСЃРѕРє РїРѕРґРїР°РїРѕРє РЅР°С‚РёРІРЅС‹Рј Dir(folderPath & "*", vbDirectory).
+    ReDim subFolders(1 To 255)
+    subCount = 0
+    subName = Dir(folderPath & "*", vbDirectory)
+    Do While subName <> ""
+        ' РћР±СЏР·Р°С‚РµР»СЊРЅРѕ РїСЂРѕРїСѓСЃРєР°РµРј "." Рё ".." (РёРЅР°С‡Рµ Р±РµСЃРєРѕРЅРµС‡РЅР°СЏ СЂРµРєСѓСЂСЃРёСЏ).
+        If subName <> "." And subName <> ".." Then
+            On Error Resume Next
+            attr = GetAttr(folderPath & subName)
             On Error GoTo 0
-            fName = Dir()
+            ' РЈС‡РёС‚С‹РІР°РµРј С‚РѕР»СЊРєРѕ СЌР»РµРјРµРЅС‚С‹, СЏРІР»СЏСЋС‰РёРµСЃСЏ РїР°РїРєР°РјРё (Р°С‚СЂРёР±СѓС‚ vbDirectory).
+            If Err.Number = 0 Then
+                If (attr And vbDirectory) = vbDirectory Then
+                    subCount = subCount + 1
+                    If subCount > UBound(subFolders) Then
+                        ReDim Preserve subFolders(1 To subCount + 255)
+                    End If
+                    subFolders(subCount) = subName & "\"
+                End If
+            Else
+                Err.Clear
+            End If
+        End If
+        subName = Dir()
+    Loop
+
+    ' c) Р РµРєСѓСЂСЃРёРІРЅС‹Р№ СЃРїСѓСЃРє РІ РєР°Р¶РґСѓСЋ РїРѕРґРїР°РїРєСѓ.
+    For i = 1 To subCount
+        CollectStepFiles folderPath & subFolders(i), mask, colFiles
+    Next i
+End Sub
+
+' ============================================================
+' Р­РўРђРџ 2: Р—РђР“Р РЈР—РљРђ Р’РЎР•РҐ Р¤РђР™Р›РћР’ *_types.xlsx (OPT-10)
+' ============================================================
+Private Sub LoadAllTypes()
+    Dim f As Variant
+    Dim fullPath As String
+    Dim fName As String
+    Dim wbSrc As Workbook
+    Dim wsSrc As Worksheet
+    Dim rSrc As Long
+    Dim lastRow As Long
+    Dim j As Long
+    Dim sysName As String
+    Dim colFound As Collection
+
+    On Error GoTo ErrHandler
+
+    ' ============================================================
+    ' Р¤РђР—Рђ 1: Р—РђР“Р РЈР—РљРђ Р’РЎР•РҐ РўРРџРћР’
+    ' ============================================================
+    colInfos.Add "=== Р¤РђР—Рђ 1: Р—Р°РіСЂСѓР·РєР° С‚РёРїРѕРІ ==="
+
+    ' Р›РѕРіРёСЂРѕРІР°РЅРёРµ РїРѕРёСЃРєР° С„Р°Р№Р»РѕРІ С€Р°РіРѕРІ (W-ASSEMBLER-TEST-FIX-2): РІРёРґРЅРѕ РІ Р»РѕРіРµ,
+    ' РІ РєР°РєРѕР№ РёРјРµРЅРЅРѕ РїР°РїРєРµ Mod_Assembler РёС‰РµС‚ С„Р°Р№Р»С‹ Рё С‡С‚Рѕ РѕРЅ РЅР°С€С‘Р».
+    ' РџРѕРёСЃРє СЂРµРєСѓСЂСЃРёРІРЅС‹Р№: РєРѕСЂРµРЅСЊ "01_РџРѕ С€Р°РіР°Рј" Рё РІСЃРµ РїРѕРґРїР°РїРєРё РЁР°РіР° (W-ASSEMBLER-NESTED-SEARCH).
+    Mod_Util.WriteLog "Mod_Assembler: РїРѕРёСЃРє С„Р°Р№Р»РѕРІ С€Р°РіРѕРІ (СЂРµРєСѓСЂСЃРёРІРЅРѕ, РІРєР»СЋС‡Р°СЏ РїРѕРґРїР°РїРєРё) РІ РїР°РїРєРµ: " & sourceFolderPath
+
+    Set colFound = New Collection
+    Call CollectStepFiles(sourceFolderPath, "*_types.xlsx", colFound)
+    If colFound.Count = 0 Then
+        Mod_Util.WriteLog "[WARN] Р¤Р°Р№Р»С‹ С€Р°РіРѕРІ РЅРµ РЅР°Р№РґРµРЅС‹ РїРѕ РјР°СЃРєРµ *_types.xlsx (РЅРё РІ РєРѕСЂРЅРµ, РЅРё РІ РїРѕРґРїР°РїРєР°С…)"
+    End If
+    For Each f In colFound
+        fullPath = CStr(f)
+        fName = Mid(fullPath, Len(sourceFolderPath) + 1)
+        colInfos.Add "Р¤Р°Р№Р» С‚РёРїРѕРІ: " & fName
+        Mod_Util.WriteLog "РќР°Р№РґРµРЅ С„Р°Р№Р» С€Р°РіР°: " & fullPath
+
+        On Error Resume Next
+        ' W-AV-REFACTOR, Рї.1: AddToMru:=False вЂ” РЅРµ Р·Р°СЃРѕСЂСЏРµРј СЃРїРёСЃРѕРє РїРѕСЃР»РµРґРЅРёС…
+        ' С„Р°Р№Р»РѕРІ Excel; РјР°СЃСЃРѕРІРѕРµ РґРѕР±Р°РІР»РµРЅРёРµ РІ MRU РІРѕСЃРїСЂРёРЅРёРјР°РµС‚СЃСЏ AV РєР°Рє
+        ' РїРѕРґРѕР·СЂРёС‚РµР»СЊРЅРѕРµ СЃРєР°РЅРёСЂРѕРІР°РЅРёРµ.
+        Set wbSrc = Workbooks.Open(fullPath, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
+        If Err.Number <> 0 Then
+            AddError "T005", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ С„Р°Р№Р»: " & fullPath & ". РћС€РёР±РєР°: " & Err.Description
+            On Error GoTo 0
             GoTo NextTypeFile
         End If
         On Error GoTo 0
-        
+
         On Error Resume Next
         Set wsSrc = wbSrc.Sheets(1)
         On Error GoTo 0
-        
+
         If Not wsSrc Is Nothing Then
             lastRow = wsSrc.Cells(wsSrc.Rows.Count, 1).End(xlUp).row
             For rSrc = 2 To lastRow
                 sysName = Trim(CStr(wsSrc.Cells(rSrc, 1).value))
                 If sysName = "" Then GoTo NextTypeRow
-                
+
                 For j = 1 To 12
                     wsTypes.Cells(rTypes, j).value = wsSrc.Cells(rSrc, j).value
                 Next j
-                
+
                 Call ValidateTypeBasic(wsSrc, rSrc, fName, sysName)
-                
+
                 rTypes = rTypes + 1
 NextTypeRow:
             Next rSrc
             Set wsSrc = Nothing
         Else
-            AddWarning "F002", "В файле " & fName & " нет доступных листов"
+            AddWarning "T005", "Р’ С„Р°Р№Р»Рµ " & fName & " РЅРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… Р»РёСЃС‚РѕРІ"
         End If
-        
+
         wbSrc.Close SaveChanges:=False
 NextTypeFile:
-        fName = Dir()
-    Loop
-    
-    colInfos.Add "Всего типов загружено: " & (rTypes - 2)
-    
+    Next f
+
+    colInfos.Add "Р’СЃРµРіРѕ С‚РёРїРѕРІ Р·Р°РіСЂСѓР¶РµРЅРѕ: " & (rTypes - 2)
+    Exit Sub
+ErrHandler:
+    AddError "T005", "LoadAllTypes: РѕС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё С„Р°Р№Р»РѕРІ С‚РёРїРѕРІ. РћС€РёР±РєР°: " & Err.Description
+    Err.Clear
+End Sub
+
+' ============================================================
+' Р­РўРђРџ 3: Р—РђР“Р РЈР—РљРђ Р’РЎР•РҐ Р¤РђР™Р›РћР’ *_attributes.xlsx (OPT-10)
+' ============================================================
+Private Sub LoadAllAttributes()
+    Dim f As Variant
+    Dim fullPath As String
+    Dim fName As String
+    Dim wbSrc As Workbook
+    Dim wsSrc As Worksheet
+    Dim rSrc As Long
+    Dim lastRow As Long
+    Dim sysName As String
+    Dim attrName As String
+    Dim colFound As Collection
+
+    On Error GoTo ErrHandler
+
     ' ============================================================
-    ' ФАЗА 2: ЗАГРУЗКА ВСЕХ АТРИБУТОВ
+    ' Р¤РђР—Рђ 2: Р—РђР“Р РЈР—РљРђ Р’РЎР•РҐ РђРўР РР‘РЈРўРћР’
     ' ============================================================
-    colInfos.Add "=== ФАЗА 2: Загрузка атрибутов ==="
-    fName = Dir(folderPath & "*_attributes.xlsx")
-    Do While fName <> ""
-        colInfos.Add "Файл атрибутов: " & fName
-        
+    colInfos.Add "=== Р¤РђР—Рђ 2: Р—Р°РіСЂСѓР·РєР° Р°С‚СЂРёР±СѓС‚РѕРІ ==="
+
+    ' Р›РѕРіРёСЂРѕРІР°РЅРёРµ РїРѕРёСЃРєР° С„Р°Р№Р»РѕРІ С€Р°РіРѕРІ (W-ASSEMBLER-TEST-FIX-2): РјР°СЃРєР° Р°С‚СЂРёР±СѓС‚РѕРІ.
+    ' РџРѕРёСЃРє СЂРµРєСѓСЂСЃРёРІРЅС‹Р№: РєРѕСЂРµРЅСЊ "01_РџРѕ С€Р°РіР°Рј" Рё РІСЃРµ РїРѕРґРїР°РїРєРё РЁР°РіР° (W-ASSEMBLER-NESTED-SEARCH).
+    Mod_Util.WriteLog "Mod_Assembler: РїРѕРёСЃРє С„Р°Р№Р»РѕРІ С€Р°РіРѕРІ (СЂРµРєСѓСЂСЃРёРІРЅРѕ, РІРєР»СЋС‡Р°СЏ РїРѕРґРїР°РїРєРё) РІ РїР°РїРєРµ: " & sourceFolderPath
+
+    Set colFound = New Collection
+    Call CollectStepFiles(sourceFolderPath, "*_attributes.xlsx", colFound)
+    If colFound.Count = 0 Then
+        Mod_Util.WriteLog "[WARN] Р¤Р°Р№Р»С‹ С€Р°РіРѕРІ РЅРµ РЅР°Р№РґРµРЅС‹ РїРѕ РјР°СЃРєРµ *_attributes.xlsx (РЅРё РІ РєРѕСЂРЅРµ, РЅРё РІ РїРѕРґРїР°РїРєР°С…)"
+    End If
+    For Each f In colFound
+        fullPath = CStr(f)
+        fName = Mid(fullPath, Len(sourceFolderPath) + 1)
+        colInfos.Add "Р¤Р°Р№Р» Р°С‚СЂРёР±СѓС‚РѕРІ: " & fName
+        Mod_Util.WriteLog "РќР°Р№РґРµРЅ С„Р°Р№Р» С€Р°РіР°: " & fullPath
+
         On Error Resume Next
-        Set wbSrc = Workbooks.Open(folderPath & fName, ReadOnly:=True, UpdateLinks:=0)
+        ' W-AV-REFACTOR, Рї.1: AddToMru:=False вЂ” РЅРµ Р·Р°СЃРѕСЂСЏРµРј СЃРїРёСЃРѕРє РїРѕСЃР»РµРґРЅРёС…
+        ' С„Р°Р№Р»РѕРІ Excel (СЃРј. LoadAllTypes).
+        Set wbSrc = Workbooks.Open(fullPath, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
         If Err.Number <> 0 Then
-            AddError "F001", "Не удалось открыть файл: " & fName & ". Ошибка: " & Err.Description
+            AddError "A017", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ С„Р°Р№Р»: " & fullPath & ". РћС€РёР±РєР°: " & Err.Description
             On Error GoTo 0
-            fName = Dir()
             GoTo NextAttrFile
         End If
         On Error GoTo 0
-        
+
         On Error Resume Next
         Set wsSrc = wbSrc.Sheets(1)
         On Error GoTo 0
-        
+
         If Not wsSrc Is Nothing Then
             lastRow = wsSrc.Cells(wsSrc.Rows.Count, 1).End(xlUp).row
             For rSrc = 2 To lastRow
                 sysName = Trim(CStr(wsSrc.Cells(rSrc, 1).value))
                 attrName = Trim(CStr(wsSrc.Cells(rSrc, 2).value))
                 If sysName = "" And attrName = "" Then GoTo NextAttrRow
-                
+
                 Call CopyAttributeRow(wsSrc, rSrc, fName, sysName, attrName, wsAttrs, rAttrs, rLog)
-                
+
 NextAttrRow:
             Next rSrc
             Set wsSrc = Nothing
         Else
-            AddWarning "F003", "В файле " & fName & " нет доступных листов"
+            AddWarning "A017", "Р’ С„Р°Р№Р»Рµ " & fName & " РЅРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… Р»РёСЃС‚РѕРІ"
         End If
-        
+
         wbSrc.Close SaveChanges:=False
 NextAttrFile:
-        fName = Dir()
-    Loop
-    
-    colInfos.Add "Всего атрибутов загружено (после дедупликации): " & (rAttrs - 2)
-    
+    Next f
+
+    colInfos.Add "Р’СЃРµРіРѕ Р°С‚СЂРёР±СѓС‚РѕРІ Р·Р°РіСЂСѓР¶РµРЅРѕ (РїРѕСЃР»Рµ РґРµРґСѓРїР»РёРєР°С†РёРё): " & (rAttrs - 2)
+    Exit Sub
+ErrHandler:
+    AddError "A017", "LoadAllAttributes: РѕС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё С„Р°Р№Р»РѕРІ Р°С‚СЂРёР±СѓС‚РѕРІ. РћС€РёР±РєР°: " & Err.Description
+    Err.Clear
+End Sub
+
+' ============================================================
+' Р­РўРђРџ 4: РР•Р РђР РҐРРЇ Р РџР РћР’Р•Р РљРђ РЎРЎР«Р›РћРљ (OPT-10)
+' ============================================================
+Private Sub ValidateHierarchy()
+    On Error GoTo ErrHandler
+
     ' ============================================================
-    ' ФАЗА 3: АВТОИСПРАВЛЕНИЕ ИЕРАРХИИ И ПРОВЕРКА ССЫЛОК
+    ' Р¤РђР—Рђ 3: РђР’РўРћРРЎРџР РђР’Р›Р•РќРР• РР•Р РђР РҐРР Р РџР РћР’Р•Р РљРђ РЎРЎР«Р›РћРљ
     ' ============================================================
-    colInfos.Add "=== ФАЗА 3: Автоисправление иерархии ==="
+    colInfos.Add "=== Р¤РђР—Рђ 3: РђРІС‚РѕРёСЃРїСЂР°РІР»РµРЅРёРµ РёРµСЂР°СЂС…РёРё ==="
     Call AutoFixHierarchy(wsTypes, rTypes)
-    
+
     If Not isSoftMode Then
         Call SyncChildrenFromParents(wsTypes, rTypes)
     End If
-    
-    colInfos.Add "=== ФАЗА 4: Проверка ссылок ==="
+
+    colInfos.Add "=== Р¤РђР—Рђ 4: РџСЂРѕРІРµСЂРєР° СЃСЃС‹Р»РѕРє ==="
     Call ValidateAllTypeReferences(wsTypes, rTypes)
     Call ValidateAllAttributeReferences(wsAttrs, rAttrs)
     Call FinalValidation(wsTypes, wsAttrs, rTypes)
-    
+    Exit Sub
+ErrHandler:
+    AddError "T018", "ValidateHierarchy: РѕС€РёР±РєР° СЌС‚Р°РїР° РїСЂРѕРІРµСЂРєРё РёРµСЂР°СЂС…РёРё Рё СЃСЃС‹Р»РѕРє. РћС€РёР±РєР°: " & Err.Description
+    Err.Clear
+End Sub
+
+' ============================================================
+' Р­РўРђРџ 5: РћРўР§РЃРўР« (OPT-10, OPT-08)
+' Р РµРµСЃС‚СЂС‹ (BuildRegistrySheet) РёР· СЃР±РѕСЂРєРё СѓР±СЂР°РЅС‹ вЂ” РёС… С„РѕСЂРјРёСЂСѓРµС‚ Mod_Registry (W6)
+' W-AV-REFACTOR, Рї.5: Guard Pattern вЂ” С„Р»Р°РіРё Application СЃРѕС…СЂР°РЅСЏСЋС‚СЃСЏ РІ РЅР°С‡Р°Р»Рµ
+' Рё РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°СЋС‚СЃСЏ РІ РµРґРёРЅРѕР№ С‚РѕС‡РєРµ CleanExit.
+' ============================================================
+Private Sub BuildReports()
+    Dim oldScreenUpdating As Boolean
+    Dim oldDisplayAlerts As Boolean
+    oldScreenUpdating = Application.ScreenUpdating
+    oldDisplayAlerts = Application.DisplayAlerts
+
+    On Error GoTo ErrHandler
+
+    ' РќР° РІСЂРµРјСЏ С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РѕС‚С‡С‘С‚РѕРІ СЃРєСЂС‹РІР°РµРј РёРЅС‚РµСЂС„РµР№СЃ (СѓСЃРєРѕСЂРµРЅРёРµ Рё
+    ' Р·Р°С‰РёС‚Р° РѕС‚ СЃР»СѓС‡Р°Р№РЅС‹С… РєР»РёРєРѕРІ); РёСЃС…РѕРґРЅС‹Рµ Р·РЅР°С‡РµРЅРёСЏ СѓР¶Рµ СЃРѕС…СЂР°РЅРµРЅС‹ РІС‹С€Рµ.
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
     ' ============================================================
-    ' ФАЗА 5: ФОРМИРОВАНИЕ ОТЧЁТА
+    ' Р¤РђР—Рђ 5: Р¤РћР РњРР РћР’РђРќРР• РћРўР§РЃРўРђ
     ' ============================================================
-    colInfos.Add "=== ФАЗА 5: Формирование отчёта ==="
+    colInfos.Add "=== Р¤РђР—Рђ 5: Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ РѕС‚С‡С‘С‚Р° ==="
     Call BuildErrorsReport(wsErrors)
     Call BuildWarningsReport(wsWarnings)
     Call HighlightProblemsInFinalFile(wsTypes, wsAttrs, rTypes, rAttrs)
-    Call BuildRegistrySheet(wsReg, wsTypes, wsAttrs, rTypes, rAttrs)   ' НОВОЕ
+    ' OPT-08: РІС‹Р·РѕРІ BuildRegistrySheet РёР· СЃР±РѕСЂРєРё СѓР±СЂР°РЅ вЂ” СЂРµРµСЃС‚СЂС‹ С„РѕСЂРјРёСЂСѓРµС‚ Mod_Registry (W6)
     Call FillSummarySheet(wsReport, rTypes, rAttrs)
-    
+
+    ' Р РµРµСЃС‚СЂС‹ (W4/OPT-08): СЃС‚СЂРѕРёРј СЃР»РѕРІР°СЂРё, РїРёС€РµРј С„Р°Р№Р»С‹, РѕР±РЅРѕРІР»СЏРµРј СЃР»СѓР¶РµР±РЅС‹Рµ Р»РёСЃС‚С‹
+    Call Mod_Registry.BuildRegistries
+
+    ' РЎРєРІРѕР·РЅР°СЏ Р·Р°С‰РёС‚Р° РѕС‚ РїСѓСЃС‚С‹С… РґР°РЅРЅС‹С… (W-ASSEMBLER-TEST-FIX-2):
+    ' РµСЃР»Рё BuildRegistries РЅРµ РЅР°С€С‘Р» РЅРё РѕРґРЅРѕРіРѕ С‚РёРїР° (РЅР°РїСЂРёРјРµСЂ, С„Р°Р№Р»С‹ С€Р°РіРѕРІ
+    ' РѕС‚СЃСѓС‚СЃС‚РІСѓСЋС‚), СЂРµРµСЃС‚СЂС‹ РќР• РїРёС€СѓС‚СЃСЏ Рё Р»РёСЃС‚С‹ РќР• РѕР±РЅРѕРІР»СЏСЋС‚СЃСЏ вЂ” РёРЅР°С‡Рµ
+    ' WriteRegistryFiles/UpdateRegistrySheets РїР°РґР°СЋС‚ СЃ "Subscript out of
+    ' range" / R005 РЅР° РїСѓСЃС‚С‹С… СЃС‚СЂСѓРєС‚СѓСЂР°С….
+    If Not Mod_Registry.RegistryHasData() Then
+        Mod_Util.WriteLog "РЎР±РѕСЂРєР° СЂРµРµСЃС‚СЂРѕРІ РїСЂРѕРїСѓС‰РµРЅР°: РЅРµС‚ РґР°РЅРЅС‹С… (0 С‚РёРїРѕРІ)"
+        MsgBox "РЎР±РѕСЂРєР° СЂРµРµСЃС‚СЂРѕРІ РїСЂРѕРїСѓС‰РµРЅР°: РЅРµС‚ РґР°РЅРЅС‹С… (0 С‚РёРїРѕРІ).", vbExclamation, "Р РµРµСЃС‚СЂС‹"
+    Else
+        Call Mod_Registry.WriteRegistryFiles
+        Call Mod_Registry.UpdateRegistrySheets
+    End If
+
     wsTypes.UsedRange.Columns.AutoFit
     wsAttrs.UsedRange.Columns.AutoFit
     wsErrors.UsedRange.Columns.AutoFit
     wsWarnings.UsedRange.Columns.AutoFit
     wsLog.UsedRange.Columns.AutoFit
-    wsReg.UsedRange.Columns.AutoFit     ' НОВОЕ
+    wsReg.UsedRange.Columns.AutoFit     ' РќРћР’РћР•
     wsReport.UsedRange.Columns.AutoFit
-    
+
     wsTypes.Rows(1).Font.Bold = True
     wsAttrs.Rows(1).Font.Bold = True
     wsReport.Rows(1).Font.Bold = True
     wsLog.Rows(1).Font.Bold = True
-    
-    outputFile = sourceFolderPath & "zhc_okks_gost_FINAL.xlsx"
-    On Error Resume Next
-    Kill outputFile
-    On Error GoTo 0
-    
-    On Error Resume Next
-    wbOut.SaveAs fileName:=outputFile, FileFormat:=xlOpenXMLWorkbook
-    If Err.Number <> 0 Then
-        AddError "F004", "Не удалось сохранить файл: " & outputFile & ". Ошибка: " & Err.Description
-        Err.Clear
-    Else
-        colInfos.Add "Файл сохранён: " & outputFile
-    End If
-    On Error GoTo 0
-    
-    Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
-    
-    Dim msg As String
-    msg = "=== РЕЗУЛЬТАТЫ ВАЛИДАЦИИ ===" & vbCrLf
-    msg = msg & "Режим: " & IIf(isSoftMode, "ПРОМЕЖУТОЧНЫЙ (soft)", "ФИНАЛЬНЫЙ") & vbCrLf & vbCrLf
-    msg = msg & "Типов: " & (rTypes - 2) & vbCrLf
-    msg = msg & "Атрибутов (после удаления дубликатов): " & (rAttrs - 2) & vbCrLf
-    msg = msg & "Уникальных пар: " & attrDict.Count & vbCrLf
-    msg = msg & "Типов без покрытия атрибутами: " & uncoveredTypesCount & vbCrLf   ' НОВОЕ
-    msg = msg & "ОШИБОК: " & colErrors.Count & vbCrLf
-    msg = msg & "ПРЕДУПРЕЖДЕНИЙ: " & colWarnings.Count & vbCrLf & vbCrLf
-    msg = msg & "См. листы:" & vbCrLf
-    msg = msg & "  - 'Ошибки' — критические проблемы (красный, с гиперссылками)" & vbCrLf
-    msg = msg & "  - 'Предупреждения' — рекомендации (жёлтый, с гиперссылками)" & vbCrLf
-    msg = msg & "  - 'Лог дубликатов' — история удаления дубликатов" & vbCrLf
-    msg = msg & "  - 'Реестры' — Реестр типов и Реестр покрытия атрибутами" & vbCrLf   ' НОВОЕ
-    msg = msg & "  - 'Сводка' — общая статистика" & vbCrLf & vbCrLf
-    msg = msg & "Итоговый файл сохранён: " & outputFile & vbCrLf
-    msg = msg & "В листах 'Типы' и 'Атрибуты' проблемные строки раскрашены."
-    
-    If colErrors.Count > 0 Then
-        msg = msg & vbCrLf & vbCrLf & "[FAIL] Исправьте " & colErrors.Count & " ошибок перед импортом в БД."
-        MsgBox msg, vbExclamation, "Валидация завершена"
-    Else
-        msg = msg & vbCrLf & vbCrLf & "[PASS] Критических ошибок не обнаружено. Файл готов к импорту."
-        MsgBox msg, vbInformation, "Валидация завершена"
-    End If
+    GoTo CleanExit
+ErrHandler:
+    AddError "R002", "BuildReports: РѕС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РѕС‚С‡С‘С‚РѕРІ. РћС€РёР±РєР°: " & Err.Description
+    Err.Clear
+CleanExit:
+    ' Guard Pattern: РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ СЃРѕСЃС‚РѕСЏРЅРёСЏ Excel РїРµСЂРµРґ РїРѕРєР°Р·РѕРј СЂРµР·СѓР»СЊС‚Р°С‚Р°
+    Application.ScreenUpdating = oldScreenUpdating
+    Application.DisplayAlerts = oldDisplayAlerts
 End Sub
 
 ' ============================================================
-' ИНИЦИАЛИЗАЦИЯ СЛОВАРЕЙ
+' Р­РўРђРџ 6: РЎРћРҐР РђРќР•РќРР• РРўРћР“РћР’РћР“Рћ Р¤РђР™Р›Рђ Р РРўРћР“РћР’РћР• РЎРћРћР‘Р©Р•РќРР• (OPT-10)
+' W-AV-REFACTOR, Рї.1/Рї.4/Рї.5: РїСЂСЏРјРѕР№ Kill outputFile Р·Р°РјРµРЅС‘РЅ РЅР° Р±РµР·РѕРїР°СЃРЅСѓСЋ
+' Mod_Util.DeleteFileIfExists; Guard Pattern вЂ” С„Р»Р°РіРё Application
+' СЃРѕС…СЂР°РЅСЏСЋС‚СЃСЏ РІ РЅР°С‡Р°Р»Рµ Рё РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°СЋС‚СЃСЏ РІ CleanExit.
+' ============================================================
+Private Sub SaveResult()
+    Dim oldScreenUpdating As Boolean
+    Dim oldDisplayAlerts As Boolean
+    oldScreenUpdating = Application.ScreenUpdating
+    oldDisplayAlerts = Application.DisplayAlerts
+
+    On Error GoTo ErrHandler
+
+    ' РЎРѕС…СЂР°РЅСЏРµРј СЃС‚Р°СЂС‹Рµ Р·РЅР°С‡РµРЅРёСЏ Рё РѕС‚РєР»СЋС‡Р°РµРј РёРЅС‚РµСЂС„РµР№СЃ РЅР° РІСЂРµРјСЏ Р·Р°РїРёСЃРё С„Р°Р№Р»Р°
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+
+    outputFile = Mod_Util.GetProjectRoot & "\03_Р РµР·СѓР»СЊС‚Р°С‚С‹ РіРµРЅРµСЂР°С†РёРё\02_РЎРІРѕРґРЅС‹Рµ\zhc_okks_gost_FINAL.xlsx"
+    ' Р‘РµР·РѕРїР°СЃРЅРѕРµ СѓРґР°Р»РµРЅРёРµ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµРіРѕ С„Р°Р№Р»Р° С‡РµСЂРµР· DeleteFileIfExists
+    ' РІРјРµСЃС‚Рѕ РїСЂСЏРјРѕРіРѕ РІС‹Р·РѕРІР° Kill (СЃРЅРёР¶Р°РµС‚ СЌРІСЂРёСЃС‚РёС‡РµСЃРєРёР№ СЃРєРѕСЂ Р°РЅС‚РёРІРёСЂСѓСЃРѕРІ).
+    If Len(Dir(outputFile)) > 0 Then
+        If Not Mod_Util.DeleteFileIfExists(outputFile) Then
+            AddWarning "F004", "РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ С„Р°Р№Р» РїРµСЂРµРґ РїРµСЂРµР·Р°РїРёСЃСЊСЋ: " & outputFile
+        End If
+    End If
+
+    On Error Resume Next
+    wbOut.SaveAs fileName:=outputFile, FileFormat:=xlOpenXMLWorkbook
+    If Err.Number <> 0 Then
+        AddError "F004", "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ С„Р°Р№Р»: " & outputFile & ". РћС€РёР±РєР°: " & Err.Description
+        Err.Clear
+    Else
+        colInfos.Add "Р¤Р°Р№Р» СЃРѕС…СЂР°РЅС‘РЅ: " & outputFile
+    End If
+    On Error GoTo 0
+
+    Dim msg As String
+    msg = "=== Р Р•Р—РЈР›Р¬РўРђРўР« Р’РђР›РР”РђР¦РР ===" & vbCrLf
+    msg = msg & "Р РµР¶РёРј: " & IIf(isSoftMode, "РџР РћРњР•Р–РЈРўРћР§РќР«Р™ (soft)", "Р¤РРќРђР›Р¬РќР«Р™") & vbCrLf & vbCrLf
+    msg = msg & "РўРёРїРѕРІ: " & (rTypes - 2) & vbCrLf
+    msg = msg & "РђС‚СЂРёР±СѓС‚РѕРІ (РїРѕСЃР»Рµ СѓРґР°Р»РµРЅРёСЏ РґСѓР±Р»РёРєР°С‚РѕРІ): " & (rAttrs - 2) & vbCrLf
+    msg = msg & "РЈРЅРёРєР°Р»СЊРЅС‹С… РїР°СЂ: " & attrDict.Count & vbCrLf
+    msg = msg & "РўРёРїРѕРІ Р±РµР· РїРѕРєСЂС‹С‚РёСЏ Р°С‚СЂРёР±СѓС‚Р°РјРё: " & uncoveredTypesCount & vbCrLf   ' РќРћР’РћР•
+    msg = msg & "РћРЁРР‘РћРљ: " & colErrors.Count & vbCrLf
+    msg = msg & "РџР Р•Р”РЈРџР Р•Р–Р”Р•РќРР™: " & colWarnings.Count & vbCrLf & vbCrLf
+    msg = msg & "РЎРј. Р»РёСЃС‚С‹:" & vbCrLf
+    msg = msg & "  - 'РћС€РёР±РєРё' вЂ” РєСЂРёС‚РёС‡РµСЃРєРёРµ РїСЂРѕР±Р»РµРјС‹ (РєСЂР°СЃРЅС‹Р№, СЃ РіРёРїРµСЂСЃСЃС‹Р»РєР°РјРё)" & vbCrLf
+    msg = msg & "  - 'РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ' вЂ” СЂРµРєРѕРјРµРЅРґР°С†РёРё (Р¶С‘Р»С‚С‹Р№, СЃ РіРёРїРµСЂСЃСЃС‹Р»РєР°РјРё)" & vbCrLf
+    msg = msg & "  - 'Р›РѕРі РґСѓР±Р»РёРєР°С‚РѕРІ' вЂ” РёСЃС‚РѕСЂРёСЏ СѓРґР°Р»РµРЅРёСЏ РґСѓР±Р»РёРєР°С‚РѕРІ" & vbCrLf
+    msg = msg & "  - 'Р РµРµСЃС‚СЂС‹' вЂ” Р РµРµСЃС‚СЂ С‚РёРїРѕРІ Рё Р РµРµСЃС‚СЂ РїРѕРєСЂС‹С‚РёСЏ Р°С‚СЂРёР±СѓС‚Р°РјРё" & vbCrLf   ' РќРћР’РћР•
+    msg = msg & "  - 'РЎРІРѕРґРєР°' вЂ” РѕР±С‰Р°СЏ СЃС‚Р°С‚РёСЃС‚РёРєР°" & vbCrLf & vbCrLf
+    msg = msg & "РС‚РѕРіРѕРІС‹Р№ С„Р°Р№Р» СЃРѕС…СЂР°РЅС‘РЅ: " & outputFile & vbCrLf
+    msg = msg & "Р’ Р»РёСЃС‚Р°С… 'РўРёРїС‹' Рё 'РђС‚СЂРёР±СѓС‚С‹' РїСЂРѕР±Р»РµРјРЅС‹Рµ СЃС‚СЂРѕРєРё СЂР°СЃРєСЂР°С€РµРЅС‹."
+
+    If colErrors.Count > 0 Then
+        msg = msg & vbCrLf & vbCrLf & "[FAIL] РСЃРїСЂР°РІСЊС‚Рµ " & colErrors.Count & " РѕС€РёР±РѕРє РїРµСЂРµРґ РёРјРїРѕСЂС‚РѕРј РІ Р‘Р”."
+        MsgBox msg, vbExclamation, "Р’Р°Р»РёРґР°С†РёСЏ Р·Р°РІРµСЂС€РµРЅР°"
+    Else
+        msg = msg & vbCrLf & vbCrLf & "[PASS] РљСЂРёС‚РёС‡РµСЃРєРёС… РѕС€РёР±РѕРє РЅРµ РѕР±РЅР°СЂСѓР¶РµРЅРѕ. Р¤Р°Р№Р» РіРѕС‚РѕРІ Рє РёРјРїРѕСЂС‚Сѓ."
+        MsgBox msg, vbInformation, "Р’Р°Р»РёРґР°С†РёСЏ Р·Р°РІРµСЂС€РµРЅР°"
+    End If
+    GoTo CleanExit
+ErrHandler:
+    AddError "F004", "SaveResult: РѕС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РёС‚РѕРіРѕРІРѕРіРѕ С„Р°Р№Р»Р°. РћС€РёР±РєР°: " & Err.Description
+    Err.Clear
+CleanExit:
+    ' Guard Pattern: РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ СЃРѕСЃС‚РѕСЏРЅРёСЏ Excel
+    Application.ScreenUpdating = oldScreenUpdating
+    Application.DisplayAlerts = oldDisplayAlerts
+End Sub
+
+' ============================================================
+' РРќРР¦РРђР›РР—РђР¦РРЇ РЎР›РћР’РђР Р•Р™
+' OPT-09: СЏРІРЅР°СЏ РѕС‡РёСЃС‚РєР° РІСЃРµС… СЃР»РѕРІР°СЂРµР№ Рё РєРѕР»Р»РµРєС†РёР№ РїРµСЂРµРґ
+' РїРѕРІС‚РѕСЂРЅС‹Рј Р·Р°РїРѕР»РЅРµРЅРёРµРј вЂ” РіР°СЂР°РЅС‚РёСЂРѕРІР°РЅ РєРѕСЂСЂРµРєС‚РЅС‹Р№ РїРѕРІС‚РѕСЂРЅС‹Р№ Р·Р°РїСѓСЃРє
+' Р±РµР· РїРµСЂРµР·Р°РіСЂСѓР·РєРё РєРЅРёРіРё.
 ' ============================================================
 Private Sub InitDictionaries()
+    ' РћС‡РёСЃС‚РєР° РєРѕР»Р»РµРєС†РёР№ (РїРµСЂРµСЃРѕР·РґР°РЅРёРµ)
+    Set colErrors = New Collection
+    Set colWarnings = New Collection
+    Set colInfos = New Collection
+
+    ' РћС‡РёСЃС‚РєР° СЃР»РѕРІР°СЂРµР№: RemoveAll, РµСЃР»Рё СЃР»РѕРІР°СЂСЊ СѓР¶Рµ СЃРѕР·РґР°РЅ,
+    ' РёРЅР°С‡Рµ вЂ” СЃРѕР·РґР°РЅРёРµ РЅРѕРІРѕРіРѕ СЌРєР·РµРјРїР»СЏСЂР°
+    If Not knownTypes Is Nothing Then
+        knownTypes.RemoveAll
+    Else
+        Set knownTypes = CreateObject("Scripting.Dictionary")
+    End If
+    If Not attrDict Is Nothing Then
+        attrDict.RemoveAll
+    Else
+        Set attrDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not attrSourceRow Is Nothing Then
+        attrSourceRow.RemoveAll
+    Else
+        Set attrSourceRow = CreateObject("Scripting.Dictionary")
+    End If
+    If Not groupDict Is Nothing Then
+        groupDict.RemoveAll
+    Else
+        Set groupDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not attrTypesDict Is Nothing Then
+        attrTypesDict.RemoveAll
+    Else
+        Set attrTypesDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not uniqDict Is Nothing Then
+        uniqDict.RemoveAll
+    Else
+        Set uniqDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not boolValuesDict Is Nothing Then
+        boolValuesDict.RemoveAll
+    Else
+        Set boolValuesDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not baseTypesDict Is Nothing Then
+        baseTypesDict.RemoveAll
+    Else
+        Set baseTypesDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not typesProblemsDict Is Nothing Then
+        typesProblemsDict.RemoveAll
+    Else
+        Set typesProblemsDict = CreateObject("Scripting.Dictionary")
+    End If
+    If Not attrsProblemsDict Is Nothing Then
+        attrsProblemsDict.RemoveAll
+    Else
+        Set attrsProblemsDict = CreateObject("Scripting.Dictionary")
+    End If
+
     AddBaseType "Root_object_type"
     AddBaseType "Smart_folder_type"
     AddBaseType "Project_folder"
@@ -367,24 +669,24 @@ Private Sub InitDictionaries()
     AddBaseType "applications_folder"
     AddBaseType "qualification_folder"
     
-    AddAttrType "Строка"
-    AddAttrType "Дата и время"
-    AddAttrType "Целое число"
-    AddAttrType "Вещественное число"
-    AddAttrType "Десятичный (денежная единица)"
-    AddAttrType "Нумератор"
-    AddAttrType "Состояние"
-    AddAttrType "Организационная единица"
-    AddAttrType "Справочник элементов"
-    AddAttrType "Наследуемый"
-    AddAttrType "Булевый"
+    AddAttrType "РЎС‚СЂРѕРєР°"
+    AddAttrType "Р”Р°С‚Р° Рё РІСЂРµРјСЏ"
+    AddAttrType "Р¦РµР»РѕРµ С‡РёСЃР»Рѕ"
+    AddAttrType "Р’РµС‰РµСЃС‚РІРµРЅРЅРѕРµ С‡РёСЃР»Рѕ"
+    AddAttrType "Р”РµСЃСЏС‚РёС‡РЅС‹Р№ (РґРµРЅРµР¶РЅР°СЏ РµРґРёРЅРёС†Р°)"
+    AddAttrType "РќСѓРјРµСЂР°С‚РѕСЂ"
+    AddAttrType "РЎРѕСЃС‚РѕСЏРЅРёРµ"
+    AddAttrType "РћСЂРіР°РЅРёР·Р°С†РёРѕРЅРЅР°СЏ РµРґРёРЅРёС†Р°"
+    AddAttrType "РЎРїСЂР°РІРѕС‡РЅРёРє СЌР»РµРјРµРЅС‚РѕРІ"
+    AddAttrType "РќР°СЃР»РµРґСѓРµРјС‹Р№"
+    AddAttrType "Р‘СѓР»РµРІС‹Р№"
     
-    AddUniqueness "Не проверять"
-    AddUniqueness "Показывать предупреждение"
-    AddUniqueness "Запрещать создание дубликатов"
+    AddUniqueness "РќРµ РїСЂРѕРІРµСЂСЏС‚СЊ"
+    AddUniqueness "РџРѕРєР°Р·С‹РІР°С‚СЊ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ"
+    AddUniqueness "Р—Р°РїСЂРµС‰Р°С‚СЊ СЃРѕР·РґР°РЅРёРµ РґСѓР±Р»РёРєР°С‚РѕРІ"
     
-    boolValuesDict.Add "да", True
-    boolValuesDict.Add "нет", True
+    boolValuesDict.Add "РґР°", True
+    boolValuesDict.Add "РЅРµС‚", True
 End Sub
 
 Private Sub AddBaseType(typeName As String)
@@ -401,52 +703,52 @@ Private Sub AddUniqueness(value As String)
 End Sub
 
 ' ============================================================
-' ЗАПИСЬ ЗАГОЛОВКОВ
+' Р—РђРџРРЎР¬ Р—РђР“РћР›РћР’РљРћР’
 ' ============================================================
 Private Sub WriteHeaders(wsTypes As Worksheet, wsAttrs As Worksheet, _
                          wsErrors As Worksheet, wsWarnings As Worksheet, _
                          wsLog As Worksheet)
     Dim typeHeaders As Variant
-    typeHeaders = Array("Системное имя типа", "Видимое имя типа", "Может быть корневым", _
-        "Может монтироваться на диск", "Отображается на диске", "Является проектом", _
-        "Является документом", "Может содержать умные папки", "Служебный", _
-        "Дополнительные параметры", "Состоит из", "Входит в")
+    typeHeaders = Array("РЎРёСЃС‚РµРјРЅРѕРµ РёРјСЏ С‚РёРїР°", "Р’РёРґРёРјРѕРµ РёРјСЏ С‚РёРїР°", "РњРѕР¶РµС‚ Р±С‹С‚СЊ РєРѕСЂРЅРµРІС‹Рј", _
+        "РњРѕР¶РµС‚ РјРѕРЅС‚РёСЂРѕРІР°С‚СЊСЃСЏ РЅР° РґРёСЃРє", "РћС‚РѕР±СЂР°Р¶Р°РµС‚СЃСЏ РЅР° РґРёСЃРєРµ", "РЇРІР»СЏРµС‚СЃСЏ РїСЂРѕРµРєС‚РѕРј", _
+        "РЇРІР»СЏРµС‚СЃСЏ РґРѕРєСѓРјРµРЅС‚РѕРј", "РњРѕР¶РµС‚ СЃРѕРґРµСЂР¶Р°С‚СЊ СѓРјРЅС‹Рµ РїР°РїРєРё", "РЎР»СѓР¶РµР±РЅС‹Р№", _
+        "Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ РїР°СЂР°РјРµС‚СЂС‹", "РЎРѕСЃС‚РѕРёС‚ РёР·", "Р’С…РѕРґРёС‚ РІ")
     Dim i As Long
     For i = LBound(typeHeaders) To UBound(typeHeaders)
         wsTypes.Cells(1, i + 1).value = typeHeaders(i)
     Next i
     
     Dim attrHeaders As Variant
-    attrHeaders = Array("Системное имя типа", "name", "Наименование", "Группа атрибутов", _
-        "Тип атрибута", "Отображать атрибут в названиях", "Не индексировать", _
-        "Обязательный для заполнения", "Объединять с предыдущим", "Служебный", _
-        "Уникальность", "Дополнительные параметры")
+    attrHeaders = Array("РЎРёСЃС‚РµРјРЅРѕРµ РёРјСЏ С‚РёРїР°", "name", "РќР°РёРјРµРЅРѕРІР°РЅРёРµ", "Р“СЂСѓРїРїР° Р°С‚СЂРёР±СѓС‚РѕРІ", _
+        "РўРёРї Р°С‚СЂРёР±СѓС‚Р°", "РћС‚РѕР±СЂР°Р¶Р°С‚СЊ Р°С‚СЂРёР±СѓС‚ РІ РЅР°Р·РІР°РЅРёСЏС…", "РќРµ РёРЅРґРµРєСЃРёСЂРѕРІР°С‚СЊ", _
+        "РћР±СЏР·Р°С‚РµР»СЊРЅС‹Р№ РґР»СЏ Р·Р°РїРѕР»РЅРµРЅРёСЏ", "РћР±СЉРµРґРёРЅСЏС‚СЊ СЃ РїСЂРµРґС‹РґСѓС‰РёРј", "РЎР»СѓР¶РµР±РЅС‹Р№", _
+        "РЈРЅРёРєР°Р»СЊРЅРѕСЃС‚СЊ", "Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ РїР°СЂР°РјРµС‚СЂС‹")
     For i = LBound(attrHeaders) To UBound(attrHeaders)
         wsAttrs.Cells(1, i + 1).value = attrHeaders(i)
     Next i
     
-    wsErrors.Cells(1, 1).value = "Код"
-    wsErrors.Cells(1, 2).value = "Источник"
-    wsErrors.Cells(1, 3).value = "Сообщение"
+    wsErrors.Cells(1, 1).value = "РљРѕРґ"
+    wsErrors.Cells(1, 2).value = "РСЃС‚РѕС‡РЅРёРє"
+    wsErrors.Cells(1, 3).value = "РЎРѕРѕР±С‰РµРЅРёРµ"
     wsErrors.Rows(1).Font.Bold = True
     wsErrors.Rows(1).Interior.Color = RGB(255, 199, 206)
     
-    wsWarnings.Cells(1, 1).value = "Код"
-    wsWarnings.Cells(1, 2).value = "Источник"
-    wsWarnings.Cells(1, 3).value = "Сообщение"
+    wsWarnings.Cells(1, 1).value = "РљРѕРґ"
+    wsWarnings.Cells(1, 2).value = "РСЃС‚РѕС‡РЅРёРє"
+    wsWarnings.Cells(1, 3).value = "РЎРѕРѕР±С‰РµРЅРёРµ"
     wsWarnings.Rows(1).Font.Bold = True
     wsWarnings.Rows(1).Interior.Color = RGB(255, 235, 156)
     
-    wsLog.Cells(1, 1).value = "Тип"
-    wsLog.Cells(1, 2).value = "Атрибут"
-    wsLog.Cells(1, 3).value = "Действие"
-    wsLog.Cells(1, 4).value = "Причина"
-    wsLog.Cells(1, 5).value = "Источник (файл)"
+    wsLog.Cells(1, 1).value = "РўРёРї"
+    wsLog.Cells(1, 2).value = "РђС‚СЂРёР±СѓС‚"
+    wsLog.Cells(1, 3).value = "Р”РµР№СЃС‚РІРёРµ"
+    wsLog.Cells(1, 4).value = "РџСЂРёС‡РёРЅР°"
+    wsLog.Cells(1, 5).value = "РСЃС‚РѕС‡РЅРёРє (С„Р°Р№Р»)"
     wsLog.Rows(1).Font.Bold = True
 End Sub
 
 ' ============================================================
-' ДОБАВЛЕНИЕ ОШИБКИ / ПРЕДУПРЕЖДЕНИЯ
+' Р”РћР‘РђР’Р›Р•РќРР• РћРЁРР‘РљР / РџР Р•Р”РЈРџР Р•Р–Р”Р•РќРРЇ
 ' ============================================================
 Private Sub AddError(code As String, message As String, _
                      Optional fileName As String = "", _
@@ -491,7 +793,7 @@ Private Sub AddWarning(code As String, message As String, _
 End Sub
 
 ' ============================================================
-' БАЗОВАЯ ВАЛИДАЦИЯ ТИПА
+' Р‘РђР—РћР’РђРЇ Р’РђР›РР”РђР¦РРЇ РўРРџРђ
 ' ============================================================
 Private Sub ValidateTypeBasic(ws As Worksheet, row As Long, fileName As String, sysName As String)
     Dim visibleName As String
@@ -513,21 +815,21 @@ Private Sub ValidateTypeBasic(ws As Worksheet, row As Long, fileName As String, 
     children = Trim(CStr(ws.Cells(row, 11).value))
     parents = Trim(CStr(ws.Cells(row, 12).value))
     
-    ' T016: Видимое имя
+    ' T016: Р’РёРґРёРјРѕРµ РёРјСЏ
     If visibleName = "" Then
-        AddError "T016", "Тип '" & sysName & "': поле 'Видимое имя типа' пустое. Заполните наименование на русском языке.", _
-                 fileName, "Типы", row, sysName, "TYPE"
+        AddError "T016", "РўРёРї '" & sysName & "': РїРѕР»Рµ 'Р’РёРґРёРјРѕРµ РёРјСЏ С‚РёРїР°' РїСѓСЃС‚РѕРµ. Р—Р°РїРѕР»РЅРёС‚Рµ РЅР°РёРјРµРЅРѕРІР°РЅРёРµ РЅР° СЂСѓСЃСЃРєРѕРј СЏР·С‹РєРµ.", _
+                 fileName, "РўРёРїС‹", row, sysName, "TYPE"
     End If
     
-    ' T016/T006: Булевы поля
+    ' T016/T006: Р‘СѓР»РµРІС‹ РїРѕР»СЏ
     Dim boolCols As Variant
-    boolCols = Array(Array(3, "Может быть корневым"), _
-                     Array(4, "Может монтироваться на диск"), _
-                     Array(5, "Отображается на диске"), _
-                     Array(6, "Является проектом"), _
-                     Array(7, "Является документом"), _
-                     Array(8, "Может содержать умные папки"), _
-                     Array(9, "Служебный"))
+    boolCols = Array(Array(3, "РњРѕР¶РµС‚ Р±С‹С‚СЊ РєРѕСЂРЅРµРІС‹Рј"), _
+                     Array(4, "РњРѕР¶РµС‚ РјРѕРЅС‚РёСЂРѕРІР°С‚СЊСЃСЏ РЅР° РґРёСЃРє"), _
+                     Array(5, "РћС‚РѕР±СЂР°Р¶Р°РµС‚СЃСЏ РЅР° РґРёСЃРєРµ"), _
+                     Array(6, "РЇРІР»СЏРµС‚СЃСЏ РїСЂРѕРµРєС‚РѕРј"), _
+                     Array(7, "РЇРІР»СЏРµС‚СЃСЏ РґРѕРєСѓРјРµРЅС‚РѕРј"), _
+                     Array(8, "РњРѕР¶РµС‚ СЃРѕРґРµСЂР¶Р°С‚СЊ СѓРјРЅС‹Рµ РїР°РїРєРё"), _
+                     Array(9, "РЎР»СѓР¶РµР±РЅС‹Р№"))
     
     For Each bc In boolCols
         colIdx = bc(0)
@@ -535,110 +837,113 @@ Private Sub ValidateTypeBasic(ws As Worksheet, row As Long, fileName As String, 
         val = LCase(Trim(CStr(ws.Cells(row, colIdx).value)))
         
         If val = "" Then
-            AddError "T016", "Тип '" & sysName & "': поле '" & colName & "' пустое. Допустимые значения: 'да' или 'нет'.", _
-                     fileName, "Типы", row, sysName, "TYPE"
+            AddError "T016", "РўРёРї '" & sysName & "': РїРѕР»Рµ '" & colName & "' РїСѓСЃС‚РѕРµ. Р”РѕРїСѓСЃС‚РёРјС‹Рµ Р·РЅР°С‡РµРЅРёСЏ: 'РґР°' РёР»Рё 'РЅРµС‚'.", _
+                     fileName, "РўРёРїС‹", row, sysName, "TYPE"
         ElseIf Not boolValuesDict.Exists(val) Then
-            AddError "T006", "Тип '" & sysName & "': колонка '" & colName & "' содержит значение '" & val & "'. Допустимо только 'да' или 'нет'.", _
-                     fileName, "Типы", row, sysName, "TYPE"
+            AddError "T006", "РўРёРї '" & sysName & "': РєРѕР»РѕРЅРєР° '" & colName & "' СЃРѕРґРµСЂР¶РёС‚ Р·РЅР°С‡РµРЅРёРµ '" & val & "'. Р”РѕРїСѓСЃС‚РёРјРѕ С‚РѕР»СЊРєРѕ 'РґР°' РёР»Рё 'РЅРµС‚'.", _
+                     fileName, "РўРёРїС‹", row, sysName, "TYPE"
         End If
     Next bc
     
-    ' T016: Состоит из (в soft-режиме — предупреждение)
+    ' T016: РЎРѕСЃС‚РѕРёС‚ РёР· (РІ soft-СЂРµР¶РёРјРµ вЂ” РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ)
     If children = "" Then
         If isSoftMode Then
-            AddWarning "T016", "Тип '" & sysName & "': поле 'Состоит из' пустое. Дети-документы могут быть добавлены на следующих шагах.", _
-                     fileName, "Типы", row, sysName, "TYPE"
+            AddWarning "T016", "РўРёРї '" & sysName & "': РїРѕР»Рµ 'РЎРѕСЃС‚РѕРёС‚ РёР·' РїСѓСЃС‚РѕРµ. Р”РµС‚Рё-РґРѕРєСѓРјРµРЅС‚С‹ РјРѕРіСѓС‚ Р±С‹С‚СЊ РґРѕР±Р°РІР»РµРЅС‹ РЅР° СЃР»РµРґСѓСЋС‰РёС… С€Р°РіР°С….", _
+                     fileName, "РўРёРїС‹", row, sysName, "TYPE"
         Else
-            AddError "T016", "Тип '" & sysName & "': поле 'Состоит из' пустое. Укажите дочерние типы или оставьте пустым только для типов без дочерних элементов.", _
-                     fileName, "Типы", row, sysName, "TYPE"
+            AddError "T016", "РўРёРї '" & sysName & "': РїРѕР»Рµ 'РЎРѕСЃС‚РѕРёС‚ РёР·' РїСѓСЃС‚РѕРµ. РЈРєР°Р¶РёС‚Рµ РґРѕС‡РµСЂРЅРёРµ С‚РёРїС‹ РёР»Рё РѕСЃС‚Р°РІСЊС‚Рµ РїСѓСЃС‚С‹Рј С‚РѕР»СЊРєРѕ РґР»СЏ С‚РёРїРѕРІ Р±РµР· РґРѕС‡РµСЂРЅРёС… СЌР»РµРјРµРЅС‚РѕРІ.", _
+                     fileName, "РўРёРїС‹", row, sysName, "TYPE"
         End If
     End If
     
-    ' T016: Входит в
+    ' T016: Р’С…РѕРґРёС‚ РІ
     If parents = "" Then
-        AddError "T016", "Тип '" & sysName & "': поле 'Входит в' пустое. Укажите родительский тип.", _
-                 fileName, "Типы", row, sysName, "TYPE"
+        AddError "T016", "РўРёРї '" & sysName & "': РїРѕР»Рµ 'Р’С…РѕРґРёС‚ РІ' РїСѓСЃС‚РѕРµ. РЈРєР°Р¶РёС‚Рµ СЂРѕРґРёС‚РµР»СЊСЃРєРёР№ С‚РёРї.", _
+                 fileName, "РўРёРїС‹", row, sysName, "TYPE"
     End If
     
-    ' T002: имя типа — camelCase
+    ' T002: РёРјСЏ С‚РёРїР° вЂ” camelCase
     If Not IsCamelTypeName(sysName) Then
-        AddError "T002", "Системное имя типа '" & sysName & "' нарушает правило camelCase. Допустимы только латинские буквы без подчёркиваний; первое слово со строчной; исключения: суффикс _doc, фазы phase0–phase3, коды форм ksN.", _
-                 fileName, "Типы", row, sysName, "TYPE"
+        AddError "T002", "РЎРёСЃС‚РµРјРЅРѕРµ РёРјСЏ С‚РёРїР° '" & sysName & "' РЅР°СЂСѓС€Р°РµС‚ РїСЂР°РІРёР»Рѕ camelCase. Р”РѕРїСѓСЃС‚РёРјС‹ С‚РѕР»СЊРєРѕ Р»Р°С‚РёРЅСЃРєРёРµ Р±СѓРєРІС‹ Р±РµР· РїРѕРґС‡С‘СЂРєРёРІР°РЅРёР№; РїРµСЂРІРѕРµ СЃР»РѕРІРѕ СЃРѕ СЃС‚СЂРѕС‡РЅРѕР№; РёСЃРєР»СЋС‡РµРЅРёСЏ: СЃСѓС„С„РёРєСЃ _doc, С„Р°Р·С‹ phase0вЂ“phase3, РєРѕРґС‹ С„РѕСЂРј ksN.", _
+                 fileName, "РўРёРїС‹", row, sysName, "TYPE"
     End If
     
-    ' T017: цифры только в phase0–phase3 и ksN
+    ' T017: С†РёС„СЂС‹ С‚РѕР»СЊРєРѕ РІ phase0вЂ“phase3 Рё ksN
     If ContainsForbiddenDigit(sysName) Then
-        AddError "T017", "Тип '" & sysName & "': цифры в системном имени допустимы только у фаз phase0–phase3 и кодов форм ksN.", _
-                 fileName, "Типы", row, sysName, "TYPE"
+        AddError "T017", "РўРёРї '" & sysName & "': С†РёС„СЂС‹ РІ СЃРёСЃС‚РµРјРЅРѕРј РёРјРµРЅРё РґРѕРїСѓСЃС‚РёРјС‹ С‚РѕР»СЊРєРѕ Сѓ С„Р°Р· phase0вЂ“phase3 Рё РєРѕРґРѕРІ С„РѕСЂРј ksN.", _
+                 fileName, "РўРёРїС‹", row, sysName, "TYPE"
     End If
     
-    ' T003: Запрещённые префиксы
+    ' T003: Р—Р°РїСЂРµС‰С‘РЅРЅС‹Рµ РїСЂРµС„РёРєСЃС‹
     lowerName = LCase(sysName)
     If Left(lowerName, 3) = "lc_" Or Left(lowerName, 8) = "lc_gost_" Then
-        AddError "T003", "Системное имя '" & sysName & "' использует запрещённый префикс lc_/lc_gost_. Удалите префикс.", _
-                 fileName, "Типы", row, sysName, "TYPE"
+        AddError "T003", "РЎРёСЃС‚РµРјРЅРѕРµ РёРјСЏ '" & sysName & "' РёСЃРїРѕР»СЊР·СѓРµС‚ Р·Р°РїСЂРµС‰С‘РЅРЅС‹Р№ РїСЂРµС„РёРєСЃ lc_/lc_gost_. РЈРґР°Р»РёС‚Рµ РїСЂРµС„РёРєСЃ.", _
+                 fileName, "РўРёРїС‹", row, sysName, "TYPE"
     End If
     If InStr(lowerName, "gost") > 0 And Left(lowerName, 5) <> "gost_" Then
-        AddWarning "T003", "Имя '" & sysName & "' содержит 'gost'. Проверьте соответствие Схеме.", _
-                   fileName, "Типы", row, sysName, "TYPE"
+        AddWarning "T003", "РРјСЏ '" & sysName & "' СЃРѕРґРµСЂР¶РёС‚ 'gost'. РџСЂРѕРІРµСЂСЊС‚Рµ СЃРѕРѕС‚РІРµС‚СЃС‚РІРёРµ РЎС…РµРјРµ.", _
+                   fileName, "РўРёРїС‹", row, sysName, "TYPE"
     End If
     
-    ' T004: Дубликат
+    ' T004: Р”СѓР±Р»РёРєР°С‚
     If knownTypes.Exists(sysName) And Not baseTypesDict.Exists(sysName) Then
-        AddError "T004", "Дубликат системного имени типа '" & sysName & "'. Переименуйте тип или удалите дублирующую строку.", _
-                 fileName, "Типы", row, sysName, "TYPE"
+        AddError "T004", "Р”СѓР±Р»РёРєР°С‚ СЃРёСЃС‚РµРјРЅРѕРіРѕ РёРјРµРЅРё С‚РёРїР° '" & sysName & "'. РџРµСЂРµРёРјРµРЅСѓР№С‚Рµ С‚РёРї РёР»Рё СѓРґР°Р»РёС‚Рµ РґСѓР±Р»РёСЂСѓСЋС‰СѓСЋ СЃС‚СЂРѕРєСѓ.", _
+                 fileName, "РўРёРїС‹", row, sysName, "TYPE"
     Else
         If Not knownTypes.Exists(sysName) Then knownTypes.Add sysName, True
     End If
     
-    ' T007: Отображается на диске
-    If displayOnDisk = "да" Then
-        If sysName <> "bim_coordinationModel" And sysName <> "bim_modelPartFolder" Then
-            AddError "T007", "Тип '" & sysName & "': 'Отображается на диске'=да недопустимо. Разрешено только для bim_coordinationModel и bim_modelPartFolder.", _
-                     fileName, "Типы", row, sysName, "TYPE"
-        End If
-    End If
-    
-    ' T008: Умные папки
-    If smartFolders = "да" Then
-        Dim allowedSmartFolderTypes As Variant
-        allowedSmartFolderTypes = Array("project", "object", "contractor", _
-            "procurement_folder", "applications_folder", "qualification_folder", _
-            "reference_contractors", "referencebook_folder")
-        Dim isAllowed As Boolean
-        isAllowed = False
-        Dim sft As Variant
-        For Each sft In allowedSmartFolderTypes
-            If LCase(sysName) = LCase(CStr(sft)) Then
-                isAllowed = True
-                Exit For
+    ' T007: РћС‚РѕР±СЂР°Р¶Р°РµС‚СЃСЏ РЅР° РґРёСЃРєРµ (OPT-07: РїСЂРѕРІРµСЂРєРё РЅРµС‚ РІ СЃРїРµС†РёС„РёРєР°С†РёРё вЂ” СѓРїСЂР°РІР»СЏРµС‚СЃСЏ РєРѕРЅС„РёРіСѓСЂР°С†РёРµР№)
+    If Mod_Util.GetConfigValue("EnableDiskDisplayCheck") = "РґР°" Then
+        If displayOnDisk = "РґР°" Then
+            If sysName <> "bim_coordinationModel" And sysName <> "bim_modelPartFolder" Then
+                AddError "T007", "РўРёРї '" & sysName & "': 'РћС‚РѕР±СЂР°Р¶Р°РµС‚СЃСЏ РЅР° РґРёСЃРєРµ'=РґР° РЅРµРґРѕРїСѓСЃС‚РёРјРѕ. Р Р°Р·СЂРµС€РµРЅРѕ С‚РѕР»СЊРєРѕ РґР»СЏ bim_coordinationModel Рё bim_modelPartFolder.", _
+                         fileName, "РўРёРїС‹", row, sysName, "TYPE"
             End If
-        Next sft
-        If Not isAllowed Then
-            AddWarning "T008", "Тип '" & sysName & "': 'Может содержать умные папки'=да. Разрешено только для ключевых типов (project, object, contractor, procurement_folder, applications_folder, qualification_folder).", _
-                       fileName, "Типы", row, sysName, "TYPE"
         End If
     End If
-    
-    ' T009: Документ без doc_remarksFolder
-    If isDocument = "да" Then
+
+    ' T008: РЈРјРЅС‹Рµ РїР°РїРєРё (OPT-07: РїСЂРѕРІРµСЂРєРё РЅРµС‚ РІ СЃРїРµС†РёС„РёРєР°С†РёРё вЂ” СѓРїСЂР°РІР»СЏРµС‚СЃСЏ РєРѕРЅС„РёРіСѓСЂР°С†РёРµР№)
+    If Mod_Util.GetConfigValue("EnableSmartFolderCheck") = "РґР°" Then
+        If smartFolders = "РґР°" Then
+            Dim allowedSmartFolderTypes As Variant
+            allowedSmartFolderTypes = Array("project", "object", "contractor", _
+                "procurement_folder", "applications_folder", "qualification_folder", _
+                "reference_contractors", "referencebook_folder")
+            Dim isAllowed As Boolean
+            isAllowed = False
+            Dim sft As Variant
+            For Each sft In allowedSmartFolderTypes
+                If LCase(sysName) = LCase(CStr(sft)) Then
+                    isAllowed = True
+                    Exit For
+                End If
+            Next sft
+            If Not isAllowed Then
+                AddWarning "T008", "РўРёРї '" & sysName & "': 'РњРѕР¶РµС‚ СЃРѕРґРµСЂР¶Р°С‚СЊ СѓРјРЅС‹Рµ РїР°РїРєРё'=РґР°. Р Р°Р·СЂРµС€РµРЅРѕ С‚РѕР»СЊРєРѕ РґР»СЏ РєР»СЋС‡РµРІС‹С… С‚РёРїРѕРІ (project, object, contractor, procurement_folder, applications_folder, qualification_folder).", _
+                           fileName, "РўРёРїС‹", row, sysName, "TYPE"
+            End If
+        End If
+    End If
+    ' T009: Р”РѕРєСѓРјРµРЅС‚ Р±РµР· doc_remarksFolder
+    If isDocument = "РґР°" Then
         If InStr(children, "doc_remarksFolder") = 0 Then
-            AddError "T009", "Тип '" & sysName & "' является документом, но в 'Состоит из' отсутствует 'doc_remarksFolder'. Добавьте его.", _
-                     fileName, "Типы", row, sysName, "TYPE"
+            AddError "T009", "РўРёРї '" & sysName & "' СЏРІР»СЏРµС‚СЃСЏ РґРѕРєСѓРјРµРЅС‚РѕРј, РЅРѕ РІ 'РЎРѕСЃС‚РѕРёС‚ РёР·' РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚ 'doc_remarksFolder'. Р”РѕР±Р°РІСЊС‚Рµ РµРіРѕ.", _
+                     fileName, "РўРёРїС‹", row, sysName, "TYPE"
         End If
     End If
     
     ' T015: object -> projectfolder
     If LCase(sysName) = "object" Then
         If InStr(LCase(parents), "projectfolder") = 0 Then
-            AddError "T015", "Тип 'object' должен иметь родительский тип 'projectfolder' в колонке 'Входит в'.", _
-                     fileName, "Типы", row, sysName, "TYPE"
+            AddError "T015", "РўРёРї 'object' РґРѕР»Р¶РµРЅ РёРјРµС‚СЊ СЂРѕРґРёС‚РµР»СЊСЃРєРёР№ С‚РёРї 'projectfolder' РІ РєРѕР»РѕРЅРєРµ 'Р’С…РѕРґРёС‚ РІ'.", _
+                     fileName, "РўРёРїС‹", row, sysName, "TYPE"
         End If
     End If
 End Sub
 
 ' ============================================================
-' КОПИРОВАНИЕ СТРОКИ АТРИБУТА С ДЕДУПЛИКАЦИЕЙ
+' РљРћРџРР РћР’РђРќРР• РЎРўР РћРљР РђРўР РР‘РЈРўРђ РЎ Р”Р•Р”РЈРџР›РРљРђР¦РР•Р™
 ' ============================================================
 Private Sub CopyAttributeRow(ws As Worksheet, row As Long, fileName As String, _
                              sysType As String, attrName As String, _
@@ -664,8 +969,8 @@ Private Sub CopyAttributeRow(ws As Worksheet, row As Long, fileName As String, _
             Next j
             wsLog.Cells(rLog, 1).value = sysType
             wsLog.Cells(rLog, 2).value = attrName
-            wsLog.Cells(rLog, 3).value = "ЗАМЕНА"
-            wsLog.Cells(rLog, 4).value = "Новая строка полнее (оценка: " & scoreNew & " vs " & scoreExisting & ")"
+            wsLog.Cells(rLog, 3).value = "Р—РђРњР•РќРђ"
+            wsLog.Cells(rLog, 4).value = "РќРѕРІР°СЏ СЃС‚СЂРѕРєР° РїРѕР»РЅРµРµ (РѕС†РµРЅРєР°: " & scoreNew & " vs " & scoreExisting & ")"
             wsLog.Cells(rLog, 5).value = fileName
             wsLog.Cells(rLog, 3).Interior.Color = RGB(198, 239, 206)
             attrSourceRow(attrKey) = row
@@ -673,16 +978,16 @@ Private Sub CopyAttributeRow(ws As Worksheet, row As Long, fileName As String, _
         ElseIf scoreNew = scoreExisting Then
             wsLog.Cells(rLog, 1).value = sysType
             wsLog.Cells(rLog, 2).value = attrName
-            wsLog.Cells(rLog, 3).value = "ПРОПУСК"
-            wsLog.Cells(rLog, 4).value = "Идентичные данные, оставлена первая"
+            wsLog.Cells(rLog, 3).value = "РџР РћРџРЈРЎРљ"
+            wsLog.Cells(rLog, 4).value = "РРґРµРЅС‚РёС‡РЅС‹Рµ РґР°РЅРЅС‹Рµ, РѕСЃС‚Р°РІР»РµРЅР° РїРµСЂРІР°СЏ"
             wsLog.Cells(rLog, 5).value = fileName
             wsLog.Cells(rLog, 3).Interior.Color = RGB(255, 235, 156)
             rLog = rLog + 1
         Else
             wsLog.Cells(rLog, 1).value = sysType
             wsLog.Cells(rLog, 2).value = attrName
-            wsLog.Cells(rLog, 3).value = "ПРОПУСК"
-            wsLog.Cells(rLog, 4).value = "Существующая строка полнее (оценка: " & scoreExisting & " vs " & scoreNew & ")"
+            wsLog.Cells(rLog, 3).value = "РџР РћРџРЈРЎРљ"
+            wsLog.Cells(rLog, 4).value = "РЎСѓС‰РµСЃС‚РІСѓСЋС‰Р°СЏ СЃС‚СЂРѕРєР° РїРѕР»РЅРµРµ (РѕС†РµРЅРєР°: " & scoreExisting & " vs " & scoreNew & ")"
             wsLog.Cells(rLog, 5).value = fileName
             wsLog.Cells(rLog, 3).Interior.Color = RGB(255, 235, 156)
             rLog = rLog + 1
@@ -698,9 +1003,16 @@ Private Sub CopyAttributeRow(ws As Worksheet, row As Long, fileName As String, _
 End Sub
 
 ' ============================================================
-' АВТОИСПРАВЛЕНИЕ ИЕРАРХИИ (родитель -> ребёнок)
+' РђР’РўРћРРЎРџР РђР’Р›Р•РќРР• РР•Р РђР РҐРР (СЂРѕРґРёС‚РµР»СЊ -> СЂРµР±С‘РЅРѕРє)
 ' ============================================================
 Private Sub AutoFixHierarchy(wsTypes As Worksheet, rTypes As Long)
+    ' OPT-11: СѓРїСЂР°РІР»СЏРµРјРѕСЃС‚СЊ Р°РІС‚РѕРёСЃРїСЂР°РІР»РµРЅРёСЏ (GetConfigValue("EnableAutoFix"))
+    If Mod_Util.GetConfigValue("EnableAutoFix") <> "РґР°" Then
+        colInfos.Add "AutoFixHierarchy: Р°РІС‚РѕРёСЃРїСЂР°РІР»РµРЅРёРµ РѕС‚РєР»СЋС‡РµРЅРѕ РєРѕРЅС„РёРіСѓСЂР°С†РёРµР№ EnableAutoFix"
+        Mod_Util.WriteWarning "T014", "AutoFixHierarchy: Р°РІС‚РѕРёСЃРїСЂР°РІР»РµРЅРёРµ РёРµСЂР°СЂС…РёРё РїСЂРѕРїСѓС‰РµРЅРѕ (EnableAutoFix <> РґР°), СЃРІСЏР·Рё 'Р’С…РѕРґРёС‚ РІ' РЅРµ РґРѕРїРѕР»РЅСЏР»РёСЃСЊ."
+        Exit Sub
+    End If
+
     Dim r As Long
     Dim typeName As String
     Dim children As String
@@ -744,8 +1056,14 @@ Private Sub AutoFixHierarchy(wsTypes As Worksheet, rTypes As Long)
             If InStr(LCase(parents), LCase(typeName)) = 0 Then
                 If parents = "" Then
                     wsTypes.Cells(childRow, 12).value = typeName
+                    ' OPT-11: РїСЂРѕС‚РѕРєРѕР» РєР°Р¶РґРѕРіРѕ РёСЃРїСЂР°РІР»РµРЅРёСЏ вЂ” С‡С‚Рѕ Р±С‹Р»Рѕ, С‡С‚Рѕ СЃС‚Р°Р»Рѕ
+                    Mod_Util.WriteLog "AutoFixHierarchy: С‚РёРї " & refName & ", РґРѕР±Р°РІР»РµРЅ СЂРѕРґРёС‚РµР»СЊ " & typeName & _
+                                      " (Р±С‹Р»Рѕ: ''; СЃС‚Р°Р»Рѕ: '" & typeName & "')"
                 Else
                     wsTypes.Cells(childRow, 12).value = parents & "; " & typeName
+                    ' OPT-11: РїСЂРѕС‚РѕРєРѕР» РєР°Р¶РґРѕРіРѕ РёСЃРїСЂР°РІР»РµРЅРёСЏ вЂ” С‡С‚Рѕ Р±С‹Р»Рѕ, С‡С‚Рѕ СЃС‚Р°Р»Рѕ
+                    Mod_Util.WriteLog "AutoFixHierarchy: С‚РёРї " & refName & ", РґРѕР±Р°РІР»РµРЅ СЂРѕРґРёС‚РµР»СЊ " & typeName & _
+                                      " (Р±С‹Р»Рѕ: '" & parents & "'; СЃС‚Р°Р»Рѕ: '" & parents & "; " & typeName & "')"
                 End If
                 fixedCount = fixedCount + 1
             End If
@@ -756,12 +1074,12 @@ NextRow:
     Next r
     
     If fixedCount > 0 Then
-        colInfos.Add "Автоматически исправлено связей иерархии: " & fixedCount
+        colInfos.Add "РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРё РёСЃРїСЂР°РІР»РµРЅРѕ СЃРІСЏР·РµР№ РёРµСЂР°СЂС…РёРё: " & fixedCount
     End If
 End Sub
 
 ' ============================================================
-' ТОЧНОЕ СРАВНЕНИЕ ИМЕНИ В СПИСКЕ
+' РўРћР§РќРћР• РЎР РђР’РќР•РќРР• РРњР•РќР Р’ РЎРџРРЎРљР•
 ' ============================================================
 Private Function HasName(ByVal listStr As String, ByVal nm As String) As Boolean
     Dim a() As String
@@ -777,9 +1095,16 @@ Private Function HasName(ByVal listStr As String, ByVal nm As String) As Boolean
 End Function
 
 ' ============================================================
-' ОБРАТНАЯ СИНХРОНИЗАЦИЯ (ребёнок -> родитель), финальный режим
+' РћР‘Р РђРўРќРђРЇ РЎРРќРҐР РћРќРР—РђР¦РРЇ (СЂРµР±С‘РЅРѕРє -> СЂРѕРґРёС‚РµР»СЊ), С„РёРЅР°Р»СЊРЅС‹Р№ СЂРµР¶РёРј
 ' ============================================================
 Private Sub SyncChildrenFromParents(wsTypes As Worksheet, rTypes As Long)
+    ' OPT-11: СѓРїСЂР°РІР»СЏРµРјРѕСЃС‚СЊ Р°РІС‚РѕРёСЃРїСЂР°РІР»РµРЅРёСЏ (GetConfigValue("EnableAutoFix"))
+    If Mod_Util.GetConfigValue("EnableAutoFix") <> "РґР°" Then
+        colInfos.Add "SyncChildrenFromParents: Р°РІС‚РѕРёСЃРїСЂР°РІР»РµРЅРёРµ РѕС‚РєР»СЋС‡РµРЅРѕ РєРѕРЅС„РёРіСѓСЂР°С†РёРµР№ EnableAutoFix"
+        Mod_Util.WriteWarning "T014", "SyncChildrenFromParents: РѕР±СЂР°С‚РЅР°СЏ СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ 'РЎРѕСЃС‚РѕРёС‚ РёР·' РїСЂРѕРїСѓС‰РµРЅР° (EnableAutoFix <> РґР°)."
+        Exit Sub
+    End If
+
     Dim r As Long
     Dim pr As Long
     Dim childName As String
@@ -814,9 +1139,15 @@ Private Sub SyncChildrenFromParents(wsTypes As Worksheet, rTypes As Long)
                 ch = Trim(CStr(wsTypes.Cells(pr, 11).value))
                 If ch = "" Then
                     wsTypes.Cells(pr, 11).value = childName
+                    ' OPT-11: РїСЂРѕС‚РѕРєРѕР» РєР°Р¶РґРѕРіРѕ РёСЃРїСЂР°РІР»РµРЅРёСЏ вЂ” С‡С‚Рѕ Р±С‹Р»Рѕ, С‡С‚Рѕ СЃС‚Р°Р»Рѕ
+                    Mod_Util.WriteLog "SyncChildrenFromParents: С‚РёРї " & pn & ", РґРѕР±Р°РІР»РµРЅ СЂРµР±С‘РЅРѕРє " & childName & _
+                                      " (Р±С‹Р»Рѕ: ''; СЃС‚Р°Р»Рѕ: '" & childName & "')"
                     syncCount = syncCount + 1
                 ElseIf Not HasName(ch, childName) Then
                     wsTypes.Cells(pr, 11).value = ch & "; " & childName
+                    ' OPT-11: РїСЂРѕС‚РѕРєРѕР» РєР°Р¶РґРѕРіРѕ РёСЃРїСЂР°РІР»РµРЅРёСЏ вЂ” С‡С‚Рѕ Р±С‹Р»Рѕ, С‡С‚Рѕ СЃС‚Р°Р»Рѕ
+                    Mod_Util.WriteLog "SyncChildrenFromParents: С‚РёРї " & pn & ", РґРѕР±Р°РІР»РµРЅ СЂРµР±С‘РЅРѕРє " & childName & _
+                                      " (Р±С‹Р»Рѕ: '" & ch & "'; СЃС‚Р°Р»Рѕ: '" & ch & "; " & childName & "')"
                     syncCount = syncCount + 1
                 End If
             End If
@@ -825,12 +1156,12 @@ NextSync:
     Next r
     
     If syncCount > 0 Then
-        colInfos.Add "Обратная синхронизация 'Состоит из': " & syncCount
+        colInfos.Add "РћР±СЂР°С‚РЅР°СЏ СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ 'РЎРѕСЃС‚РѕРёС‚ РёР·': " & syncCount
     End If
 End Sub
 
 ' ============================================================
-' ПРОВЕРКА ВСЕХ ССЫЛОК В ТИПАХ
+' РџР РћР’Р•Р РљРђ Р’РЎР•РҐ РЎРЎР«Р›РћРљ Р’ РўРРџРђРҐ
 ' ============================================================
 Private Sub ValidateAllTypeReferences(wsTypes As Worksheet, rTypes As Long)
     Dim r As Long
@@ -855,11 +1186,11 @@ Private Sub ValidateAllTypeReferences(wsTypes As Worksheet, rTypes As Long)
                 If refName <> "" Then
                     If Not knownTypes.Exists(refName) Then
                         If isSoftMode Then
-                            AddWarning "T010", "Тип '" & typeName & "': ссылка 'Состоит из' на '" & refName & "' ещё не создана (будет добавлена на следующем шаге).", _
-                                     "", "Типы", r, typeName, "TYPE"
+                            AddWarning "T010", "РўРёРї '" & typeName & "': СЃСЃС‹Р»РєР° 'РЎРѕСЃС‚РѕРёС‚ РёР·' РЅР° '" & refName & "' РµС‰С‘ РЅРµ СЃРѕР·РґР°РЅР° (Р±СѓРґРµС‚ РґРѕР±Р°РІР»РµРЅР° РЅР° СЃР»РµРґСѓСЋС‰РµРј С€Р°РіРµ).", _
+                                     "", "РўРёРїС‹", r, typeName, "TYPE"
                         Else
-                            AddError "T010", "Тип '" & typeName & "': в колонке 'Состоит из' указана ссылка на несуществующий тип '" & refName & "'. Создайте этот тип или исправьте имя.", _
-                                     "", "Типы", r, typeName, "TYPE"
+                            AddError "T010", "РўРёРї '" & typeName & "': РІ РєРѕР»РѕРЅРєРµ 'РЎРѕСЃС‚РѕРёС‚ РёР·' СѓРєР°Р·Р°РЅР° СЃСЃС‹Р»РєР° РЅР° РЅРµСЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ С‚РёРї '" & refName & "'. РЎРѕР·РґР°Р№С‚Рµ СЌС‚РѕС‚ С‚РёРї РёР»Рё РёСЃРїСЂР°РІСЊС‚Рµ РёРјСЏ.", _
+                                     "", "РўРёРїС‹", r, typeName, "TYPE"
                         End If
                     End If
                 End If
@@ -873,24 +1204,24 @@ Private Sub ValidateAllTypeReferences(wsTypes As Worksheet, rTypes As Long)
                 If refName <> "" Then
                     If Not knownTypes.Exists(refName) Then
                         If isSoftMode Then
-                            AddWarning "T011", "Тип '" & typeName & "': ссылка 'Входит в' на '" & refName & "' ещё не создана (будет добавлена на следующем шаге).", _
-                                     "", "Типы", r, typeName, "TYPE"
+                            AddWarning "T011", "РўРёРї '" & typeName & "': СЃСЃС‹Р»РєР° 'Р’С…РѕРґРёС‚ РІ' РЅР° '" & refName & "' РµС‰С‘ РЅРµ СЃРѕР·РґР°РЅР° (Р±СѓРґРµС‚ РґРѕР±Р°РІР»РµРЅР° РЅР° СЃР»РµРґСѓСЋС‰РµРј С€Р°РіРµ).", _
+                                     "", "РўРёРїС‹", r, typeName, "TYPE"
                         Else
-                            AddError "T011", "Тип '" & typeName & "': в колонке 'Входит в' указана ссылка на несуществующий тип '" & refName & "'. Создайте этот тип или исправьте имя.", _
-                                     "", "Типы", r, typeName, "TYPE"
+                            AddError "T011", "РўРёРї '" & typeName & "': РІ РєРѕР»РѕРЅРєРµ 'Р’С…РѕРґРёС‚ РІ' СѓРєР°Р·Р°РЅР° СЃСЃС‹Р»РєР° РЅР° РЅРµСЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ С‚РёРї '" & refName & "'. РЎРѕР·РґР°Р№С‚Рµ СЌС‚РѕС‚ С‚РёРї РёР»Рё РёСЃРїСЂР°РІСЊС‚Рµ РёРјСЏ.", _
+                                     "", "РўРёРїС‹", r, typeName, "TYPE"
                         End If
                     End If
                 End If
             Next ref
         End If
         
-        ' T012: самоссылка
+        ' T012: СЃР°РјРѕСЃСЃС‹Р»РєР°
         If children <> "" Then
             refs = Split(Replace(children, ";", ","), ",")
             For Each ref In refs
                 If Trim(CStr(ref)) = typeName Then
-                    AddError "T012", "Тип '" & typeName & "' ссылается сам на себя в 'Состоит из'. Удалите самоссылку.", _
-                             "", "Типы", r, typeName, "TYPE"
+                    AddError "T012", "РўРёРї '" & typeName & "' СЃСЃС‹Р»Р°РµС‚СЃСЏ СЃР°Рј РЅР° СЃРµР±СЏ РІ 'РЎРѕСЃС‚РѕРёС‚ РёР·'. РЈРґР°Р»РёС‚Рµ СЃР°РјРѕСЃСЃС‹Р»РєСѓ.", _
+                             "", "РўРёРїС‹", r, typeName, "TYPE"
                     Exit For
                 End If
             Next ref
@@ -899,8 +1230,8 @@ Private Sub ValidateAllTypeReferences(wsTypes As Worksheet, rTypes As Long)
             refs = Split(Replace(parents, ";", ","), ",")
             For Each ref In refs
                 If Trim(CStr(ref)) = typeName Then
-                    AddError "T012", "Тип '" & typeName & "' ссылается сам на себя в 'Входит в'. Удалите самоссылку.", _
-                             "", "Типы", r, typeName, "TYPE"
+                    AddError "T012", "РўРёРї '" & typeName & "' СЃСЃС‹Р»Р°РµС‚СЃСЏ СЃР°Рј РЅР° СЃРµР±СЏ РІ 'Р’С…РѕРґРёС‚ РІ'. РЈРґР°Р»РёС‚Рµ СЃР°РјРѕСЃСЃС‹Р»РєСѓ.", _
+                             "", "РўРёРїС‹", r, typeName, "TYPE"
                     Exit For
                 End If
             Next ref
@@ -911,7 +1242,7 @@ NextTypeRef:
 End Sub
 
 ' ============================================================
-' ПРОВЕРКА ВСЕХ ССЫЛОК В АТРИБУТАХ
+' РџР РћР’Р•Р РљРђ Р’РЎР•РҐ РЎРЎР«Р›РћРљ Р’ РђРўР РР‘РЈРўРђРҐ
 ' ============================================================
 Private Sub ValidateAllAttributeReferences(wsAttrs As Worksheet, rAttrs As Long)
     Dim r As Long
@@ -942,33 +1273,33 @@ Private Sub ValidateAllAttributeReferences(wsAttrs As Worksheet, rAttrs As Long)
         attrKey = sysType & "|" & attrName
         
         If sysType = "" Then
-            AddError "A015", "Строка " & r & ": поле 'Системное имя типа' пустое. Укажите тип, к которому относится атрибут.", _
-                     "", "Атрибуты", r, "|", "ATTR"
+            AddError "A015", "РЎС‚СЂРѕРєР° " & r & ": РїРѕР»Рµ 'РЎРёСЃС‚РµРјРЅРѕРµ РёРјСЏ С‚РёРїР°' РїСѓСЃС‚РѕРµ. РЈРєР°Р¶РёС‚Рµ С‚РёРї, Рє РєРѕС‚РѕСЂРѕРјСѓ РѕС‚РЅРѕСЃРёС‚СЃСЏ Р°С‚СЂРёР±СѓС‚.", _
+                     "", "РђС‚СЂРёР±СѓС‚С‹", r, "|", "ATTR"
             GoTo NextAttrRef
         End If
         
         If attrName = "" Then
-            AddError "A015", "Тип '" & sysType & "': поле 'name' пустое. Укажите системное имя атрибута в формате camelCase.", _
-                     "", "Атрибуты", r, sysType & "|", "ATTR"
+            AddError "A015", "РўРёРї '" & sysType & "': РїРѕР»Рµ 'name' РїСѓСЃС‚РѕРµ. РЈРєР°Р¶РёС‚Рµ СЃРёСЃС‚РµРјРЅРѕРµ РёРјСЏ Р°С‚СЂРёР±СѓС‚Р° РІ С„РѕСЂРјР°С‚Рµ camelCase.", _
+                     "", "РђС‚СЂРёР±СѓС‚С‹", r, sysType & "|", "ATTR"
             GoTo NextAttrRef
         End If
         
         If visibleName = "" Then
-            AddError "A015", "Атрибут '" & sysType & "." & attrName & "': поле 'Наименование' пустое. Заполните видимое имя атрибута на русском языке.", _
-                     "", "Атрибуты", r, attrKey, "ATTR"
+            AddError "A015", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "': РїРѕР»Рµ 'РќР°РёРјРµРЅРѕРІР°РЅРёРµ' РїСѓСЃС‚РѕРµ. Р—Р°РїРѕР»РЅРёС‚Рµ РІРёРґРёРјРѕРµ РёРјСЏ Р°С‚СЂРёР±СѓС‚Р° РЅР° СЂСѓСЃСЃРєРѕРј СЏР·С‹РєРµ.", _
+                     "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
         End If
         
         If attrType = "" Then
-            AddError "A015", "Атрибут '" & sysType & "." & attrName & "': поле 'Тип атрибута' пустое. Укажите тип из списка myAdmin.", _
-                     "", "Атрибуты", r, attrKey, "ATTR"
+            AddError "A015", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "': РїРѕР»Рµ 'РўРёРї Р°С‚СЂРёР±СѓС‚Р°' РїСѓСЃС‚РѕРµ. РЈРєР°Р¶РёС‚Рµ С‚РёРї РёР· СЃРїРёСЃРєР° myAdmin.", _
+                     "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
         End If
         
         Dim boolAttrCols As Variant
-        boolAttrCols = Array(Array(6, "Отображать атрибут в названиях"), _
-                             Array(7, "Не индексировать"), _
-                             Array(8, "Обязательный для заполнения"), _
-                             Array(9, "Объединять с предыдущим"), _
-                             Array(10, "Служебный"))
+        boolAttrCols = Array(Array(6, "РћС‚РѕР±СЂР°Р¶Р°С‚СЊ Р°С‚СЂРёР±СѓС‚ РІ РЅР°Р·РІР°РЅРёСЏС…"), _
+                             Array(7, "РќРµ РёРЅРґРµРєСЃРёСЂРѕРІР°С‚СЊ"), _
+                             Array(8, "РћР±СЏР·Р°С‚РµР»СЊРЅС‹Р№ РґР»СЏ Р·Р°РїРѕР»РЅРµРЅРёСЏ"), _
+                             Array(9, "РћР±СЉРµРґРёРЅСЏС‚СЊ СЃ РїСЂРµРґС‹РґСѓС‰РёРј"), _
+                             Array(10, "РЎР»СѓР¶РµР±РЅС‹Р№"))
         
         For Each bc In boolAttrCols
             colIdx = bc(0)
@@ -976,71 +1307,71 @@ Private Sub ValidateAllAttributeReferences(wsAttrs As Worksheet, rAttrs As Long)
             val = LCase(Trim(CStr(wsAttrs.Cells(r, colIdx).value)))
             
             If val = "" Then
-                AddError "A015", "Атрибут '" & sysType & "." & attrName & "': поле '" & colName & "' пустое. Допустимые значения: 'да' или 'нет'.", _
-                         "", "Атрибуты", r, attrKey, "ATTR"
+                AddError "A015", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "': РїРѕР»Рµ '" & colName & "' РїСѓСЃС‚РѕРµ. Р”РѕРїСѓСЃС‚РёРјС‹Рµ Р·РЅР°С‡РµРЅРёСЏ: 'РґР°' РёР»Рё 'РЅРµС‚'.", _
+                         "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
             ElseIf Not boolValuesDict.Exists(val) Then
-                AddError "A008", "Атрибут '" & sysType & "." & attrName & "': колонка '" & colName & "' содержит значение '" & val & "'. Допустимо только 'да' или 'нет'.", _
-                         "", "Атрибуты", r, attrKey, "ATTR"
+                AddError "A008", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "': РєРѕР»РѕРЅРєР° '" & colName & "' СЃРѕРґРµСЂР¶РёС‚ Р·РЅР°С‡РµРЅРёРµ '" & val & "'. Р”РѕРїСѓСЃС‚РёРјРѕ С‚РѕР»СЊРєРѕ 'РґР°' РёР»Рё 'РЅРµС‚'.", _
+                         "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
             End If
         Next bc
         
         If uniqueness = "" Then
-            AddError "A015", "Атрибут '" & sysType & "." & attrName & "': поле 'Уникальность' пустое. Укажите значение из списка myAdmin.", _
-                     "", "Атрибуты", r, attrKey, "ATTR"
+            AddError "A015", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "': РїРѕР»Рµ 'РЈРЅРёРєР°Р»СЊРЅРѕСЃС‚СЊ' РїСѓСЃС‚РѕРµ. РЈРєР°Р¶РёС‚Рµ Р·РЅР°С‡РµРЅРёРµ РёР· СЃРїРёСЃРєР° myAdmin.", _
+                     "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
         End If
         
-        ' A001: неизвестный тип
+        ' A001: РЅРµРёР·РІРµСЃС‚РЅС‹Р№ С‚РёРї
         If sysType <> "" And Not knownTypes.Exists(sysType) Then
-            AddError "A001", "Атрибут '" & attrName & "' ссылается на несуществующий тип '" & sysType & "'. Создайте этот тип в листе 'Типы' или исправьте имя.", _
-                     "", "Атрибуты", r, attrKey, "ATTR"
+            AddError "A001", "РђС‚СЂРёР±СѓС‚ '" & attrName & "' СЃСЃС‹Р»Р°РµС‚СЃСЏ РЅР° РЅРµСЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ С‚РёРї '" & sysType & "'. РЎРѕР·РґР°Р№С‚Рµ СЌС‚РѕС‚ С‚РёРї РІ Р»РёСЃС‚Рµ 'РўРёРїС‹' РёР»Рё РёСЃРїСЂР°РІСЊС‚Рµ РёРјСЏ.", _
+                     "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
         End If
         
-        ' A003: имя атрибута — camelCase
+        ' A003: РёРјСЏ Р°С‚СЂРёР±СѓС‚Р° вЂ” camelCase
         If Not IsCamelAttrName(attrName) Then
-            AddError "A003", "Атрибут '" & sysType & "." & attrName & "': имя атрибута должно быть camelCase: только латинские буквы без подчёркиваний и пробелов; первое слово со строчной.", _
-                     "", "Атрибуты", r, attrKey, "ATTR"
+            AddError "A003", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "': РёРјСЏ Р°С‚СЂРёР±СѓС‚Р° РґРѕР»Р¶РЅРѕ Р±С‹С‚СЊ camelCase: С‚РѕР»СЊРєРѕ Р»Р°С‚РёРЅСЃРєРёРµ Р±СѓРєРІС‹ Р±РµР· РїРѕРґС‡С‘СЂРєРёРІР°РЅРёР№ Рё РїСЂРѕР±РµР»РѕРІ; РїРµСЂРІРѕРµ СЃР»РѕРІРѕ СЃРѕ СЃС‚СЂРѕС‡РЅРѕР№.", _
+                     "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
         End If
         
-        ' A016: цифры в имени атрибута запрещены
+        ' A016: С†РёС„СЂС‹ РІ РёРјРµРЅРё Р°С‚СЂРёР±СѓС‚Р° Р·Р°РїСЂРµС‰РµРЅС‹
         If ContainsDigit(attrName) Then
-            AddError "A016", "Атрибут '" & sysType & "." & attrName & "' содержит цифры в имени. Уберите номера (v1_0, 1_1 и т.п.).", _
-                     "", "Атрибуты", r, attrKey, "ATTR"
+            AddError "A016", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "' СЃРѕРґРµСЂР¶РёС‚ С†РёС„СЂС‹ РІ РёРјРµРЅРё. РЈР±РµСЂРёС‚Рµ РЅРѕРјРµСЂР° (v1_0, 1_1 Рё С‚.Рї.).", _
+                     "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
         End If
         
-        ' A006: тип атрибута
+        ' A006: С‚РёРї Р°С‚СЂРёР±СѓС‚Р°
         If attrType <> "" And Not attrTypesDict.Exists(attrType) Then
-            AddError "A006", "Атрибут '" & sysType & "." & attrName & "': недопустимый тип атрибута '" & attrType & "'. Используйте значения из myAdmin.", _
-                     "", "Атрибуты", r, attrKey, "ATTR"
+            AddError "A006", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "': РЅРµРґРѕРїСѓСЃС‚РёРјС‹Р№ С‚РёРї Р°С‚СЂРёР±СѓС‚Р° '" & attrType & "'. РСЃРїРѕР»СЊР·СѓР№С‚Рµ Р·РЅР°С‡РµРЅРёСЏ РёР· myAdmin.", _
+                     "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
         End If
         
-        ' A007: уникальность
+        ' A007: СѓРЅРёРєР°Р»СЊРЅРѕСЃС‚СЊ
         If uniqueness <> "" And Not uniqDict.Exists(uniqueness) Then
-            AddError "A007", "Атрибут '" & sysType & "." & attrName & "': недопустимое значение уникальности '" & uniqueness & "'.", _
-                     "", "Атрибуты", r, attrKey, "ATTR"
+            AddError "A007", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "': РЅРµРґРѕРїСѓСЃС‚РёРјРѕРµ Р·РЅР°С‡РµРЅРёРµ СѓРЅРёРєР°Р»СЊРЅРѕСЃС‚Рё '" & uniqueness & "'.", _
+                     "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
         End If
         
-        ' A011: наследуемый без источника
-        If attrType = "Наследуемый" Then
-            If InStr(additionalParams, "Наследуется от:") = 0 Then
-                AddError "A011", "Атрибут '" & sysType & "." & attrName & "' имеет тип 'Наследуемый', но не указан источник. Формат: 'Наследуется от: parent_type.attribute_name'.", _
-                         "", "Атрибуты", r, attrKey, "ATTR"
+        ' A011: РЅР°СЃР»РµРґСѓРµРјС‹Р№ Р±РµР· РёСЃС‚РѕС‡РЅРёРєР°
+        If attrType = "РќР°СЃР»РµРґСѓРµРјС‹Р№" Then
+            If InStr(additionalParams, "РќР°СЃР»РµРґСѓРµС‚СЃСЏ РѕС‚:") = 0 Then
+                AddError "A011", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "' РёРјРµРµС‚ С‚РёРї 'РќР°СЃР»РµРґСѓРµРјС‹Р№', РЅРѕ РЅРµ СѓРєР°Р·Р°РЅ РёСЃС‚РѕС‡РЅРёРє. Р¤РѕСЂРјР°С‚: 'РќР°СЃР»РµРґСѓРµС‚СЃСЏ РѕС‚: parent_type.attribute_name'.", _
+                         "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
             End If
         End If
         
-        ' A013: состояние без UserStateRootNode
-        If attrType = "Состояние" Then
+        ' A013: СЃРѕСЃС‚РѕСЏРЅРёРµ Р±РµР· UserStateRootNode
+        If attrType = "РЎРѕСЃС‚РѕСЏРЅРёРµ" Then
             If InStr(additionalParams, "UserStateRootNode") = 0 And _
-               InStr(additionalParams, "Выбрать машину состояний") = 0 Then
-                AddWarning "A013", "Атрибут '" & sysType & "." & attrName & "' имеет тип 'Состояние', но XML не содержит 'UserStateRootNode'.", _
-                           "", "Атрибуты", r, attrKey, "ATTR"
+               InStr(additionalParams, "Р’С‹Р±СЂР°С‚СЊ РјР°С€РёРЅСѓ СЃРѕСЃС‚РѕСЏРЅРёР№") = 0 Then
+                AddWarning "A013", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "' РёРјРµРµС‚ С‚РёРї 'РЎРѕСЃС‚РѕСЏРЅРёРµ', РЅРѕ XML РЅРµ СЃРѕРґРµСЂР¶РёС‚ 'UserStateRootNode'.", _
+                           "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
             End If
         End If
         
-        ' A014: справочник без Source
-        If attrType = "Справочник элементов" Then
+        ' A014: СЃРїСЂР°РІРѕС‡РЅРёРє Р±РµР· Source
+        If attrType = "РЎРїСЂР°РІРѕС‡РЅРёРє СЌР»РµРјРµРЅС‚РѕРІ" Then
             If InStr(additionalParams, "ElementBook") > 0 And InStr(additionalParams, "Source=") = 0 Then
-                AddError "A014", "Атрибут '" & sysType & "." & attrName & "' имеет тип 'Справочник элементов', но в XML не указан 'Source'.", _
-                         "", "Атрибуты", r, attrKey, "ATTR"
+                AddError "A014", "РђС‚СЂРёР±СѓС‚ '" & sysType & "." & attrName & "' РёРјРµРµС‚ С‚РёРї 'РЎРїСЂР°РІРѕС‡РЅРёРє СЌР»РµРјРµРЅС‚РѕРІ', РЅРѕ РІ XML РЅРµ СѓРєР°Р·Р°РЅ 'Source'.", _
+                         "", "РђС‚СЂРёР±СѓС‚С‹", r, attrKey, "ATTR"
             End If
         End If
         
@@ -1057,13 +1388,13 @@ NextAttrRef:
 End Sub
 
 ' ============================================================
-' ФИНАЛЬНЫЕ ПРОВЕРКИ
+' Р¤РРќРђР›Р¬РќР«Р• РџР РћР’Р•Р РљР
 ' ============================================================
 Private Sub FinalValidation(wsTypes As Worksheet, wsAttrs As Worksheet, rTypes As Long)
     Dim k As Variant
     For Each k In groupDict.Keys
         If groupDict(k) < 2 Then
-            AddWarning "A009", "Группа атрибутов '" & CStr(k) & "' содержит только " & groupDict(k) & " атрибут(ов). Группа должна содержать минимум 2 атрибута."
+            AddWarning "A009", "Р“СЂСѓРїРїР° Р°С‚СЂРёР±СѓС‚РѕРІ '" & CStr(k) & "' СЃРѕРґРµСЂР¶РёС‚ С‚РѕР»СЊРєРѕ " & groupDict(k) & " Р°С‚СЂРёР±СѓС‚(РѕРІ). Р“СЂСѓРїРїР° РґРѕР»Р¶РЅР° СЃРѕРґРµСЂР¶Р°С‚СЊ РјРёРЅРёРјСѓРј 2 Р°С‚СЂРёР±СѓС‚Р°."
         End If
     Next k
     
@@ -1091,7 +1422,7 @@ Private Sub FinalValidation(wsTypes As Worksheet, wsAttrs As Worksheet, rTypes A
                         If Trim(CStr(wsTypes.Cells(r2, 1).value)) = refName Then
                             refParents = Trim(CStr(wsTypes.Cells(r2, 12).value))
                             If InStr(refParents, typeName) = 0 Then
-                                AddWarning "T013", "Тип '" & refName & "' указан в 'Состоит из' типа '" & typeName & "', но не указывает '" & typeName & "' в своём 'Входит в'."
+                                AddWarning "T013", "РўРёРї '" & refName & "' СѓРєР°Р·Р°РЅ РІ 'РЎРѕСЃС‚РѕРёС‚ РёР·' С‚РёРїР° '" & typeName & "', РЅРѕ РЅРµ СѓРєР°Р·С‹РІР°РµС‚ '" & typeName & "' РІ СЃРІРѕС‘Рј 'Р’С…РѕРґРёС‚ РІ'."
                             End If
                             found = True
                             Exit For
@@ -1104,7 +1435,7 @@ Private Sub FinalValidation(wsTypes As Worksheet, wsAttrs As Worksheet, rTypes A
 End Sub
 
 ' ============================================================
-' ОТЧЁТ ОБ ОШИБКАХ
+' РћРўР§РЃРў РћР‘ РћРЁРР‘РљРђРҐ
 ' ============================================================
 Private Sub BuildErrorsReport(wsErrors As Worksheet)
     Dim rErr As Long
@@ -1130,7 +1461,7 @@ Private Sub BuildErrorsReport(wsErrors As Worksheet)
                 Address:=fullPath, _
                 SubAddress:="'" & parts(3) & "'!A" & parts(4), _
                 TextToDisplay:=linkText, _
-                ScreenTip:="Перейти к проблемной строке"
+                ScreenTip:="РџРµСЂРµР№С‚Рё Рє РїСЂРѕР±Р»РµРјРЅРѕР№ СЃС‚СЂРѕРєРµ"
             On Error GoTo 0
         Else
             wsErrors.Cells(rErr, 2).value = ""
@@ -1148,7 +1479,7 @@ Private Sub BuildErrorsReport(wsErrors As Worksheet)
 End Sub
 
 ' ============================================================
-' ОТЧЁТ О ПРЕДУПРЕЖДЕНИЯХ
+' РћРўР§РЃРў Рћ РџР Р•Р”РЈРџР Р•Р–Р”Р•РќРРЇРҐ
 ' ============================================================
 Private Sub BuildWarningsReport(wsWarnings As Worksheet)
     Dim rWrn As Long
@@ -1174,7 +1505,7 @@ Private Sub BuildWarningsReport(wsWarnings As Worksheet)
                 Address:=fullPathW, _
                 SubAddress:="'" & parts(3) & "'!A" & parts(4), _
                 TextToDisplay:=linkTextW, _
-                ScreenTip:="Перейти к проблемной строке"
+                ScreenTip:="РџРµСЂРµР№С‚Рё Рє РїСЂРѕР±Р»РµРјРЅРѕР№ СЃС‚СЂРѕРєРµ"
             On Error GoTo 0
         Else
             wsWarnings.Cells(rWrn, 2).value = ""
@@ -1192,7 +1523,7 @@ Private Sub BuildWarningsReport(wsWarnings As Worksheet)
 End Sub
 
 ' ============================================================
-' РАСКРАСКА ПРОБЛЕМНЫХ СТРОК
+' Р РђРЎРљР РђРЎРљРђ РџР РћР‘Р›Р•РњРќР«РҐ РЎРўР РћРљ
 ' ============================================================
 Private Sub HighlightProblemsInFinalFile(wsTypes As Worksheet, wsAttrs As Worksheet, _
                                          rTypes As Long, rAttrs As Long)
@@ -1255,7 +1586,7 @@ Private Sub HighlightProblemsInFinalFile(wsTypes As Worksheet, wsAttrs As Worksh
 End Sub
 
 ' ============================================================
-' НОВОЕ: ЛИСТ "РЕЕСТРЫ" — Реестр типов + Реестр покрытия атрибутами
+' РќРћР’РћР•: Р›РРЎРў "Р Р•Р•РЎРўР Р«" вЂ” Р РµРµСЃС‚СЂ С‚РёРїРѕРІ + Р РµРµСЃС‚СЂ РїРѕРєСЂС‹С‚РёСЏ Р°С‚СЂРёР±СѓС‚Р°РјРё
 ' ============================================================
 Private Sub BuildRegistrySheet(wsReg As Worksheet, wsTypes As Worksheet, wsAttrs As Worksheet, _
                                rTypes As Long, rAttrs As Long)
@@ -1267,7 +1598,7 @@ Private Sub BuildRegistrySheet(wsReg As Worksheet, wsTypes As Worksheet, wsAttrs
     Dim r As Long
     Dim nm As String
     
-    ' Подсчет атрибутов по типам
+    ' РџРѕРґСЃС‡РµС‚ Р°С‚СЂРёР±СѓС‚РѕРІ РїРѕ С‚РёРїР°Рј
     For r = 2 To rAttrs - 1
         nm = Trim(CStr(wsAttrs.Cells(r, 1).value))
         If nm <> "" Then
@@ -1275,7 +1606,7 @@ Private Sub BuildRegistrySheet(wsReg As Worksheet, wsTypes As Worksheet, wsAttrs
         End If
     Next r
     
-    ' Множество имен типов из листа "Типы"
+    ' РњРЅРѕР¶РµСЃС‚РІРѕ РёРјРµРЅ С‚РёРїРѕРІ РёР· Р»РёСЃС‚Р° "РўРёРїС‹"
     For r = 2 To rTypes - 1
         nm = Trim(CStr(wsTypes.Cells(r, 1).value))
         If nm <> "" And Not typeNames.Exists(nm) Then typeNames.Add nm, r
@@ -1284,14 +1615,14 @@ Private Sub BuildRegistrySheet(wsReg As Worksheet, wsTypes As Worksheet, wsAttrs
     uncoveredTypesCount = 0
     orphanCoverageCount = 0
     
-    ' ---------- БЛОК 1: РЕЕСТР ТИПОВ ----------
-    wsReg.Cells(1, 1).value = "РЕЕСТР ТИПОВ (созданные в итоговой сборке)"
+    ' ---------- Р‘Р›РћРљ 1: Р Р•Р•РЎРўР  РўРРџРћР’ ----------
+    wsReg.Cells(1, 1).value = "Р Р•Р•РЎРўР  РўРРџРћР’ (СЃРѕР·РґР°РЅРЅС‹Рµ РІ РёС‚РѕРіРѕРІРѕР№ СЃР±РѕСЂРєРµ)"
     wsReg.Cells(1, 1).Font.Bold = True
-    wsReg.Cells(2, 1).value = "№"
-    wsReg.Cells(2, 2).value = "Системное имя типа"
-    wsReg.Cells(2, 3).value = "Видимое имя типа"
-    wsReg.Cells(2, 4).value = "Атрибутов"
-    wsReg.Cells(2, 5).value = "Покрытие атрибутами"
+    wsReg.Cells(2, 1).value = "в„–"
+    wsReg.Cells(2, 2).value = "РЎРёСЃС‚РµРјРЅРѕРµ РёРјСЏ С‚РёРїР°"
+    wsReg.Cells(2, 3).value = "Р’РёРґРёРјРѕРµ РёРјСЏ С‚РёРїР°"
+    wsReg.Cells(2, 4).value = "РђС‚СЂРёР±СѓС‚РѕРІ"
+    wsReg.Cells(2, 5).value = "РџРѕРєСЂС‹С‚РёРµ Р°С‚СЂРёР±СѓС‚Р°РјРё"
     wsReg.Range(wsReg.Cells(2, 1), wsReg.Cells(2, 5)).Font.Bold = True
     wsReg.Range(wsReg.Cells(2, 1), wsReg.Cells(2, 5)).Interior.Color = RGB(221, 235, 247)
     
@@ -1310,27 +1641,27 @@ Private Sub BuildRegistrySheet(wsReg As Worksheet, wsTypes As Worksheet, wsAttrs
             wsReg.Cells(rowOut, 3).value = Trim(CStr(wsTypes.Cells(r, 2).value))
             wsReg.Cells(rowOut, 4).value = cnt
             If cnt > 0 Then
-                wsReg.Cells(rowOut, 5).value = "ДА"
+                wsReg.Cells(rowOut, 5).value = "Р”Рђ"
             Else
-                wsReg.Cells(rowOut, 5).value = "НЕТ"
+                wsReg.Cells(rowOut, 5).value = "РќР•Рў"
                 wsReg.Range(wsReg.Cells(rowOut, 1), wsReg.Cells(rowOut, 5)).Interior.Color = RGB(255, 199, 206)
                 wsReg.Range(wsReg.Cells(rowOut, 1), wsReg.Cells(rowOut, 5)).Font.Color = RGB(156, 0, 6)
                 uncoveredTypesCount = uncoveredTypesCount + 1
-                AddWarning "R001", "Тип '" & nm & "' отсутствует в Реестре покрытия атрибутами: в листе 'Атрибуты' нет ни одной строки для этого типа.", _
-                           "", "Реестры", rowOut, nm, "TYPE"
+                AddWarning "R001", "РўРёРї '" & nm & "' РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚ РІ Р РµРµСЃС‚СЂРµ РїРѕРєСЂС‹С‚РёСЏ Р°С‚СЂРёР±СѓС‚Р°РјРё: РІ Р»РёСЃС‚Рµ 'РђС‚СЂРёР±СѓС‚С‹' РЅРµС‚ РЅРё РѕРґРЅРѕР№ СЃС‚СЂРѕРєРё РґР»СЏ СЌС‚РѕРіРѕ С‚РёРїР°.", _
+                           "", "Р РµРµСЃС‚СЂС‹", rowOut, nm, "TYPE"
             End If
         End If
     Next r
     
-    ' ---------- БЛОК 2: РЕЕСТР ПОКРЫТИЯ АТРИБУТАМИ ----------
+    ' ---------- Р‘Р›РћРљ 2: Р Р•Р•РЎРўР  РџРћРљР Р«РўРРЇ РђРўР РР‘РЈРўРђРњР ----------
     Dim start2 As Long
     start2 = i + 2 + 3
-    wsReg.Cells(start2, 1).value = "РЕЕСТР ПОКРЫТИЯ ТИПОВ АТРИБУТАМИ"
+    wsReg.Cells(start2, 1).value = "Р Р•Р•РЎРўР  РџРћРљР Р«РўРРЇ РўРРџРћР’ РђРўР РР‘РЈРўРђРњР"
     wsReg.Cells(start2, 1).Font.Bold = True
-    wsReg.Cells(start2 + 1, 1).value = "№"
-    wsReg.Cells(start2 + 1, 2).value = "Системное имя типа"
-    wsReg.Cells(start2 + 1, 3).value = "Количество атрибутов"
-    wsReg.Cells(start2 + 1, 4).value = "Наличие в Реестре типов"
+    wsReg.Cells(start2 + 1, 1).value = "в„–"
+    wsReg.Cells(start2 + 1, 2).value = "РЎРёСЃС‚РµРјРЅРѕРµ РёРјСЏ С‚РёРїР°"
+    wsReg.Cells(start2 + 1, 3).value = "РљРѕР»РёС‡РµСЃС‚РІРѕ Р°С‚СЂРёР±СѓС‚РѕРІ"
+    wsReg.Cells(start2 + 1, 4).value = "РќР°Р»РёС‡РёРµ РІ Р РµРµСЃС‚СЂРµ С‚РёРїРѕРІ"
     wsReg.Range(wsReg.Cells(start2 + 1, 1), wsReg.Cells(start2 + 1, 4)).Font.Bold = True
     wsReg.Range(wsReg.Cells(start2 + 1, 1), wsReg.Cells(start2 + 1, 4)).Interior.Color = RGB(221, 235, 247)
     
@@ -1343,28 +1674,28 @@ Private Sub BuildRegistrySheet(wsReg As Worksheet, wsTypes As Worksheet, wsAttrs
         wsReg.Cells(row2, 2).value = CStr(k)
         wsReg.Cells(row2, 3).value = attrCount(k)
         If typeNames.Exists(CStr(k)) Then
-            wsReg.Cells(row2, 4).value = "ДА"
+            wsReg.Cells(row2, 4).value = "Р”Рђ"
         Else
-            wsReg.Cells(row2, 4).value = "НЕТ"
+            wsReg.Cells(row2, 4).value = "РќР•Рў"
             wsReg.Range(wsReg.Cells(row2, 1), wsReg.Cells(row2, 4)).Interior.Color = RGB(255, 199, 206)
             wsReg.Range(wsReg.Cells(row2, 1), wsReg.Cells(row2, 4)).Font.Color = RGB(156, 0, 6)
             orphanCoverageCount = orphanCoverageCount + 1
         End If
     Next k
     
-    ' ---------- БЛОК 3: КОНТРОЛЬНЫЕ ИТОГИ ----------
+    ' ---------- Р‘Р›РћРљ 3: РљРћРќРўР РћР›Р¬РќР«Р• РРўРћР“Р ----------
     Dim start3 As Long
     start3 = start2 + 1 + jj + 3
-    wsReg.Cells(start3, 1).value = "КОНТРОЛЬНЫЕ ИТОГИ"
+    wsReg.Cells(start3, 1).value = "РљРћРќРўР РћР›Р¬РќР«Р• РРўРћР“Р"
     wsReg.Cells(start3, 1).Font.Bold = True
-    wsReg.Cells(start3 + 1, 1).value = "Типов в Реестре типов"
+    wsReg.Cells(start3 + 1, 1).value = "РўРёРїРѕРІ РІ Р РµРµСЃС‚СЂРµ С‚РёРїРѕРІ"
     wsReg.Cells(start3 + 1, 2).value = i
-    wsReg.Cells(start3 + 2, 1).value = "Типов в Реестре покрытия"
+    wsReg.Cells(start3 + 2, 1).value = "РўРёРїРѕРІ РІ Р РµРµСЃС‚СЂРµ РїРѕРєСЂС‹С‚РёСЏ"
     wsReg.Cells(start3 + 2, 2).value = jj
-    wsReg.Cells(start3 + 3, 1).value = "Типов без покрытия атрибутами (R001)"
+    wsReg.Cells(start3 + 3, 1).value = "РўРёРїРѕРІ Р±РµР· РїРѕРєСЂС‹С‚РёСЏ Р°С‚СЂРёР±СѓС‚Р°РјРё (R001)"
     wsReg.Cells(start3 + 3, 2).value = uncoveredTypesCount
     If uncoveredTypesCount > 0 Then wsReg.Cells(start3 + 3, 2).Font.Color = RGB(156, 0, 6)
-    wsReg.Cells(start3 + 4, 1).value = "Записей покрытия без типа в Реестре"
+    wsReg.Cells(start3 + 4, 1).value = "Р—Р°РїРёСЃРµР№ РїРѕРєСЂС‹С‚РёСЏ Р±РµР· С‚РёРїР° РІ Р РµРµСЃС‚СЂРµ"
     wsReg.Cells(start3 + 4, 2).value = orphanCoverageCount
     If orphanCoverageCount > 0 Then wsReg.Cells(start3 + 4, 2).Font.Color = RGB(156, 0, 6)
     
@@ -1372,24 +1703,24 @@ Private Sub BuildRegistrySheet(wsReg As Worksheet, wsTypes As Worksheet, wsAttrs
 End Sub
 
 ' ============================================================
-' СВОДКА
+' РЎР’РћР”РљРђ
 ' ============================================================
 Private Sub FillSummarySheet(wsReport As Worksheet, rTypes As Long, rAttrs As Long)
-    wsReport.Cells(1, 1).value = "Метрика"
-    wsReport.Cells(1, 2).value = "Значение"
+    wsReport.Cells(1, 1).value = "РњРµС‚СЂРёРєР°"
+    wsReport.Cells(1, 2).value = "Р—РЅР°С‡РµРЅРёРµ"
     wsReport.Rows(1).Font.Bold = True
     
-    wsReport.Cells(2, 1).value = "Всего типов"
+    wsReport.Cells(2, 1).value = "Р’СЃРµРіРѕ С‚РёРїРѕРІ"
     wsReport.Cells(2, 2).value = rTypes - 2
-    wsReport.Cells(3, 1).value = "Всего атрибутов (после удаления дубликатов)"
+    wsReport.Cells(3, 1).value = "Р’СЃРµРіРѕ Р°С‚СЂРёР±СѓС‚РѕРІ (РїРѕСЃР»Рµ СѓРґР°Р»РµРЅРёСЏ РґСѓР±Р»РёРєР°С‚РѕРІ)"
     wsReport.Cells(3, 2).value = rAttrs - 2
-    wsReport.Cells(4, 1).value = "Уникальных пар (тип|name)"
+    wsReport.Cells(4, 1).value = "РЈРЅРёРєР°Р»СЊРЅС‹С… РїР°СЂ (С‚РёРї|name)"
     wsReport.Cells(4, 2).value = attrDict.Count
-    wsReport.Cells(5, 1).value = "Ошибок (требуют исправления)"
+    wsReport.Cells(5, 1).value = "РћС€РёР±РѕРє (С‚СЂРµР±СѓСЋС‚ РёСЃРїСЂР°РІР»РµРЅРёСЏ)"
     wsReport.Cells(5, 2).value = colErrors.Count
     wsReport.Cells(5, 1).Font.Bold = True
     If colErrors.Count > 0 Then wsReport.Cells(5, 2).Font.Color = RGB(156, 0, 6)
-    wsReport.Cells(6, 1).value = "Предупреждений (рекомендации)"
+    wsReport.Cells(6, 1).value = "РџСЂРµРґСѓРїСЂРµР¶РґРµРЅРёР№ (СЂРµРєРѕРјРµРЅРґР°С†РёРё)"
     wsReport.Cells(6, 2).value = colWarnings.Count
     wsReport.Cells(6, 1).Font.Bold = True
     If colWarnings.Count > 0 Then wsReport.Cells(6, 2).Font.Color = RGB(156, 101, 0)
@@ -1400,25 +1731,25 @@ Private Sub FillSummarySheet(wsReport As Worksheet, rTypes As Long, rAttrs As Lo
     Else
         logCount = 0
     End If
-    wsReport.Cells(7, 1).value = "Обработано дубликатов"
+    wsReport.Cells(7, 1).value = "РћР±СЂР°Р±РѕС‚Р°РЅРѕ РґСѓР±Р»РёРєР°С‚РѕРІ"
     wsReport.Cells(7, 2).value = logCount
-    wsReport.Cells(8, 1).value = "Режим"
-    wsReport.Cells(8, 2).value = IIf(isSoftMode, "ПРОМЕЖУТОЧНЫЙ (soft)", "ФИНАЛЬНЫЙ")
-    wsReport.Cells(9, 1).value = "Дата генерации"
+    wsReport.Cells(8, 1).value = "Р РµР¶РёРј"
+    wsReport.Cells(8, 2).value = IIf(isSoftMode, "РџР РћРњР•Р–РЈРўРћР§РќР«Р™ (soft)", "Р¤РРќРђР›Р¬РќР«Р™")
+    wsReport.Cells(9, 1).value = "Р”Р°С‚Р° РіРµРЅРµСЂР°С†РёРё"
     wsReport.Cells(9, 2).value = Format(Now, "yyyy-mm-dd hh:mm:ss")
-    ' НОВОЕ: показатели покрытия
-    wsReport.Cells(10, 1).value = "Типов без покрытия атрибутами (R001)"
+    ' РќРћР’РћР•: РїРѕРєР°Р·Р°С‚РµР»Рё РїРѕРєСЂС‹С‚РёСЏ
+    wsReport.Cells(10, 1).value = "РўРёРїРѕРІ Р±РµР· РїРѕРєСЂС‹С‚РёСЏ Р°С‚СЂРёР±СѓС‚Р°РјРё (R001)"
     wsReport.Cells(10, 2).value = uncoveredTypesCount
     wsReport.Cells(10, 1).Font.Bold = True
     If uncoveredTypesCount > 0 Then wsReport.Cells(10, 2).Font.Color = RGB(156, 0, 6)
-    wsReport.Cells(11, 1).value = "Записей покрытия без типа в Реестре"
+    wsReport.Cells(11, 1).value = "Р—Р°РїРёСЃРµР№ РїРѕРєСЂС‹С‚РёСЏ Р±РµР· С‚РёРїР° РІ Р РµРµСЃС‚СЂРµ"
     wsReport.Cells(11, 2).value = orphanCoverageCount
     wsReport.Cells(11, 1).Font.Bold = True
     If orphanCoverageCount > 0 Then wsReport.Cells(11, 2).Font.Color = RGB(156, 0, 6)
 End Sub
 
 ' ============================================================
-' ОЦЕНКА КАЧЕСТВА СТРОКИ АТРИБУТА
+' РћР¦Р•РќРљРђ РљРђР§Р•РЎРўР’Рђ РЎРўР РћРљР РђРўР РР‘РЈРўРђ
 ' ============================================================
 Private Function CalcRowScore(ws As Worksheet, row As Long) As Long
     Dim score As Long
@@ -1432,10 +1763,10 @@ Private Function CalcRowScore(ws As Worksheet, row As Long) As Long
             score = score + 1
             Select Case c
                 Case 5: score = score + 10
-                Case 8: If LCase(cellVal) = "да" Then score = score + 5
+                Case 8: If LCase(cellVal) = "РґР°" Then score = score + 5
                 Case 11:
-                    If cellVal = "Запрещать создание дубликатов" Then score = score + 3
-                    If cellVal = "Показывать предупреждение" Then score = score + 2
+                    If cellVal = "Р—Р°РїСЂРµС‰Р°С‚СЊ СЃРѕР·РґР°РЅРёРµ РґСѓР±Р»РёРєР°С‚РѕРІ" Then score = score + 3
+                    If cellVal = "РџРѕРєР°Р·С‹РІР°С‚СЊ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ" Then score = score + 2
                 Case 12: score = score + 8
                 Case 4: score = score + 2
             End Select
@@ -1446,7 +1777,10 @@ Private Function CalcRowScore(ws As Worksheet, row As Long) As Long
 End Function
 
 ' ============================================================
-' ИМЯ ТИПА — camelCase (T002)
+' РРњРЇ РўРРџРђ вЂ” camelCase (T002)
+' OPT-12: СЃРІРµСЂРµРЅРѕ СЃРѕ СЃРїРµС†РёС„РёРєР°С†РёРµР№: РёРјРµРЅР° С‚РёРїРѕРІ вЂ” camelCase,
+' РёСЃРєР»СЋС‡РµРЅРёСЏ вЂ” С„Р°Р·С‹ phase0вЂ“phase3, СЃСѓС„С„РёРєСЃ _doc Рё РєРѕРґС‹ С„РѕСЂРј ksN.
+' РџСЂР°РІРёР»Р° РІ РєРѕРґРµ СЃРѕРІРїР°РґР°СЋС‚ СЃРѕ СЃРїРµС†РёС„РёРєР°С†РёРµР№ вЂ” Р»РѕРіРёРєР° РѕСЃС‚Р°РІР»РµРЅР°.
 ' ============================================================
 Private Function IsCamelTypeName(ByVal s As String) As Boolean
     Dim re As Object, t As String
@@ -1462,17 +1796,22 @@ Private Function IsCamelTypeName(ByVal s As String) As Boolean
 End Function
 
 ' ============================================================
-' ИМЯ АТРИБУТА — camelCase (A003)
+' РРњРЇ РђРўР РР‘РЈРўРђ вЂ” camelCase (A003)
+' OPT-12: РїРѕ СЃРїРµС†РёС„РёРєР°С†РёРё РёРјРµРЅР° Р°С‚СЂРёР±СѓС‚РѕРІ вЂ” camelCase Р‘Р•Р— Р¦РР¤Р ,
+' РїРѕСЌС‚РѕРјСѓ С†РёС„СЂС‹ РІ С€Р°Р±Р»РѕРЅРµ Р·Р°РїСЂРµС‰РµРЅС‹ ([0-9] РёСЃРєР»СЋС‡С‘РЅ).
+' РџСЂРѕРІРµСЂРєР° РЅР°Р»РёС‡РёСЏ С†РёС„СЂ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ РѕС‚РґРµР»СЊРЅРѕ ContainsDigit (A016).
 ' ============================================================
 Private Function IsCamelAttrName(ByVal s As String) As Boolean
     Dim re As Object
     Set re = CreateObject("VBScript.RegExp")
-    re.Pattern = "^[a-z][a-zA-Z0-9]*$"
+    re.Pattern = "^[a-z][a-zA-Z]*$"
     IsCamelAttrName = re.Test(s)
 End Function
 
 ' ============================================================
-' ЦИФРЫ В ИМЕНИ АТРИБУТА (A016)
+' Р¦РР¤Р Р« Р’ РРњР•РќР РђРўР РР‘РЈРўРђ (A016)
+' OPT-12: РїРѕ СЃРїРµС†РёС„РёРєР°С†РёРё РІ РёРјРµРЅР°С… Р°С‚СЂРёР±СѓС‚РѕРІ С†РёС„СЂС‹ Р·Р°РїСЂРµС‰РµРЅС‹ РїРѕР»РЅРѕСЃС‚СЊСЋ вЂ”
+' РїСЂР°РІРёР»Р° РІ РєРѕРґРµ СЃРѕРІРїР°РґР°СЋС‚ СЃРѕ СЃРїРµС†РёС„РёРєР°С†РёРµР№, Р»РѕРіРёРєР° РѕСЃС‚Р°РІР»РµРЅР°.
 ' ============================================================
 Private Function ContainsDigit(ByVal s As String) As Boolean
     Dim re As Object
@@ -1482,7 +1821,10 @@ Private Function ContainsDigit(ByVal s As String) As Boolean
 End Function
 
 ' ============================================================
-' ЦИФРЫ В ИМЕНИ ТИПА (T017): только phase0–phase3 и ksN
+' Р¦РР¤Р Р« Р’ РРњР•РќР РўРРџРђ (T017): С‚РѕР»СЊРєРѕ phase0вЂ“phase3 Рё ksN
+' OPT-12: РїРѕ СЃРїРµС†РёС„РёРєР°С†РёРё С†РёС„СЂС‹ РІ РёРјРµРЅР°С… С‚РёРїРѕРІ РґРѕРїСѓСЃС‚РёРјС‹ С‚РѕР»СЊРєРѕ Сѓ С„Р°Р·
+' phase0вЂ“phase3 Рё РєРѕРґРѕРІ С„РѕСЂРј ksN вЂ” РїСЂР°РІРёР»Р° РІ РєРѕРґРµ СЃРѕРІРїР°РґР°СЋС‚
+' СЃРѕ СЃРїРµС†РёС„РёРєР°С†РёРµР№, Р»РѕРіРёРєР° РѕСЃС‚Р°РІР»РµРЅР°.
 ' ============================================================
 Private Function ContainsForbiddenDigit(ByVal s As String) As Boolean
     Dim re As Object
@@ -1503,7 +1845,7 @@ Private Function ContainsForbiddenDigit(ByVal s As String) As Boolean
 End Function
 
 ' ============================================================
-' ТОЧКИ ВХОДА
+' РўРћР§РљР Р’РҐРћР”Рђ
 ' ============================================================
 Sub RunSoftMode()
     ValidateAndAssemble True
