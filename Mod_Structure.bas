@@ -9,6 +9,30 @@ Option Explicit
 Private Const FIRST_ROW As Long = 8                        ' строка, с которой начинается структура (Объект)
 Private Const LAST_COL  As Long = 30                       ' максимальный столбец сканирования
 
+' Реестр кодов ошибок/предупреждений модуля (единый формат - см. Mod_Util):
+'   S001 - в папке 01_Схема нет xlsx-файла;
+'   S002 - в папке 01_Схема больше одного xlsx;
+'   S003 - папка 01_Схема не найдена;
+'   S004 - ошибка получения листа / выполнения сборки;
+'   S005 - ошибка сохранения результатов;
+'   S006 - ошибки проверки дублей / обработки ярлыков;
+'   S007 - ошибка бэкапа листа плоской таблицы;
+'   S008 - ошибка архивации старых артефактов схемы;
+'   S009 - ошибка подсветки строк-дублей (HighlightDuplicateRows);
+'   S010 - информационное предупреждение WriteSchemaDuplicates;
+'   S011 - предупреждение (PRE-04): диапазон легенды из настройки LegendRange
+'          (поле B8 листа "Настройки") некорректен на листе схемы -
+'          использован диапазон по умолчанию (Mod_Util.DEFAULT_LEGEND_RANGE).
+' PRE-04: код S011 зарегистрирован здесь (был добавлен вместе с динамическим
+' чтением диапазона легенды в BuildFlatStructure).
+
+' PRE-04: число колонок плоской таблицы A-G (канон соответствия PRE-01
+' Python-конвертера): A "№шага/подшага", B "Отображаемое имя", C "Категория"
+' (переименовано из "Тип"), D "Паттерн", E "Входит в", F "Состоит из",
+' G "Аномалия". Используется в WriteFlatTable/HighlightDuplicateRows для
+' заголовков, записи данных, умной таблицы, подсветки и AutoFit.
+Private Const FLAT_COLS As Long = 7
+
 ' W-PROMPT-00-SCHEMA-FIX: имя листа и префикс сохраняемого файла результата
 ' подготовки схемы (переименовано из "Плоская_таблица").
 Private Const FLAT_SHEET_NAME As String = "Адаптированная_структура"
@@ -853,6 +877,8 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
     Mod_Util.DebugLog "WriteFlatTable: старт"
     GetSheet wbOut, FLAT_SHEET_NAME, ws
     Mod_Util.DebugLog "WriteFlatTable: GetSheet завершён"
+    ' PRE-04: заголовки 7 колонок A-G (канон PRE-01); колонки A и D при
+    ' первичной сборке остаются пустыми (заполняются вручную/ИИ).
     ws.Range("A1:G1").value = Array("№шага/подшага", "Отображаемое имя", _
                                     "Категория", "Паттерн", "Входит в", _
                                     "Состоит из", "Аномалия")
@@ -908,12 +934,17 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
             parentCell = ParentName(Nodes(i).parentIdx)
         End If
         
-        ws.Cells(r, 1).value = Nodes(i).Name
-        ' Возвращаем пользователю исходное имя типа, а не служебное
-        ws.Cells(r, 2).value = IIf(isShortcut, "Ярлык", Nodes(i).NodeType)
-        ws.Cells(r, 3).value = parentCell
-        ws.Cells(r, 4).value = Nodes(i).Children
-        ' Колонка "Аномалия": пометки дублей и очищенных имён
+        ' PRE-04: запись данных в 7 колонок A-G (канон PRE-01):
+        ' A "" (пусто, заполняется ИИ/вручную), B имя узла, C категория
+        ' (бывш. "Тип"; для ярлыков без цели - служебное "ОШИБКА_ЯРЛЫКА",
+        ' как в прежней колонке B - подсветка и фильтры не ломаются),
+        ' D "" (Паттерн - пусто при первичной сборке), E "Входит в"
+        ' (родитель), F "Состоит из" (дети), G "Аномалия".
+        ws.Cells(r, 2).value = Nodes(i).Name
+        ws.Cells(r, 3).value = IIf(isShortcut, "ОШИБКА_ЯРЛЫКА", Nodes(i).NodeType)
+        ws.Cells(r, 5).value = parentCell
+        ws.Cells(r, 6).value = Nodes(i).Children
+        ' Колонка "Аномалия" (G): пометки дублей и очищенных имён
         ' (W-T-SCHEMA-FIX: "[!] Имя очищено"; при совпадении с дублем метки
         ' объединяются через "; ")
         anomText = ""
@@ -922,21 +953,21 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
             If Len(anomText) > 0 Then anomText = anomText & "; "
             anomText = anomText & "[!] Имя очищено"
         End If
-        If Len(anomText) > 0 Then ws.Cells(r, 5).value = anomText
+        If Len(anomText) > 0 Then ws.Cells(r, FLAT_COLS).value = anomText
         
-        ' Подсветка проблемной строки
+        ' Подсветка проблемной строки (PRE-04: в диапазоне A:G)
         If hasError Then
-            ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Interior.Color = RGB(255, 199, 206)
-            ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Font.Color = RGB(156, 0, 6)
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, FLAT_COLS)).Interior.Color = RGB(255, 199, 206)
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, FLAT_COLS)).Font.Color = RGB(156, 0, 6)
         ElseIf isDup Then
             ' W-STRUCTURE-DUPLICATES-FIX: жёлтая подсветка строк-дублей
-            ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Interior.Color = RGB(255, 255, 0)
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, FLAT_COLS)).Interior.Color = RGB(255, 255, 0)
         ElseIf isNameCleaned Then
             ' W-T-SCHEMA-FIX: розовая подсветка строк с очищенным именем
             ' (проблемная строка по problemsDict уже обработана выше — это
             ' страховка на случай рассинхронизации словаря)
-            ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Interior.Color = RGB(255, 199, 206)
-            ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Font.Color = RGB(156, 0, 6)
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, FLAT_COLS)).Interior.Color = RGB(255, 199, 206)
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, FLAT_COLS)).Font.Color = RGB(156, 0, 6)
         End If
         
         r = r + 1
@@ -944,13 +975,13 @@ NextNode:
     Next i
     Mod_Util.DebugLog "WriteFlatTable: данные записаны, строк = " & (r - 1)
     
-    ' Создаём Умную таблицу
+    ' Создаём Умную таблицу (PRE-04: диапазон A1:G<lastRow>)
     Dim lastRowData As Long
     lastRowData = r - 1
     
     If lastRowData >= 2 Then
         Mod_Util.DebugLog "WriteFlatTable: вызов CreateSmartTable"
-        Call CreateSmartTable(ws, ws.Range("A1:E" & lastRowData), _
+        Call CreateSmartTable(ws, ws.Range("A1:G" & lastRowData), _
                               "tblFlatStructure", "TableStyleMedium2")
         Mod_Util.DebugLog "WriteFlatTable: CreateSmartTable завершён"
     End If
@@ -958,7 +989,8 @@ NextNode:
     ' W-FIX-AUTOFIT-WRITELOG: AutoFit через SafeAutoFit — на скрытом/неотрисованном
     ' листе прямой вызов мог падать с "Object doesn't support this property or
     ' method" и ронять всю сборку через Fail главной процедуры.
-    SafeAutoFit ws, "A:E"
+    ' PRE-04: диапазон автоподбора расширен до A:G (7 колонок).
+    SafeAutoFit ws, "A:G"
 End Sub
 '---------------- Лист 2: трассировка ----------------
 Private Sub WriteTraceability(ByVal wbOut As Workbook)
@@ -966,7 +998,9 @@ Private Sub WriteTraceability(ByVal wbOut As Workbook)
     Mod_Util.DebugLog "WriteTraceability: старт"
     GetSheet wbOut, "Трассировка", ws
     Mod_Util.DebugLog "WriteTraceability: GetSheet завершён"
-    ws.Range("A1:H1").value = Array("№", "Строка", "Столбец", "Уровень", "Отображаемое имя", "Тип", "Цвет RGB", "Родитель")
+    ' PRE-04: колонка "Тип" листа трассировки переименована в "Категория"
+    ' (единый канон заголовков с плоской таблицей A-G).
+    ws.Range("A1:H1").value = Array("№", "Строка", "Столбец", "Уровень", "Отображаемое имя", "Категория", "Цвет RGB", "Родитель")
     Dim i As Long
     For i = 1 To NodeCount
         ws.Cells(i + 1, 1).value = i
@@ -1584,8 +1618,8 @@ End Sub
 ' Применяется ПОСЛЕ WriteFlatTable (после создания Умной таблицы
 ' tblFlatStructure), чтобы жёлтая заливка не перекрывалась стилями таблицы.
 ' Для строк, участвующих в дублях (dupCountDict, ключ "Тип|Номер"):
-'  - в колонку "Аномалия" (E) ставится "[!] Дубль" (если ещё не поставлено);
-'  - вся строка A:E красится в жёлтый цвет RGB(255, 255, 0).
+'  - в колонку "Аномалия" (G; PRE-04) ставится "[!] Дубль" (если ещё не поставлено);
+'  - вся строка A:G красится в жёлтый цвет RGB(255, 255, 0) (PRE-04: 7 колонок).
 ' Проблемные строки (hasError, розовая подсветка WriteFlatTable) НЕ перекрашиваются.
 Private Sub HighlightDuplicateRows(ByVal wbOut As Workbook)
     Dim ws As Worksheet
@@ -1616,10 +1650,11 @@ Private Sub HighlightDuplicateRows(ByVal wbOut As Workbook)
                 ' не перекрашиваем строки ошибок (розовая подсветка WriteFlatTable)
                 If Not problemsDict.Exists(Nodes(i).Name) And _
                    Nodes(i).NodeType <> "ОШИБКА_ЯРЛЫКА" Then
-                    If Len(CStr(ws.Cells(r, 5).Value)) = 0 Then
-                        ws.Cells(r, 5).Value = "[!] Дубль"      ' колонка "Аномалия"
+                    ' PRE-04: колонка "Аномалия" - G (FLAT_COLS), подсветка - A:G
+                    If Len(CStr(ws.Cells(r, FLAT_COLS).Value)) = 0 Then
+                        ws.Cells(r, FLAT_COLS).Value = "[!] Дубль"      ' колонка "Аномалия"
                     End If
-                    ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Interior.Color = RGB(255, 255, 0)
+                    ws.Range(ws.Cells(r, 1), ws.Cells(r, FLAT_COLS)).Interior.Color = RGB(255, 255, 0)
                 End If
             End If
             r = r + 1
