@@ -5,9 +5,17 @@ Option Explicit
 ' Модуль утилит: пути проекта, журналирование, чтение конфигурации.
 ' Реализация W4 (разделы 2, 5 спецификации Spec_Dispatcher.md).
 ' Пути строятся как в Mod_Registry / Mod_Prompt: <корень>\NN_Имя_папки,
-' корень берётся из именованного диапазона ProjectRoot листа "Настройки".
-' Коды ошибок модуля: U003 - ошибка подготовки листа "Настройки",
-' U004 - ошибка выбора папки проекта, U002 - ошибка чтения configuration.txt.
+' корень берётся из поля ProjectRoot листа "Настройки" (T3.1); если поле
+' пустое - используется папка файла .xlsm (ThisWorkbook.Path) как значение
+' по умолчанию (обратная совместимость).
+' Реестр кодов ошибок/предупреждений модуля (OPT-06, единый реестр):
+'   U002 - ошибка чтения configuration.txt;
+'   U003 - ошибка подготовки листа "Настройки";
+'   U004 - ошибка выбора папки проекта;
+'   U005 - ошибка открытия папки в проводнике;
+'   U006 - предупреждение: в папке найден только .pilotcfx;
+'   U007 - предупреждение (T3.1): числовая настройка пуста/некорректна -
+'          использовано значение по умолчанию.
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
@@ -15,10 +23,18 @@ Option Explicit
 ' ---------------------------------------------------------------------------
 
 ' Имена именованных диапазонов листа "Настройки" (раздел 5 спецификации).
+' T3.1: добавлены ProjectRoot (B2) и MaxTypesPerTable (B7).
+Private Const NAME_PROJECT_ROOT As String = "ProjectRoot"
 Private Const NAME_CHECK_MODE As String = "CheckMode"
 Private Const NAME_AUTO_OPEN_RESULTS As String = "AutoOpenResults"
 Private Const NAME_PROMPT_GEN_VERSION As String = "PromptGenVersion"
 Private Const NAME_PROMPT_FIX_VERSION As String = "PromptFixVersion"
+Private Const NAME_MAX_TYPES_PER_TABLE As String = "MaxTypesPerTable"
+
+' Значение по умолчанию для MaxTypesPerTable (T3.1): используется
+' Mod_Prompt при подстановке {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ} и как default
+' для GetSettingLong.
+Public Const DEFAULT_MAX_TYPES_PER_TABLE As Long = 50
 
 ' Пароль защиты служебных листов (единый для книги Препроцессора).
 Private Const SHEET_PASSWORD As String = "pilot"
@@ -35,17 +51,107 @@ End Function
 ' ПУБЛИЧЕСКИЕ ПРОЦЕДУРЫ И ФУНКЦИИ
 ' ---------------------------------------------------------------------------
 
-' Возвращает корневую папку проекта из именованного диапазона ProjectRoot
-' на листе "Настройки". Если диапазон не найден или значение пустое -
-' пишет в лог "GetProjectRoot: ProjectRoot не задан" и возвращает "".
+' Возвращает корневую папку проекта (T3.1, H2 исправлен):
+' 1. читает значение поля ProjectRoot (B2) листа "Настройки" - через
+'    именованный диапазон ProjectRoot, либо напрямую по ячейке B2, если
+'    имя ещё не создано;
+' 2. если поле пустое (или лист "Настройки" отсутствует) - возвращает
+'    папку файла .xlsm (ThisWorkbook.Path) - обратная совместимость;
+' 3. если книга не сохранена - возвращает "".
+' Значение нормализуется (снимаются завершающие "\").
 Public Function GetProjectRoot() As String
-    ' Корень проекта — всегда папка, где лежит файл .xlsm.
-    ' Если книга не сохранена (ThisWorkbook.Path = "") — возвращаем "".
+    Dim v As String
+    Dim ws As Worksheet
+    Dim wb As Workbook
+
+    Set wb = ThisWorkbook
+
+    ' 1. ProjectRoot из листа "Настройки" (именованный диапазон / ячейка B2).
+    On Error Resume Next
+    Dim nm As Name
+    Set nm = wb.Names(NAME_PROJECT_ROOT)
+    If Err.Number = 0 Then
+        v = CStr(nm.Value)
+    Else
+        Err.Clear
+        Set ws = wb.Worksheets("Настройки")
+        If Err.Number = 0 Then v = CStr(ws.Range("B2").Value)
+        Err.Clear
+    End If
+    On Error GoTo 0
+
+    v = Trim$(v)
+    If v <> "" Then
+        GetProjectRoot = NormPath(v)
+        Exit Function
+    End If
+
+    ' 2. Поле пусто - папка файла книги (обратная совместимость).
     If ThisWorkbook.path <> "" Then
         GetProjectRoot = NormPath(ThisWorkbook.path)
     Else
         GetProjectRoot = ""
     End If
+End Function
+
+' Читает числовую настройку листа "Настройки" по имени именованного
+' диапазона (T3.1). Поведение:
+'   * значение корректное целое (>= 1) -> возвращается оно;
+'   * поле пустое / значение не является целым >= 1 -> возвращается
+'     defaultValue + WriteWarning U007 (штатная ситуация, не ошибка);
+'   * имя/лист не найдены -> возвращается defaultValue без предупреждения
+'     (корректное состояние до первого запуска EnsureSettingsSheet).
+' Используется для MaxTypesPerTable (Mod_Prompt: {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ}).
+Public Function GetSettingLong(ByVal name As String, ByVal defaultValue As Long) As Long
+    Dim raw As String
+    Dim pos As Long
+    Dim parsed As Double
+    Dim sNum As String
+
+    GetSettingLong = defaultValue
+
+    On Error GoTo ErrHandler
+
+    ' Читаем значение через именованный диапазон листа "Настройки".
+    raw = Trim$(CStr(ThisWorkbook.Names(name).Value))
+    If raw = "" Then
+        WriteWarning "U007", "GetSettingLong: настройка """ & name & """ пуста - " & _
+                   "использовано значение по умолчанию " & defaultValue & "."
+        Exit Function
+    End If
+
+    ' Name.Value может вернуть значение вместе со ссылкой на книгу
+    ' ("50;System\..." ) - отбрасываем хвост после ";".
+    pos = InStr(raw, ";")
+    If pos > 0 Then raw = Trim$(Left$(raw, pos - 1))
+
+    ' Разделитель дробной части зависит от локали - пробуем оба варианта.
+    sNum = raw
+    pos = InStr(sNum, ",")
+    If pos > 0 Then Mid$(sNum, pos, 1) = "."
+
+    If Not IsNumeric(sNum) Then
+        WriteWarning "U007", "GetSettingLong: настройка """ & name & """=""" & raw & _
+                   """ не является числом - использовано значение по умолчанию " & _
+                   defaultValue & "."
+        Exit Function
+    End If
+
+    parsed = CDbl(sNum)
+    If parsed < 1 Or parsed <> Int(parsed) Then
+        WriteWarning "U007", "GetSettingLong: настройка """ & name & """=""" & raw & _
+               """ должно быть целым >= 1 - использовано значение по умолчанию " & _
+               defaultValue & "."
+        Exit Function
+    End If
+
+    GetSettingLong = CLng(parsed)
+    Exit Function
+
+ErrHandler:
+    ' Имя не найдено / лист "Настройки" отсутствует - тихо отдаём default.
+    GetSettingLong = defaultValue
+    Err.Clear
 End Function
 ' Возвращает путь к папке логов: <корень>\05_Логи.
 Public Function GetLogsFolder() As String
@@ -342,15 +448,22 @@ Public Function DeleteFileIfExists(ByVal filePath As String) As Boolean
 End Function
 
 ' Создаёт лист "Настройки" (если его нет), заполняет поля, выпадающие
-' списки и именованные диапазоны по разделу 5 спецификации Spec_Dispatcher.md:
-'   B2 ProjectRoot       - Корневая папка проекта;
-'   B3 CheckMode         - Режим проверки (Черновик / Строгая);
-'   B4 AutoOpenResults   - Автооткрытие папки результатов (да / нет);
-'   B5 PromptGenVersion  - Версия промта-генератора (по умолчанию 7.13);
-'   B6 PromptFixVersion  - Версия промта-исправления (по умолчанию 1.0).
-' Лист защищается паролем "pilot", редактируемыми остаются только B2:B6.
-' Существующие значения пользовательских настроек при повторном запуске
-' не перезаписываются.
+' списки и именованные диапазоны по разделу 5 спецификации
+' Spec_Dispatcher.md (T3.1 - шесть полей B2:B7):
+'   B2 ProjectRoot       - Корневая папка проекта (текст; пусто = ThisWorkbook.Path);
+'   B3 CheckMode         - Режим проверки (список: Черновик / Строгая; по умолчанию Черновик);
+'   B4 AutoOpenResults   - Автооткрытие папки результатов (список: да / нет; по умолчанию да);
+'   B5 PromptGenVersion  - Версия промта-генератора (текст; по умолчанию 7.13);
+'   B6 PromptFixVersion  - Версия промта-исправления (текст; по умолчанию 1.0);
+'   B7 MaxTypesPerTable  - Лимит типов в таблице (целое >= 1; по умолчанию 50).
+' Validation навешивается СТРОГО на свою ячейку (H1 исправлен):
+' CheckMode -> B3, AutoOpenResults -> B4, MaxTypesPerTable -> B7;
+' B2/B5/B6 - текстовые поля без списков.
+' Именованные диапазоны создаются для ВСЕХ шести полей; существующие имена
+' не переопределяются. Лист защищается паролем "pilot", редактируемыми
+' остаются только B2:B7. Существующие значения пользовательских настроек
+' при повторном запуске не перезаписываются (значения по умолчанию
+' проставляются только в пустые ячейки новых/существующих полей).
 Public Sub EnsureSettingsSheet()
     Dim ws As Worksheet
     Dim wb As Workbook
@@ -378,28 +491,40 @@ Public Sub EnsureSettingsSheet()
     End If
 
     ' 2. Подписи (колонка A), имена диапазонов и значения по умолчанию -
-    '    пять полей раздела 5 спецификации
-    labels = Array("Режим проверки", _
+    '    шесть полей B2:B7 (T3.1)
+    labels = Array("Корневая папка проекта", _
+               "Режим проверки", _
                "Автооткрытие папки результатов", _
                "Версия промта-генератора", _
-               "Версия промта-исправления")
-    namesArr = Array(NAME_CHECK_MODE, NAME_AUTO_OPEN_RESULTS, _
-                     NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION)
-    defaults = Array("Черновик", "да", "7.13", "1.0")
+               "Версия промта-исправления", _
+               "Максимум типов в таблице")
+    namesArr = Array(NAME_PROJECT_ROOT, NAME_CHECK_MODE, NAME_AUTO_OPEN_RESULTS, _
+                     NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION, _
+                     NAME_MAX_TYPES_PER_TABLE)
+    ' ProjectRoot остаётся пустым: пусто = ThisWorkbook.Path (см. GetProjectRoot).
+    defaults = Array("", "Черновик", "да", "7.13", "1.0", CStr(DEFAULT_MAX_TYPES_PER_TABLE))
 
-    For i = 0 To 3
+    For i = 0 To 5
         RowIdx = i + 2
         ws.Cells(RowIdx, 1).value = CStr(labels(i))
-        ' значение по умолчанию ставим только если ячейка пуста
+        ' значение по умолчанию ставим только если ячейка пуста -
+        ' пользовательские значения при повторном запуске НЕ затираются
         If Trim(CStr(ws.Cells(RowIdx, 2).value)) = "" Then
-            ws.Cells(RowIdx, 2).value = CStr(defaults(i))
+            If CStr(defaults(i)) <> "" Then
+                ws.Cells(RowIdx, 2).value = CStr(defaults(i))
+            End If
         End If
     Next i
 
     ws.Range("A1").value = "Настройки Препроцессора"
     ws.Columns("A:B").AutoFit
 
-    ' 3. Выпадающие списки (Validation): B3 - режим проверки, B4 - автооткрытие
+    ' 3. Validation строго на своих ячейках (H1 исправлен):
+    '    B3 CheckMode - список; B4 AutoOpenResults - список;
+    '    B7 MaxTypesPerTable - целое >= 1; B2/B5/B6 - без списков
+    '    (старое смещённое правило на B3 пересоздаётся ниже корректно,
+    '     правило на B2 снимается).
+    ws.Range("B2").Validation.Delete
     With ws.Range("B3").Validation
         .Delete
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
@@ -414,10 +539,22 @@ Public Sub EnsureSettingsSheet()
         .IgnoreBlank = True
         .InCellDropdown = True
     End With
+    With ws.Range("B7").Validation
+        .Delete
+        .Add Type:=xlValidateWholeNumber, AlertStyle:=xlValidAlertStop, _
+             Operator:=xlGreaterEqual, Formula1:="1"
+        .IgnoreBlank = True
+        .InCellDropdown = True
+        .InputTitle = "Лимит типов в таблице"
+        .ErrorTitle = "Некорректное значение"
+        .InputMessage = "Целое число >= 1 (по умолчанию 50)."
+        .ErrorMessage = "MaxTypesPerTable должно быть целым числом >= 1."
+    End With
 
-    ' 4. Именованные диапазоны - создавать, если их ещё нет
-    '    (существующие имена не трогаем, чтобы не переопределить ссылку)
-    For i = 0 To 3
+    ' 4. Именованные диапазоны для всех шести полей - создавать, если их
+    '    ещё нет (существующие имена не трогаем, чтобы не переопределить
+    '    ссылку)
+    For i = 0 To 5
         On Error Resume Next
         Dim nmChk As Name
         Set nmChk = wb.Names(namesArr(i))
@@ -431,12 +568,19 @@ Public Sub EnsureSettingsSheet()
         Set nmChk = Nothing
     Next i
 
-    ' 5. Защита листа от случайной правки: разблокированы только B2:B6
+    ' 5. Защита листа от случайной правки: разблокированы B2:B7
     ws.Cells.Locked = True
-    ws.Range("B2:B5").Locked = False
+    ws.Range("B2:B7").Locked = False
     ws.Protect Password:=SHEET_PASSWORD
 
     WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён"
+
+    ' 6. T3.1 (H4): фиксируем в журнале статус полей, которые пока не
+    '    используются кодом (это не ошибка - информационная запись).
+    WriteLog "EnsureSettingsSheet: поля CheckMode/AutoOpenResults/PromptGenVersion/" & _
+             "PromptFixVersion созданы; чтение этих настроек кодом пока не " & _
+             "реализовано (зарезервировано на след. задачи). MaxTypesPerTable " & _
+             "читается через GetSettingLong (Mod_Prompt: {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ})."
     Exit Sub
 
 ErrHandler:
