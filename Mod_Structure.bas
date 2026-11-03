@@ -228,11 +228,17 @@ Public Sub BuildFlatStructure()
     Dim i As Long
     Dim legCell As Range
     i = 0
-    For Each legCell In rngLeg.Cells   ' обход по строкам: B1, C1, B2, C2, ...
-        i = i + 1
-        legNames(i) = Trim(CStr(legCell.Value))
-        legColors(i) = legCell.Interior.Color
-    Next legCell
+    ' ПРАВКА (защитная): обход выполняется только если диапазон легенды
+    ' доступен (rngLeg <> Nothing); при rngLeg = Nothing (legCount = 0)
+    ' цикл пропускается - сборка продолжается без легенды (как и раньше).
+    ' Обход .Cells даёт пострядный порядок (RowMajor): B1, C1, B2, C2, ...
+    If Not rngLeg Is Nothing Then
+        For Each legCell In rngLeg.Cells   ' обход по строкам: B1, C1, B2, C2, ...
+            i = i + 1
+            legNames(i) = Trim$(CStr(legCell.Value))
+            legColors(i) = legCell.Interior.Color
+        Next legCell
+    End If
     Mod_Util.DebugLog "BuildFlatStructure: легенда прочитана из '" & sLeg & _
                       "', элементов = " & legCount
 
