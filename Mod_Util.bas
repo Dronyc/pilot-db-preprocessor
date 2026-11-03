@@ -67,11 +67,14 @@ Public Function GetProjectRoot() As String
     Set wb = ThisWorkbook
 
     ' 1. ProjectRoot из листа "Настройки" (именованный диапазон / ячейка B2).
+    ' T3.1-fix: читаем фактическое значение диапазона (nm.RefersToRange.Value),
+    ' а не строку определения имени (nm.Value).
     On Error Resume Next
     Dim nm As Name
     Set nm = wb.Names(NAME_PROJECT_ROOT)
     If Err.Number = 0 Then
-        v = CStr(nm.Value)
+        v = CStr(nm.RefersToRange.Value)
+        If Err.Number <> 0 Then v = "": Err.Clear
     Else
         Err.Clear
         Set ws = wb.Worksheets("Настройки")
@@ -112,18 +115,18 @@ Public Function GetSettingLong(ByVal name As String, ByVal defaultValue As Long)
 
     On Error GoTo ErrHandler
 
-    ' Читаем значение через именованный диапазон листа "Настройки".
-    raw = Trim$(CStr(ThisWorkbook.Names(name).Value))
+    ' T3.1-fix: читаем фактическое значение диапазона (RefersToRange.Value),
+    ' а не строку определения имени (Names(...).Value); при ошибке/недоступности
+    ' raw = "" - далее штатный fallback на defaultValue.
+    On Error Resume Next
+    raw = Trim$(CStr(ThisWorkbook.Names(name).RefersToRange.Value))
+    If Err.Number <> 0 Then raw = "": Err.Clear
+    On Error GoTo 0
     If raw = "" Then
         WriteWarning "U007", "GetSettingLong: настройка """ & name & """ пуста - " & _
                    "использовано значение по умолчанию " & defaultValue & "."
         Exit Function
     End If
-
-    ' Name.Value может вернуть значение вместе со ссылкой на книгу
-    ' ("50;System\..." ) - отбрасываем хвост после ";".
-    pos = InStr(raw, ";")
-    If pos > 0 Then raw = Trim$(Left$(raw, pos - 1))
 
     ' Разделитель дробной части зависит от локали - пробуем оба варианта.
     sNum = raw
