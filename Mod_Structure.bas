@@ -26,6 +26,11 @@ Private Type NodeRec
     parentIdx  As Long
     ColorCode  As Long
     Children   As String
+    ' W-T-SCHEMA-FIX (очистка имён): RawName — исходное имя ячейки до
+    ' CleanNodeName (нужно для описания аномалии NAME_CLEANED в журнале);
+    ' NameCleaned — True, если очистка изменила имя.
+    RawName    As String
+    NameCleaned As Boolean
 End Type
 
 Private Nodes() As NodeRec
@@ -33,6 +38,11 @@ Private NodeCount As Long
 
 ' Словарь проблемных узлов: имя узла -> "E" (ошибка) / "W" (предупреждение)
 ' Заполняется в ProcessShortcuts и WriteLog. Используется в WriteFlatTable для подсветки.
+' W-T-SCHEMA-FIX (очистка имён): значения "NAME_CLEANED_<код>" — служебные ключи
+' журнала аномалий (строки NAME_CLEANED пишутся по ним в WriteLog); узлы, чьи
+' имена были очищены, помечаются значением "W". Инициализируется ДО цикла
+' сканирования структуры (BuildFlatStructure), т.к. problemsDict заполняется уже
+' на этапе сканирования (NAME_CLEANED).
 Private problemsDict As Object
 
 ' W-STRUCTURE-DUPLICATES-FIX / W-STRUCTURE-DUPLICATES-SAVE-FIX: словарь узлов,
@@ -161,6 +171,11 @@ Public Sub BuildFlatStructure()
     Next i
 
     '---------- 2. Сканирование структуры ----------
+    ' W-T-SCHEMA-FIX: словарь проблем инициализируется ДО цикла сканирования —
+    ' при очистке имён узлов (CleanNodeName) в него сразу откладывается
+    ' NAME_CLEANED (см. WriteLog / WriteFlatTable).
+    Set problemsDict = CreateObject("Scripting.Dictionary")
+
     ReDim Nodes(1 To 20000)
     NodeCount = 0
     Dim lastAtLevel(1 To LAST_COL) As Long
@@ -185,8 +200,20 @@ Public Sub BuildFlatStructure()
                     tName = ColorToType(colr, legColors, legNames)
                     If tName <> "" Then                      ' цвет из легенды => это узел структуры
                         NodeCount = NodeCount + 1
+                        ' W-T-SCHEMA-FIX (очистка имён): исходное имя сравнивается
+                        ' с очищенным (CleanNodeName); при расхождении в узле
+                        ' запоминается исходник (RawName — для журнала аномалий),
+                        ' а в problemsDict откладывается "NAME_CLEANED" (значение —
+                        ' индекс узла, строки 1..NodeCount; см. комментарий к
+                        ' problemsDict). Словарь проблем инициализируется до цикла
+                        ' сканирования (см. ниже Set problemsDict).
+                        Dim origName As String, cleanName As String
+                        origName = Trim(CStr(v))
+                        cleanName = CleanNodeName(origName)
                         With Nodes(NodeCount)
-                            .Name = Trim(CStr(v))
+                            .Name = cleanName
+                            .RawName = origName
+                            .NameCleaned = (origName <> cleanName)
                             .NodeType = tName
                             .Level = c
                             .RowIdx = r
@@ -203,6 +230,27 @@ Public Sub BuildFlatStructure()
                         If Nodes(NodeCount).Name = "Объект" Then
                             Nodes(NodeCount).NodeType = "Папка"
                             Nodes(NodeCount).parentIdx = 0
+                        End If
+                        ' W-T-SCHEMA-FIX (очистка имён): имя изменено очисткой —
+                        ' фиксируем аномалию NAME_CLEANED в problemsDict. Ключ
+                        ' уникален для каждого узла ("NAME_CLEANED_<код>_<индекс>"),
+                        ' т.к. Scripting.Dictionary не допускает повторов ключей,
+                        ' а имена узлов могут повторяться; по значению (индекс
+                        ' узла) WriteLog восстановит строку/столбец и исходное
+                        ' имя, WriteFlatTable подсветит строку.
+                        If origName <> cleanName Then
+                            Dim ncKey As String
+                            ncKey = "NAME_CLEANED_" & LeadCode(cleanName) & "_" & CStr(NodeCount)
+                            If Not problemsDict.Exists(ncKey) Then
+                                problemsDict.Add ncKey, CStr(NodeCount)
+                            End If
+                            ' сам узел помечаем как проблемный (W — предупреждение):
+                            ' даст подсветку в WriteFlatTable, если там нет дубля;
+                            ' служебные ключи NAME_CLEANED_* на этот случай не
+                            ' реагируют (см. цикл записи журнала в WriteLog).
+                            If Not problemsDict.Exists(cleanName) Then
+                                problemsDict.Add cleanName, "W"
+                            End If
                         End If
                         lastAtLevel(c) = NodeCount
                         Dim k As Long
@@ -228,8 +276,9 @@ Public Sub BuildFlatStructure()
         End If
     Next i
     
-    ' Инициализация словаря проблем (для подсветки в WriteFlatTable)
-    Set problemsDict = CreateObject("Scripting.Dictionary")
+    ' Словарь проблем (problemsDict) инициализирован ДО цикла сканирования
+    ' (W-T-SCHEMA-FIX: очистка имён NAME_CLEANED) — здесь НЕ пересоздаётся,
+    ' иначе были бы потеряны метки очистки.
 
     ' W-STRUCTURE-DUPLICATES-SAVE-FIX: инициализация словаря дублей ДО поиска.
     ' Заполняется в BuildDupKeyDict (вызывается из главной процедуры ПЕРЕД
@@ -332,6 +381,16 @@ Public Sub BuildFlatStructure()
     ' (обычно no-op: журнал уже заполнен на шагах 2-3). Сборку НЕ блокирует.
     CheckNumberDuplicates wbOut
     Mod_Util.DebugLog "BuildFlatStructure: CheckNumberDuplicates завершён"
+
+    ' W-T-SCHEMA-FIX (порядок листов): журнал "Аномалии схемы" принудительно
+    ' перемещается в самый конец книги — иначе он мог оказаться между
+    ' листами "Адаптированная_структура" и "Трассировка" (листы создаются в
+    ' момент записи), и пользователь воспринимал это как "журнал не последний".
+    ' On Error Resume Next — если листа нет или он уже последний, сборку
+    ' не прерываем; после блока восстанавливаем обработчик Fail.
+    On Error Resume Next
+    wbOut.Worksheets("Аномалии схемы").Move After:=wbOut.Worksheets(wbOut.Worksheets.Count)
+    On Error GoTo Fail
 
     ' ЧАСТЬ B: удалить пустой лист Лист1, созданный Workbooks.Add
     Dim wsEmpty As Worksheet
@@ -519,6 +578,37 @@ Fail:                                       ' прочие ошибки (нап�
 End Sub
 
 '---------------- Вспомогательные функции ----------------
+
+' W-T-SCHEMA-FIX (очистка имён): возвращает очищенное имя узла:
+'   1. неразрывные пробелы (Chr(160)) заменяются на обычные;
+'   2. пробелы перед и после подчёркивания убираются ("12_ Имя" -> "12_Имя",
+'      "12 _Имя" -> "12_Имя");
+'   3. двойные (и более) пробелы сворачиваются в один;
+'   4. Trim — удаляются ведущие/замыкающие пробелы.
+' Вызывается из цикла сканирования структуры (BuildFlatStructure); при
+' расхождении исходного и очищённого имени фиксируется аномалия NAME_CLEANED.
+Private Function CleanNodeName(ByVal s As String) As String
+    Dim res As String
+    Dim prevLen As Long
+
+    res = s
+    ' 1. невидимые символы: неразрывный пробел -> обычный
+    res = Replace(res, Chr(160), " ")
+    ' 2. пробелы перед и после подчёркивания (цикл — чтобы обработать
+    '    цепочки вида "12 _  Имя" за один проход до устойчивого состояния)
+    Do
+        prevLen = Len(res)
+        res = Replace(res, " _", "_")
+        res = Replace(res, "_ ", "_")
+    Loop While Len(res) <> prevLen
+    ' 3. двойные пробелы -> одиночные (повторяем до сворачивания всех цепочек)
+    Do
+        prevLen = Len(res)
+        res = Replace(res, "  ", " ")
+    Loop While Len(res) <> prevLen
+    ' 4. Trim
+    CleanNodeName = Trim(res)
+End Function
 
 Private Function ColorToType(ByVal colr As Long, legColors() As Long, legNames() As String) As String
     Dim i As Long
@@ -717,6 +807,10 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
     Dim isShortcut As Boolean
     Dim isDup As Boolean
     Dim dupKey As String
+    ' W-T-SCHEMA-FIX (очистка имён): пометка строк с NAME_CLEANED в колонке
+    ' "Аномалия" и подсветка строки
+    Dim isNameCleaned As Boolean
+    Dim anomText As String
     
     r = 2
     For i = 1 To NodeCount
@@ -726,6 +820,8 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         hasError = False
         isShortcut = False
         isDup = False
+        ' W-T-SCHEMA-FIX (очистка имён): узел с очищенным именем (NAME_CLEANED)
+        isNameCleaned = Nodes(i).NameCleaned
         
         ' Если это ярлык без цели - это ошибка
         If Nodes(i).NodeType = "ОШИБКА_ЯРЛЫКА" Then
@@ -733,7 +829,9 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
             isShortcut = True
         End If
         
-        ' Проверяем словарь проблем (добавлено в WriteLog и ProcessShortcuts)
+        ' Проверяем словарь проблем (добавлено в WriteLog и ProcessShortcuts;
+        ' W-T-SCHEMA-FIX: узлы с очищенными именами помечены "W" на этапе
+        ' сканирования — они тоже попадают сюда)
         If problemsDict.Exists(Nodes(i).Name) Then
             hasError = True
         End If
@@ -761,8 +859,16 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         ws.Cells(r, 2).value = IIf(isShortcut, "Ярлык", Nodes(i).NodeType)
         ws.Cells(r, 3).value = parentCell
         ws.Cells(r, 4).value = Nodes(i).Children
-        ' Колонка "Аномалия": пометка дублей
-        If isDup Then ws.Cells(r, 5).value = "[!] Дубль"
+        ' Колонка "Аномалия": пометки дублей и очищенных имён
+        ' (W-T-SCHEMA-FIX: "[!] Имя очищено"; при совпадении с дублем метки
+        ' объединяются через "; ")
+        anomText = ""
+        If isDup Then anomText = "[!] Дубль"
+        If isNameCleaned Then
+            If Len(anomText) > 0 Then anomText = anomText & "; "
+            anomText = anomText & "[!] Имя очищено"
+        End If
+        If Len(anomText) > 0 Then ws.Cells(r, 5).value = anomText
         
         ' Подсветка проблемной строки
         If hasError Then
@@ -771,6 +877,12 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         ElseIf isDup Then
             ' W-STRUCTURE-DUPLICATES-FIX: жёлтая подсветка строк-дублей
             ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Interior.Color = RGB(255, 255, 0)
+        ElseIf isNameCleaned Then
+            ' W-T-SCHEMA-FIX: розовая подсветка строк с очищенным именем
+            ' (проблемная строка по problemsDict уже обработана выше — это
+            ' страховка на случай рассинхронизации словаря)
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Interior.Color = RGB(255, 199, 206)
+            ws.Range(ws.Cells(r, 1), ws.Cells(r, 5)).Font.Color = RGB(156, 0, 6)
         End If
         
         r = r + 1
@@ -980,6 +1092,28 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
                 r = r + 1
                 If Not problemsDict.Exists(nm) Then problemsDict.Add nm, "E"
             End If
+        End If
+
+        ' W-T-SCHEMA-FIX (очистка имён): NAME_CLEANED — имя узла было изменено
+        ' очисткой на этапе сканирования (CleanNodeName). Метка уже лежит в
+        ' problemsDict под служебным ключом "NAME_CLEANED_<код>_<индекс>"
+        ' (значение — индекс узла); здесь она переводится в строку журнала:
+        ' колонка A — код проблемы, B/C/D/E/F/G — координаты и данные узла,
+        ' H — описание с исходным именем.
+        Dim ncKeyI As String
+        ncKeyI = "NAME_CLEANED_" & LeadCode(nm) & "_" & CStr(i)
+        If problemsDict.Exists(ncKeyI) Then
+            ws.Cells(r, 1).value = "NAME_CLEANED"
+            ws.Cells(r, 2).value = Nodes(i).RowIdx
+            ws.Cells(r, 3).value = Nodes(i).ColIdx
+            ws.Cells(r, 4).value = Nodes(i).Level
+            ws.Cells(r, 5).value = Nodes(i).NodeType
+            ws.Cells(r, 6).value = nm
+            ws.Cells(r, 7).value = pn
+            ws.Cells(r, 8).value = "Имя очищено: """ & Nodes(i).RawName & _
+                                   """ -> """ & nm & """"
+            r = r + 1
+            If Not problemsDict.Exists(nm) Then problemsDict.Add nm, "W"
         End If
 NextNodeLog:
     Next i
