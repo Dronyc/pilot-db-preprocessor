@@ -73,7 +73,14 @@ Private Const FIELD_TYPE As String = "ТИП:"
 Private Const FIELD_COND As String = "УСЛОВИЕ:"
 Private Const FIELD_CLAR As String = "УТОЧНЕНИЕ:"
 Private Const COL_STEP As String = "Шаг"
-Private Const COL_SYS_NAME As String = "Тип"
+' PRE-04: в плоской таблице (Mod_Structure.WriteFlatTable, 7 колонок A-G)
+' заголовок "Тип" переименован в "Категория", а колонка номера шага получила
+' канонический заголовок "№шага/подшага". Константы ниже - новые канонические
+' имена; старые ("Тип", "Шаг") сохранены в распознавании заголовков для
+' обратной совместимости с артефактами, собранными до PRE-04.
+Private Const COL_CATEGORY As String = "Категория"       ' новый канон (PRE-04)
+Private Const COL_STEP_NUM As String = "№шага/подшага"   ' новый канон (PRE-04)
+Private Const COL_SYS_NAME As String = "Тип"             ' старый заголовок категории
 Private Const COL_VIS_NAME As String = "Отображаемое имя"
 
 ' W-PROMPT-00-SCHEMA-FIX: имя артефакта подготовки схемы (лист книги и
@@ -1174,7 +1181,10 @@ End Function
 ' книга открывается только для чтения и сразу закрывается).
 ' Колонки берутся по ЗАГОЛОВКАМ (канон: "Шаг", "Системное имя типа",
 ' "Видимое имя типа"; обратная совместимость со старыми книгами:
-' "Тип"/"Отображаемое имя"). Фильтрация по колонке "Шаг": совпадение числа
+' "Тип"/"Отображаемое имя"). PRE-04: канонические заголовки плоской таблицы
+' A-G - "№шага/подшага" (колонка шага) и "Категория" (бывш. "Тип"); оба
+' новых имени распознаются наравне со старыми, жёстких буквенных индексов
+' колонок нет. Фильтрация по колонке шага: совпадение числа
 ' (NN) или диапазона "NN/MM", "NN-MM". Порядок строк - как в структуре
 ' (без сортировки). Формат вывода: "<Видимое имя типа> | <Тип>"; системное
 ' имя типа в блок 6 НЕ выводится (вторая колонка - значение поля "Тип"
@@ -1225,7 +1235,12 @@ Private Function BuildStepTypeList(ByVal root As String, ByVal nn As String) As 
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
     If lastCol < 1 Then lastCol = 1
 
-    ' 1. Индексы колонок по заголовкам (строка 1)
+    ' 1. Индексы колонок по заголовкам (строка 1).
+    ' PRE-04: новые канонические заголовки плоской таблицы A-G -
+    ' "№шага/подшага" (колонка шага) и "Категория" (бывш. "Тип");
+    ' старые заголовки ("Шаг", "Тип") распознаются для обратной
+    ' совместимости с артефактами, собранными до PRE-04. Жёстких
+    ' буквенных индексов (A-E) здесь нет - только поиск по имени.
     colStep = -1
     colSys = -1
     colVis = -1
@@ -1233,18 +1248,20 @@ Private Function BuildStepTypeList(ByVal root As String, ByVal nn As String) As 
     For c = 1 To lastCol
         headerName = Trim$(CStr(ws.Cells(1, c).value))
         Select Case headerName
-            Case COL_STEP: colStep = c
+            Case COL_STEP, COL_STEP_NUM: colStep = c   ' "Шаг" / новый "№шага/подшага"
             Case "Системное имя типа": colSys = c
             Case "Видимое имя типа": colVis = c
-            Case COL_SYS_NAME: colSys = c          ' старый заголовок "Тип"
-            Case COL_VIS_NAME: colVis = c          ' старый "Отображаемое имя"
+            Case COL_SYS_NAME: colSys = c              ' старый заголовок "Тип"
+            Case COL_CATEGORY: colSys = c              ' новый "Категория" (PRE-04)
+            Case COL_VIS_NAME: colVis = c              ' "Отображаемое имя"
             Case "Тип": colType = c
         End Select
     Next c
 
     If colVis < 0 Or (colSys < 0 And colType < 0) Then
         Mod_Util.WriteWarning "P002", "BuildStepTypeList: в структуре не найдены " & _
-            "колонки ""Видимое имя типа"" и ""Системное имя типа""/""Тип"" - блок 6 не собран."
+            "колонки ""Видимое имя типа""/""Отображаемое имя"" и " & _
+            """Системное имя типа""/""Тип""/""Категория"" - блок 6 не собран."
         GoTo CleanExit
     End If
     If colStep < 0 Then
