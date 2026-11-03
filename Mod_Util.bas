@@ -15,7 +15,8 @@ Option Explicit
 '   U005 - ошибка открытия папки в проводнике;
 '   U006 - предупреждение: в папке найден только .pilotcfx;
 '   U007 - предупреждение (T3.1): числовая настройка пуста/некорректна -
-'          использовано значение по умолчанию.
+'          использовано значение по умолчанию; с PRE-04 распространяется
+'          и на текстовые настройки (GetSettingText, напр. LegendRange).
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
@@ -24,12 +25,19 @@ Option Explicit
 
 ' Имена именованных диапазонов листа "Настройки" (раздел 5 спецификации).
 ' T3.1: добавлены ProjectRoot (B2) и MaxTypesPerTable (B7).
+' PRE-04: добавлен LegendRange (B8) - диапазон легенды цветов на листе схемы.
 Private Const NAME_PROJECT_ROOT As String = "ProjectRoot"
 Private Const NAME_CHECK_MODE As String = "CheckMode"
 Private Const NAME_AUTO_OPEN_RESULTS As String = "AutoOpenResults"
 Private Const NAME_PROMPT_GEN_VERSION As String = "PromptGenVersion"
 Private Const NAME_PROMPT_FIX_VERSION As String = "PromptFixVersion"
 Private Const NAME_MAX_TYPES_PER_TABLE As String = "MaxTypesPerTable"
+Private Const NAME_LEGEND_RANGE As String = "LegendRange"
+
+' PRE-04: значение по умолчанию для LegendRange (адрес диапазона легенды
+' цветов на первом листе книги-схемы): используется как default для
+' GetSettingText("LegendRange", DEFAULT_LEGEND_RANGE) в Mod_Structure.
+Public Const DEFAULT_LEGEND_RANGE As String = "B1:C3"
 
 ' Значение по умолчанию для MaxTypesPerTable (T3.1): используется
 ' Mod_Prompt при подстановке {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ} и как default
@@ -154,6 +162,44 @@ Public Function GetSettingLong(ByVal name As String, ByVal defaultValue As Long)
 ErrHandler:
     ' Имя не найдено / лист "Настройки" отсутствует - тихо отдаём default.
     GetSettingLong = defaultValue
+    Err.Clear
+End Function
+
+' Читает ТЕКСТОВУЮ настройку листа "Настройки" по имени именованного
+' диапазона (PRE-04; аналог GetSettingLong для строковых значений).
+' Поведение:
+'   * значение непустое -> возвращается как есть (только Trim);
+'   * поле пустое / недоступно -> возвращается defaultValue + WriteWarning
+'     U007 (штатная ситуация, не ошибка);
+'   * имя/лист не найдены -> возвращается defaultValue без предупреждения
+'     (корректное состояние до первого запуска EnsureSettingsSheet).
+' Используется для LegendRange (Mod_Structure.BuildFlatStructure: адрес
+' диапазона легенды цветов на листе схемы, напр. "B1:C3").
+Public Function GetSettingText(ByVal name As String, ByVal defaultValue As String) As String
+    Dim raw As String
+
+    GetSettingText = defaultValue
+
+    On Error GoTo ErrHandler
+
+    ' Читаем фактическое значение диапазона (RefersToRange.Value), а не
+    ' строку определения имени (Names(...).Value) - см. T3.1-fix.
+    On Error Resume Next
+    raw = Trim$(CStr(ThisWorkbook.Names(name).RefersToRange.Value))
+    If Err.Number <> 0 Then raw = "": Err.Clear
+    On Error GoTo 0
+    If raw = "" Then
+        WriteWarning "U007", "GetSettingText: настройка """ & name & """ пуста - " & _
+                   "использовано значение по умолчанию """ & defaultValue & """."
+        Exit Function
+    End If
+
+    GetSettingText = raw
+    Exit Function
+
+ErrHandler:
+    ' Имя не найдено / лист "Настройки" отсутствует - тихо отдаём default.
+    GetSettingText = defaultValue
     Err.Clear
 End Function
 ' Возвращает путь к папке логов: <корень>\05_Логи.
@@ -480,19 +526,23 @@ End Function
 
 ' Создаёт лист "Настройки" (если его нет), заполняет поля, выпадающие
 ' списки и именованные диапазоны по разделу 5 спецификации
-' Spec_Dispatcher.md (T3.1 - шесть полей B2:B7):
+' Spec_Dispatcher.md (T3.1 - шесть полей B2:B7; PRE-04 - седьмое поле B8):
 '   B2 ProjectRoot       - Корневая папка проекта (текст; пусто = ThisWorkbook.Path);
 '   B3 CheckMode         - Режим проверки (список: Черновик / Строгая; по умолчанию Черновик);
 '   B4 AutoOpenResults   - Автооткрытие папки результатов (список: да / нет; по умолчанию да);
 '   B5 PromptGenVersion  - Версия промта-генератора (текст; по умолчанию 7.13);
 '   B6 PromptFixVersion  - Версия промта-исправления (текст; по умолчанию 1.0);
-'   B7 MaxTypesPerTable  - Лимит типов в таблице (целое >= 1; по умолчанию 50).
+'   B7 MaxTypesPerTable  - Лимит типов в таблице (целое >= 1; по умолчанию 50);
+'   B8 LegendRange       - Диапазон легенды (текст; адрес диапазона легенды
+'                          цветов на первом листе книги-схемы; по умолчанию
+'                          "B1:C3"; PRE-04 - читается кодом через
+'                          GetSettingText в Mod_Structure.BuildFlatStructure).
 ' Validation навешивается СТРОГО на свою ячейку (H1 исправлен):
 ' CheckMode -> B3, AutoOpenResults -> B4, MaxTypesPerTable -> B7;
-' B2/B5/B6 - текстовые поля без списков.
-' Именованные диапазоны создаются для ВСЕХ шести полей; существующие имена
+' B2/B5/B6/B8 - текстовые поля без списков.
+' Именованные диапазоны создаются для ВСЕХ семи полей; существующие имена
 ' не переопределяются. Лист защищается паролем "pilot", редактируемыми
-' остаются только B2:B7. Существующие значения пользовательских настроек
+' остаются только B2:B8. Существующие значения пользовательских настроек
 ' при повторном запуске не перезаписываются (значения по умолчанию
 ' проставляются только в пустые ячейки новых/существующих полей).
 Public Sub EnsureSettingsSheet()
@@ -522,20 +572,22 @@ Public Sub EnsureSettingsSheet()
     End If
 
     ' 2. Подписи (колонка A), имена диапазонов и значения по умолчанию -
-    '    шесть полей B2:B7 (T3.1)
+    '    семь полей B2:B8 (T3.1 + PRE-04: LegendRange)
     labels = Array("Корневая папка проекта", _
                "Режим проверки", _
                "Автооткрытие папки результатов", _
                "Версия промта-генератора", _
                "Версия промта-исправления", _
-               "Максимум типов в таблице")
+               "Максимум типов в таблице", _
+               "Диапазон легенды")
     namesArr = Array(NAME_PROJECT_ROOT, NAME_CHECK_MODE, NAME_AUTO_OPEN_RESULTS, _
                      NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION, _
-                     NAME_MAX_TYPES_PER_TABLE)
+                     NAME_MAX_TYPES_PER_TABLE, NAME_LEGEND_RANGE)
     ' ProjectRoot остаётся пустым: пусто = ThisWorkbook.Path (см. GetProjectRoot).
-    defaults = Array("", "Черновик", "да", "7.13", "1.0", CStr(DEFAULT_MAX_TYPES_PER_TABLE))
+    defaults = Array("", "Черновик", "да", "7.13", "1.0", CStr(DEFAULT_MAX_TYPES_PER_TABLE), _
+                     DEFAULT_LEGEND_RANGE)
 
-    For i = 0 To 5
+    For i = 0 To 6
         RowIdx = i + 2
         ws.Cells(RowIdx, 1).value = CStr(labels(i))
         ' значение по умолчанию ставим только если ячейка пуста -
@@ -548,14 +600,18 @@ Public Sub EnsureSettingsSheet()
     Next i
 
     ws.Range("A1").value = "Настройки Препроцессора"
+    ' PRE-04: подсказка по новому полю "Диапазон легенды" (C8) - адрес
+    ' диапазона легенды цветов на первом листе книги-схемы.
+    ws.Range("C8").value = "Адрес диапазона легенды на листе схемы, напр. B1:C3"
     ws.Columns("A:B").AutoFit
 
     ' 3. Validation строго на своих ячейках (H1 исправлен):
     '    B3 CheckMode - список; B4 AutoOpenResults - список;
-    '    B7 MaxTypesPerTable - целое >= 1; B2/B5/B6 - без списков
+    '    B7 MaxTypesPerTable - целое >= 1; B2/B5/B6/B8 - без списков
     '    (старое смещённое правило на B3 пересоздаётся ниже корректно,
     '     правило на B2 снимается).
     ws.Range("B2").Validation.Delete
+    ws.Range("B8").Validation.Delete
     With ws.Range("B3").Validation
         .Delete
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
@@ -582,10 +638,10 @@ Public Sub EnsureSettingsSheet()
         .ErrorMessage = "MaxTypesPerTable должно быть целым числом >= 1."
     End With
 
-    ' 4. Именованные диапазоны для всех шести полей - создавать, если их
+    ' 4. Именованные диапазоны для всех семи полей - создавать, если их
     '    ещё нет (существующие имена не трогаем, чтобы не переопределить
     '    ссылку)
-    For i = 0 To 5
+    For i = 0 To 6
         On Error Resume Next
         Dim nmChk As Name
         Set nmChk = wb.Names(namesArr(i))
@@ -599,9 +655,9 @@ Public Sub EnsureSettingsSheet()
         Set nmChk = Nothing
     Next i
 
-    ' 5. Защита листа от случайной правки: разблокированы B2:B7
+    ' 5. Защита листа от случайной правки: разблокированы B2:B8 (PRE-04)
     ws.Cells.Locked = True
-    ws.Range("B2:B7").Locked = False
+    ws.Range("B2:B8").Locked = False
     ws.Protect Password:=SHEET_PASSWORD
 
     WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён"
@@ -611,7 +667,9 @@ Public Sub EnsureSettingsSheet()
     WriteLog "EnsureSettingsSheet: поля CheckMode/AutoOpenResults/PromptGenVersion/" & _
              "PromptFixVersion созданы; чтение этих настроек кодом пока не " & _
              "реализовано (зарезервировано на след. задачи). MaxTypesPerTable " & _
-             "читается через GetSettingLong (Mod_Prompt: {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ})."
+             "читается через GetSettingLong (Mod_Prompt: {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ}). " & _
+             "LegendRange (B8) читается через GetSettingText " & _
+             "(Mod_Structure.BuildFlatStructure: диапазон легенды цветов)."
     Exit Sub
 
 ErrHandler:

@@ -159,16 +159,58 @@ Public Sub BuildFlatStructure()
     ' основной сборки оно остаётся в прежнем состоянии пользователя.
 
     '---------- 1. Легенда: цвет -> тип ----------
-    Dim legCells(1 To 6) As String
-    Dim legNames(1 To 6) As String
-    Dim legColors(1 To 6) As Long
-    legCells(1) = "B1": legCells(2) = "C1": legCells(3) = "B2"
-    legCells(4) = "C2": legCells(5) = "B3": legCells(6) = "C3"
+    ' PRE-04: убран хардкод адресов легенды (ранее - фиксированный массив
+    ' legCells(1 To 6): "B1", "C1", "B2", "C2", "B3", "C3"). Адрес диапазона
+    ' легенды читается из листа "Настройки" (поле B8, именованный диапазон
+    ' LegendRange; по умолчанию "B1:C3") через Mod_Util.GetSettingText.
+    ' Порядок обхода ячеек - построчно слева направо (RowMajor), как в
+    ' старом хардкоде; количество элементов легенды определяется размером
+    ' диапазона (legCount), а не константой 6.
+    Dim sLeg As String
+    sLeg = Mod_Util.GetSettingText("LegendRange", Mod_Util.DEFAULT_LEGEND_RANGE)
+    Dim rngLeg As Range
+    On Error Resume Next
+    Set rngLeg = ws.Range(sLeg)
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' Некорректный адрес в настройке - предупреждение и fallback на default.
+        Mod_Util.WriteWarning "S011", "BuildFlatStructure: диапазон легенды '" & _
+            sLeg & "' (настройка LegendRange, поле B8 листа 'Настройки') " & _
+            "некорректен на листе схемы - использован диапазон по умолчанию " & _
+            Mod_Util.DEFAULT_LEGEND_RANGE & "."
+        sLeg = Mod_Util.DEFAULT_LEGEND_RANGE
+        Set rngLeg = ws.Range(sLeg)
+        If Err.Number <> 0 Then
+            Err.Clear
+            Set rngLeg = Nothing   ' легенда недоступна - сборка продолжится без неё
+        End If
+    End If
+    On Error GoTo Fail
+    Dim legCount As Long
+    If rngLeg Is Nothing Then
+        legCount = 0
+    Else
+        legCount = rngLeg.Count
+    End If
+    Dim legNames() As String
+    Dim legColors() As Long
+    If legCount > 0 Then
+        ReDim legNames(1 To legCount)
+        ReDim legColors(1 To legCount)
+    Else
+        ReDim legNames(1 To 0)
+        ReDim legColors(1 To 0)
+    End If
     Dim i As Long
-    For i = 1 To 6
-        legNames(i) = Trim(CStr(ws.Range(legCells(i)).value))
-        legColors(i) = ws.Range(legCells(i)).Interior.Color
-    Next i
+    Dim legCell As Range
+    i = 0
+    For Each legCell In rngLeg.Cells   ' обход по строкам: B1, C1, B2, C2, ...
+        i = i + 1
+        legNames(i) = Trim(CStr(legCell.Value))
+        legColors(i) = legCell.Interior.Color
+    Next legCell
+    Mod_Util.DebugLog "BuildFlatStructure: легенда прочитана из '" & sLeg & _
+                      "', элементов = " & legCount
 
     '---------- 2. Сканирование структуры ----------
     ' W-T-SCHEMA-FIX: словарь проблем инициализируется ДО цикла сканирования —
@@ -610,9 +652,12 @@ Private Function CleanNodeName(ByVal s As String) As String
     CleanNodeName = Trim(res)
 End Function
 
+' PRE-04: верхняя граница обхода больше не константа 6 - берётся из
+' фактического размера массивов легенды (диапазон читается из настройки
+' LegendRange, число элементов = размер диапазона).
 Private Function ColorToType(ByVal colr As Long, legColors() As Long, legNames() As String) As String
     Dim i As Long
-    For i = 1 To 6
+    For i = LBound(legColors) To UBound(legColors)
         If colr = legColors(i) Then
             ColorToType = legNames(i)
             Exit Function
