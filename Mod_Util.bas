@@ -16,7 +16,11 @@ Option Explicit
 '   U006 - предупреждение: в папке найден только .pilotcfx;
 '   U007 - предупреждение (T3.1): числовая настройка пуста/некорректна -
 '          использовано значение по умолчанию; с PRE-04 распространяется
-'          и на текстовые настройки (GetSettingText, напр. LegendRange).
+'          и на текстовые настройки (GetSettingText, напр. LegendRange);
+'   U008 - предупреждение (PRE-04c): не удалось подготовить лист
+'          "Паттерны" из Mod_Util.EnsureSettingsSheet (вызов
+'          Mod_Patterns.EnsurePatternsSheet (коды модуля - PT###);
+'          подготовка книги продолжается.
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
@@ -545,6 +549,12 @@ End Function
 ' остаются только B2:B8. Существующие значения пользовательских настроек
 ' при повторном запуске не перезаписываются (значения по умолчанию
 ' проставляются только в пустые ячейки новых/существующих полей).
+' PRE-04c: в конце процедуры вызывается Mod_Patterns.EnsurePatternsSheet -
+' лист «Паттерны» создаётся автоматически вместе с листом «Настройки»
+' (обе точки входа книги идут через EnsureSettingsSheet: RestoreUI и
+' главная процедура подготовки). Вызов защищён On Error Resume Next:
+' сбой подготовки «Паттернов» не блокирует «Настройки»; при ошибке
+' пишется предупреждение U008.
 Public Sub EnsureSettingsSheet()
     Dim ws As Worksheet
     Dim wb As Workbook
@@ -553,6 +563,7 @@ Public Sub EnsureSettingsSheet()
     Dim namesArr As Variant
     Dim defaults As Variant
     Dim i As Long
+    Dim patErr As Boolean
 
     On Error GoTo ErrHandler
 
@@ -670,6 +681,23 @@ Public Sub EnsureSettingsSheet()
              "читается через GetSettingLong (Mod_Prompt: {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ}). " & _
              "LegendRange (B8) читается через GetSettingText " & _
              "(Mod_Structure.BuildFlatStructure: диапазон легенды цветов)."
+
+    ' 7. PRE-04c: автоматическая подготовка листа "Паттерны" (каркас секций
+    '    A-D и H-O, предзаполненные ИСКЛЮЧЕНИЯ, выпадающие списки, защита).
+    '    Вызов защищён: сбой подготовки "Паттернов" не блокирует работу с
+    '    листом "Настройки" (U008 - предупреждение).
+    patErr = False
+    On Error Resume Next
+    Mod_Patterns.EnsurePatternsSheet
+    If Err.Number <> 0 Then patErr = True
+    Err.Clear
+    On Error GoTo 0
+    If patErr Then
+        WriteWarning "U008", "EnsureSettingsSheet: не удалось подготовить лист " & _
+                   "'Паттерны' (Mod_Patterns.EnsurePatternsSheet). Лист 'Настройки' " & _
+                   "готов; создайте лист 'Паттерны' через 'Восстановить кнопки и " & _
+                   "оформление'."
+    End If
     Exit Sub
 
 ErrHandler:

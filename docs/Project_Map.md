@@ -14,7 +14,8 @@
 | Mod_Docs.bas | Документация проекта | генерация отчётов/документов |
 | Mod_Registry.bas | Реестры | Реестр_типов.txt, Реестр_покрытия.txt |
 | Mod_TestGen.bas, Mod_TestGen_Assembler.bas | Генерация тестов | тестовые сценарии для собранных настроек |
-| Mod_UI.bas | Кнопки/обработчики интерфейса | BuildFlatStructure_Click и др. |
+| Mod_UI.bas | Кнопки/обработчики интерфейса | BuildFlatStructure_Click и др.; RestoreUI создаёт 14 кнопок на листе «Препроцессор» (PRE-04c: добавлены «Сформировать таблицы» → CommandGenerateTables и «Разобрать ответ ИИ» → CommandParseAiResponse — пока заглушки, логика в W7) |
+| Mod_Patterns.bas | Лист «Паттерны» (PRE-04c): каркас для Промта №0.2 | EnsurePatternsSheet (создание/очистка листа, секция A–D «список паттернов», секция H–O «ИСКЛЮЧЕНИЯ паттернов» с предзаполненными правилами, Validation для колонок H/I/J/L/O, жирные заголовки, AutoFit, защита паролем "pilot" с разблокированными A2:D1000 и H2:O1000); вызывается из Mod_Util.EnsureSettingsSheet; коды PT001/PT002 |
 
 ## Папки рабочего проекта (создаются CreateProjectFolders вне репозитория)
 

@@ -79,7 +79,9 @@ Public Sub RestoreUI()
         "Показать, что нашёл Препроцессор", _
         "Открыть папку Логи", _
         "Обновить Readme", _
-        "Восстановить кнопки и оформление")
+        "Восстановить кнопки и оформление", _
+        "Сформировать таблицы", _
+        "Разобрать ответ ИИ")
 
     actions = Array( _
         "CreateProjectFolders_Click", _
@@ -93,7 +95,9 @@ Public Sub RestoreUI()
         "ShowDiscoveryReport_Click", _
         "OpenLogsFolder_Click", _
         "UpdateReadme_Click", _
-        "RestoreUI_Click")
+        "RestoreUI_Click", _
+        "CommandGenerateTables", _
+        "CommandParseAiResponse")
 
     tips = Array( _
         "Создаёт структуру папок проекта", _
@@ -107,9 +111,14 @@ Public Sub RestoreUI()
         "Показывает карту найденных шагов и файлов", _
         "Открывает папку 05_Логи", _
         "Формирует Readme.md из листа Readme", _
-        "Пересоздаёт кнопки, оформление и защиту листов")
+        "Пересоздаёт кнопки, оформление и защиту листов", _
+        "PRE-04c (заглушка W7): формирование таблиц по листу «Паттерны»", _
+        "PRE-04c (заглушка W7): разбор ответа ИИ и пополнение листа «Паттерны»")
 
-    ' Создание 12 кнопок в столбце B (строки 2, 4, ..., 24)
+    ' Создание 14 кнопок в столбце B (строки 2, 4, ..., 28)
+    ' PRE-04c: добавлены кнопки «Сформировать таблицы» (строка 26) и
+    ' «Разобрать ответ ИИ» (строка 28) — ниже существующих 12 кнопок,
+    ' поэтому они не перекрывают существующий интерфейс.
     ' Используем Shapes.AddFormControl + Placement = xlFreeFloating,
     ' чтобы кнопки не растягивались при изменении ширины столбцов и AutoFit.
     rowBtn = 2
@@ -128,7 +137,11 @@ Public Sub RestoreUI()
             .HorizontalAlignment = xlCenter
             .VerticalAlignment = xlCenter
         End With
-        shpBtn.Fill.ForeColor.RGB = RGB(91, 155, 213)      ' синий
+        If i <= 11 Then
+            shpBtn.Fill.ForeColor.RGB = RGB(91, 155, 213)      ' синий
+        Else
+            shpBtn.Fill.ForeColor.RGB = RGB(255, 217, 102)     ' жёлтый - новые (W7)
+        End If
         shpBtn.Line.ForeColor.RGB = RGB(0, 0, 0)           ' чёрная рамка
         shpBtn.Line.Weight = 1
         ws.Cells(rowBtn, 3).value = CStr(tips(i))
@@ -186,7 +199,7 @@ Public Sub RestoreUI()
     ' Упорядочить листы: Препроцессор, Настройки, Readme, остальные
     Call ReorderSheets(ThisWorkbook)
 
-    Mod_Util.WriteLog "UI восстановлен: 12 кнопок, оформление, защита"
+    Mod_Util.WriteLog "UI восстановлен: 14 кнопок, оформление, защита"
     Exit Sub
 
 ErrHandler:
@@ -320,6 +333,21 @@ ErrHandler:
     Mod_Util.WriteError "P003", "MakeFixPrompt_Click: " & Err.Description
     MsgBox "Ошибка: " & Err.Description, vbExclamation
     Err.Clear
+End Sub
+
+' ------------------------------------------------------------
+' PRE-04c: заглушки новых команд листа «Препроцессор» (кнопки 13-14).
+' Логика формирования таблиц и разбора ответа ИИ будет реализована в W7;
+' сейчас команды только информируют о том, что функция в разработке.
+' Кнопки вызываются по имени (OnAction), поэтому имена процедур
+' зафиксированы: CommandGenerateTables / CommandParseAiResponse.
+' ------------------------------------------------------------
+Public Sub CommandGenerateTables()
+    MsgBox "Команда в разработке (W7)", vbInformation
+End Sub
+
+Public Sub CommandParseAiResponse()
+    MsgBox "Команда в разработке (W7)", vbInformation
 End Sub
 
 ' ------------------------------------------------------------
