@@ -2461,6 +2461,11 @@ Private Sub GenerateStepZeroPrompt()
     ' "Проверка файлов" шаблона; если папка пуста - плейсхолдер заменяется
     ' на пустую строку.
     result = ReplaceIfPresent(result, "{EXTRA_DATA_LIST}", BuildStepZeroExtraDataList(root))
+    ' T3.1 (H3): лимит типов в таблице берётся из листа "Настройки"
+    ' (MaxTypesPerTable через GetSettingLong), а не хардкодится; при
+    ' пустом/некорректном значении GetSettingLong вернёт 50 (default).
+    result = ReplaceIfPresent(result, "{ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ}", _
+                CStr(Mod_Util.GetSettingLong("MaxTypesPerTable", Mod_Util.DEFAULT_MAX_TYPES_PER_TABLE)))
     result = ReplaceIfPresent(result, "{Decomposition_Rules}", DECOMPOSITION_RULES_V713)
 
     ' 5. Сохранение результата в 04_Промты
