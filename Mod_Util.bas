@@ -232,10 +232,13 @@ End Function
 ' информационных сообщений имеет вид "[i] <текст>" (W-CORRECTION-PACK-1,
 ' п.1.1). Если текст уже помечен маркером "[i]"/"[!]"/"ERROR" (сообщения
 ' WriteError/WriteWarning), повторная пометка НЕ добавляется.
-' ВАЖНО: обработка ошибок здесь сознательно НЕ применяется - WriteLog
-' вызывается из обработчиков ошибок других процедур, и любая собственная
-' ошибка могла бы зациклить журналирование. Если корень не задан или
-' запись невозможна - молча выходит.
+' ВАЖНО (T3.2-fix): локальные обработчики ошибок применяются ТОЛЬКО внутри
+' самой WriteLog (On Error Resume Next / On Error GoTo 0) и НИКОГДА не
+' вызывают другие процедуры журналирования, поэтому рекурсия/зацикливание
+' исключены: при любом сбое (MkDir, Open, Print) WriteLog молча выходит.
+' Без такой защиты MkDir (ошибки 75/76 - нет прав или путь недоступен)
+' ронял всю вызвавшую команду. Если корень не задан или запись невозможна -
+' молча выходит.
 Public Sub WriteLog(ByVal message As String)
     Dim root As String
     Dim logsPath As String
@@ -246,12 +249,35 @@ Public Sub WriteLog(ByVal message As String)
     If root = "" Then Exit Sub          ' корень не задан - молча выходим
 
     logsPath = root & "\05_Логи"
-    If Dir(logsPath, vbDirectory) = "" Then MkDir logsPath
+    If Dir(logsPath, vbDirectory) = "" Then
+        ' T3.2-fix: MkDir может упасть (права/недоступный путь) - защищаем
+        ' локально, чтобы не ронять вызвавшую процедуру.
+        On Error Resume Next
+        MkDir logsPath
+        If Err.Number <> 0 Then
+            ' Папку создать не удалось - выходим без записи в лог,
+            ' но НЕ роняем вызвавшую процедуру.
+            Err.Clear
+            On Error GoTo 0
+            Exit Sub
+        End If
+        On Error GoTo 0
+        ' T3.2-fix: убеждаемся, что папка действительно создалась.
+        If Dir(logsPath, vbDirectory) = "" Then Exit Sub
+    End If
 
     logFile = logsPath & "\Препроцессор_" & Format(Date, "yyyy-mm-dd") & ".log"
 
+    ' T3.2-fix: блок работы с файлом тоже защищён от ошибок (файл занят,
+    ' нет прав и т.п.) - сбой записи не должен ронять основную команду.
+    On Error Resume Next
     fnum = FreeFile
     Open logFile For Append As #fnum
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        Exit Sub                        ' файл не открылся - молча выходим
+    End If
     ' W-CORRECTION-PACK-1, п.1.1: информационные сообщения помечаются "[i]";
     ' сообщения ERROR/WARN приходят уже с маркером (см. WriteError/WriteWarning).
     If HasUnifiedPrefix(message) Then
@@ -260,6 +286,8 @@ Public Sub WriteLog(ByVal message As String)
         Print #fnum, "[" & Format(Now, "yyyy-mm-dd hh:nn:ss") & "] [i] " & message
     End If
     Close #fnum
+    Err.Clear
+    On Error GoTo 0
 End Sub
 
 ' Записывает ошибку в журнал в унифицированном формате (W-CORRECTION-PACK-1,
