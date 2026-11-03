@@ -838,15 +838,24 @@ Private Sub CreateSmartTable(ByVal ws As Worksheet, _
 End Sub
 
 '---------------- Лист 1: адаптированная структура (плоская таблица) --------
-' W-STRUCTURE-DUPLICATES-FIX, п.3: добавлена колонка "Аномалия" (E).
+' W-STRUCTURE-DUPLICATES-FIX, п.3: добавлена колонка "Аномалия".
 ' Если строка участвует в дубле (dupCountDict, ключ "Тип|Номер"),
 ' в колонку ставится "[!] Дубль" и строка красится в жёлтый цвет.
+' PRE-04: переход на 7 колонок A-G (канон соответствия PRE-01 Python-
+' конвертера): A "№шага/подшага" (пусто - заполняется ИИ/вручную),
+' B "Отображаемое имя", C "Категория" (переименовано из "Тип"),
+' D "Паттерн" (пусто - из исходной Схемы, если появится; заполняется
+' вручную/ИИ), E "Входит в", F "Состоит из", G "Аномалия".
+' Колонки A и D при первичной сборке остаются пустыми; подсветка
+' проблемных строк и умная таблица - в диапазоне A:G.
 Private Sub WriteFlatTable(ByVal wbOut As Workbook)
     Dim ws As Worksheet
     Mod_Util.DebugLog "WriteFlatTable: старт"
     GetSheet wbOut, FLAT_SHEET_NAME, ws
     Mod_Util.DebugLog "WriteFlatTable: GetSheet завершён"
-    ws.Range("A1:E1").value = Array("Отображаемое имя", "Тип", "Входит в", "Состоит из", "Аномалия")
+    ws.Range("A1:G1").value = Array("№шага/подшага", "Отображаемое имя", _
+                                    "Категория", "Паттерн", "Входит в", _
+                                    "Состоит из", "Аномалия")
     Dim i As Long, r As Long
     Dim hasError As Boolean
     Dim isShortcut As Boolean
