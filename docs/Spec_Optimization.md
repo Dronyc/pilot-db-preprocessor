@@ -32,6 +32,11 @@
 | PRE-04c | `Mod_Patterns` (новый модуль), `Mod_Util`, `Mod_UI` (VBA) | Каркас листа «Паттерны»: `Mod_Patterns.EnsurePatternsSheet` — создание листа (в конце книги), очистка, секция A–D (заголовки «Паттерн/Типы/Количество/Итерация», строки 2+ пустые — заполняются кодом позже), секция H–O «ИСКЛЮЧЕНИЯ паттернов» с предзаполненными правилами (папки ЦИМ/Год — ВКЛЮЧАТЬ; базовые системные типы document/ecmDocument/folder/project/projectfolder и маска bim_* — ИСКЛЮЧАТЬ), Validation для колонок H/I/J/L/O, жирные заголовки, AutoFit, защита паролем «pilot» (разблокированы A2:D1000, H2:O1000); вызов из `Mod_Util.EnsureSettingsSheet`; кнопки на листе «Препроцессор» «Сформировать таблицы» (`CommandGenerateTables`) и «Разобрать ответ ИИ» (`CommandParseAiResponse`) — заглушки W7 | Дать Промту №0.2 читаемый лист «Паттерны» (список паттернов + ИСКЛЮЧЕНИЯ) и точки запуска будущих команд | важно | Выполнено |
 | PRE-05 | `prompts/prompt_step_00_4_template.md` (новый шаблон) | Разработать Промт №0.4 «Выжимка ГОСТа и Описания»: вход — текст ГОСТа (HTML/PDF → MD) + Описание (docx → MD); выход — выжимка (термины, структура ЖЦ, правило ТПР/ТПКР). | Автор документов ≠ пользователь → выжимку делает ИИ, пользователь проверяет (из ответа 6.9). | важно | Не начато |
 | T3.1 | `Mod_Util`, `Mod_Prompt` | Починка листа «Настройки»: 6 полей B2:B7 (ProjectRoot, CheckMode, AutoOpenResults, PromptGenVersion, PromptFixVersion, MaxTypesPerTable), Validation строго на своих ячейках (H1), именованные диапазоны для всех 6 полей, GetProjectRoot читает ProjectRoot из настроек (пусто = ThisWorkbook.Path, H2), новая GetSettingLong + код U007 (H3/H4), Mod_Prompt подставляет {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ} из MaxTypesPerTable | Устранить расхождения листа настроек с кодом; дать промту №0.3 читаемый из настроек лимит типов вместо константы | критично | Выполнено |
+| W7.1 | `Mod_Patterns`, `Mod_Prompt`, `Mod_UI`, `Mod_Structure` (VBA) | GetPatternExceptions, GetKnownPatterns, GetPromptProfile, CommandGenerateTables = S0, FLAT_SHEET_NAME → Public, GenerateStepZeroPrompt → комментирование + MsgBox, CommandParseAiResponse — заглушка | Подключить чтение листа «Паттерны» и реализовать заглушки W7 | критично | Не начато |
+| W7.1a | `Mod_Patterns` (VBA) | Умные таблицы на листе «Паттерны» | Упростить сопровождение листа «Паттерны» | желательно | Не начато (после W7.1) |
+| W7.2 | `Mod_Prompt`, `Mod_UI` (VBA) | BuildPrompt02Patterns, BuildPrompt03Profile, CommandParseAiResponse (реальный разбор) | Реализовать формирование Промтов №0.2/№0.3 и разбор ответа ИИ | критично | Не начато (после W7.1) |
+| W-FIX-PROMPT | `prompts/prompt_fix_v1.0.md`, `Mod_Prompt` (VBA) | Плейсхолдеры промта исправления + формирование промта по сводной таблице и листу отчёта по проверкам | Закрыть цикл исправления ошибок генерации | важно | Не начато (после W7.2; зависимость — сводная таблица + лист отчёта по проверкам) |
+| W-DOCS-MAP | `docs/Project_Map.md`, `docs/Spec_Optimization.md`, `docs/Journal.md`, `docs/Handoff.md`, `prompts/archive/README.md` | Привести документацию к состоянию dc288ac | Синхронизировать документацию с кодом | важно | Выполнено |
 
 ## 2. Порядок выполнения
 
@@ -138,6 +143,22 @@
 - PRE-04c готовит лист «Паттерны» (список паттернов A–D + ИСКЛЮЧЕНИЯ H–O) как источник данных Промта №0.2 и добавляет кнопки будущих команд W7 («Сформировать таблицы», «Разобрать ответ ИИ») — пока заглушки.
 - PRE-05 закрывает разрыв «автор документов ≠ пользователь» для ГОСТа и Описания.
 - Порядок: сначала convert.py (нужен вход), затем validate.py (нужны проверки), затем CI (автотесты), затем VBA-правки и новый промт.
+
+### Этап 8. Документация и W7
+
+Выполнить:
+
+1. W-DOCS-MAP
+2. W7.1
+3. W7.1a
+4. W7.2
+5. W-FIX-PROMPT
+
+Обоснование:
+
+- Сначала документация приводится к текущему состоянию (W-DOCS-MAP), чтобы задачи W7 опирались на актуальную карту проекта.
+- Затем выполняется код W7 (W7.1 → W7.1a → W7.2): чтение листа «Паттерны», подключение Промтов №0.2/№0.3, реальный разбор ответа ИИ.
+- Промт исправления (W-FIX-PROMPT) идёт последним — после появления сводной таблицы и листа отчёта по проверкам, на которые он опирается.
 
 ## 3. Тесты после каждой задачи
 
@@ -337,6 +358,36 @@
 - Поля CheckMode/AutoOpenResults/PromptGenVersion/PromptFixVersion не удалены; их неиспользование зафиксировано информационной записью `WriteLog` в `EnsureSettingsSheet` (H4, не ошибка).
 - Повторный запуск `EnsureSettingsSheet` не затирает пользовательские значения (значения по умолчанию проставляются только в пустые ячейки).
 - В журнале штатного прогона нет ошибок U003/U007 (U007 допускается только как предупреждение при некорректном значении настройки).
+
+### После W-DOCS-MAP
+
+- `docs/Project_Map.md` содержит секцию «Карта промтов» с 11 шаблонами и корректными статусами.
+- Статусы Mod_Structure, Mod_Util, Mod_Patterns, Mod_UI, Mod_Prompt соответствуют коду на dc288ac.
+- В `docs/Project_Map.md` есть секция «Бэклог» со строками W7.1, W7.1a, W7.2, W-FIX-PROMPT, W-DOCS-MAP.
+- `docs/Handoff.md`: форма B без ветки/PR, форма C — «DeepSeek → ревьюер», буквы форм единообразны (A, B, C, D, E).
+- `prompts/archive/README.md` создан.
+
+### После W7.1
+
+- `Mod_Patterns.GetPatternExceptions` и `GetKnownPatterns` реализованы и читают лист «Паттерны».
+- `Mod_Prompt.GetPromptProfile` присутствует; `Mod_Structure.FLAT_SHEET_NAME` — Public.
+- `Mod_UI.CommandGenerateTables` реализует S0 (не заглушка); `CommandParseAiResponse` остаётся заглушкой (W7.2).
+- `Mod_Prompt.GenerateStepZeroPrompt` закомментирован, при вызове — MsgBox о замене.
+- `prompt_step_00_template.md` перемещён в `prompts/archive/`.
+
+### После W7.2
+
+- `Mod_Prompt.BuildPrompt02Patterns` и `BuildPrompt03Profile` реализованы и формируют промты №0.2/№0.3.
+- `Mod_UI.CommandParseAiResponse` выполняет реальный разбор ответа ИИ (не MsgBox-заглушка).
+- Промты №0.2/№0.3 используют данные листа «Паттерны» (через GetPatternExceptions/GetKnownPatterns).
+- `prompt_step_00_2_template.md` / `prompt_step_00_3_template.md` переведены в статус «работает».
+
+### После W-FIX-PROMPT
+
+- `prompts/prompt_fix_v1.0.md` содержит плейсхолдеры `{NN}`, `{ERRORS}`, `{REGISTRY_TYPES}`, `{REGISTRY_COVERAGE}`, `{SCHEMA}`.
+- `Mod_Prompt.MakeFixPrompt` формирует промт по сводной таблице и листу отчёта по проверкам.
+- `MakeFixPrompt` подключён к `MakeFixPrompt_Click` (кнопка UI).
+- Промт исправления проверен на тестовом наборе ошибок шага.
 
 ## 4. Что НЕ делать
 

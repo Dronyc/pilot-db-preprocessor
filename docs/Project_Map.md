@@ -1,21 +1,21 @@
 # Карта проекта (Project Map)
 
-Обновлено: 2026-10-27 (W-DOCS-UPDATE: актуализация карты проекта под новую архитектуру генерации промтов — prompt_step_template_v1.md, BuildPromptForStep, механизм корректировок).
+Обновлено: 2026-11-05 (W-DOCS-MAP: приведение документации к состоянию коммита dc288ac — PRE-04, PRE-04c, T3.1; добавлена карта промтов и бэклог W7).
 
 ## VBA-модули (корень репозитория, формат .bas)
 
 | Модуль | Назначение | Ключевые функции/процедуры |
 |---|---|---|
-| Mod_Util.bas | Журналирование, конфигурация, пути | WriteLog ("[i] <текст>"), WriteError ("ERROR [<код>]: <текст>"), WriteWarning ("[!] <текст>"), DebugLog (публичная, безопасное отладочное логирование: Immediate + файл-журнал, ошибки журналирования не роняют сборку), FormatMissingFile, FindConfigFile (.xml > .txt; только .pilotcfx — предупреждение), GetConfigValue, GetProjectRoot |
+| Mod_Util.bas | Журналирование, конфигурация, настройки, пути | WriteLog ("[i] <текст>"), WriteError ("ERROR [<код>]: <текст>"), WriteWarning ("[!] <текст>"), DebugLog, FormatMissingFile, FindConfigFile (.xml > .txt; только .pilotcfx — предупреждение), GetConfigValue, **GetProjectRoot** (читает ProjectRoot из «Настроек», пусто = ThisWorkbook.Path), **GetSettingLong(name, defaultValue)** (предупреждение U007 при пустом/некорректном значении), **GetSettingText(name, defaultValue)** (пусто → default + U007), **LegendRange** (именованный диапазон на лист «Настройки», B8), **MaxTypesPerTable** (поле B7, именованный диапазон, читается через GetSettingLong), **EnsureSettingsSheet** (6 полей B2:B7: ProjectRoot, CheckMode, AutoOpenResults, PromptGenVersion, PromptFixVersion, MaxTypesPerTable + 7-е поле B8 «Диапазон легенды» / LegendRange; Validation на B3/B4/B7; именованные диапазоны всех 6 полей; защита «pilot», разблокированы B2:B8; вызов Mod_Patterns.EnsurePatternsSheet с обёрткой On Error Resume Next + U008) |
 | Mod_Folders.bas | Структура папок и проверка исходников | CreateProjectFolders (создаёт в т.ч. "01_Исходные данные\04_Дополнительные данные"), CheckSourceFolders (Схема .xlsx / Описание .docx / Конфигурация через FindConfigFile / сводка по доп. данным; возвращает True/False), GetStepFolder |
-| Mod_Structure.bas | Парсинг схемы ЖЦ ОКС в адаптированную структуру | BuildFlatStructure (использует prevScreenUpdating / prevDisplayAlerts / prevStatusBar для восстановления состояния и корректно освобождает ресурсы — закрывает wbOut/wbSrc — во всех аварийных ветках Fail, OpenErr, saveErr), WriteFlatTable (лист "Адаптированная_структура"), WriteLog (лист "Аномалии схемы"; заголовки читаются через Worksheet.Range("A1:H1"), а не через ListObject.HeaderRange — из-за бага 438 после Resize), SafeAutoFit (приватная, безопасный AutoFit на скрытых листах: ошибки перехватываются локально, ширина колонок не роняет сборку), WriteTraceability, CheckNumberDuplicates (дубли номеров/наименований — только предупреждения), BackupFlatTableSheet (бэкапы "Адаптированная_структура_bak_<YYYYMMDD_HHMMSS>", ротация 5), ArchiveOldSchemaArtifacts (архивация старых "Адаптированная_структура_*.xlsx" в "02_Подготовка схемы\Архив") |
-| Mod_Prompt.bas | Генерация промтов по новому шаблону prompt_step_template_v1.md | **BuildPromptForStep** (общая цепочка сборки промта шага по новому шаблону: загрузка шаблона → ApplyCorrectionsBlock → FillAllPlaceholders → локальные дополнения/очистка маркеров), **ApplyCorrectionsBlock** (сохранение пользовательских корректировок предыдущей версии промта и corrections.md в блоке 16 «Точечные корректировки и уточнения шага»; работает ДО подстановки плейсхолдеров, пока {{NN}} в тексте жив), **FillAllPlaceholders** (подстановка плейсхолдеров `{{...}}` нового шаблона: блоки 3.1–3.5, 4.1/4.2, 6, константы проекта из project_settings.md; BuildExtraDataListBlock формирует блок 3.4 с назначениями доп. файлов), **GenerateStepZeroPrompt** (теперь генерирует ТОЛЬКО Промт Декомпозиции №0 по шаблону prompt_step_00_template.md — вызывается из MakeNextStepPrompt при отсутствии Шаги.txt; блокировка F005 при неготовых исходниках), **MakeNextStepPrompt** (управляет ветвлением: создание папок Шаг_*, шаг 00 при отсутствии Шаги.txt, обычный промт следующего шага, финальный аудит — все через BuildPromptForStep), MakeFixPrompt, ReadStepList (канонический разделитель "\|" из Шаги.txt), ListFolderFiles, DECOMPOSITION_RULES_V713 (алгоритм «анализ → прогноз +50% → шаги → формат NN\|Имя_папки»). Устаревшая функция BuildExtraDataBlock удалена (W-PROMPT-INVARIANTS-CODE-2); её заменяет BuildExtraDataListBlock (блок 3.4) внутри FillAllPlaceholders |
+| Mod_Structure.bas | Парсинг схемы ЖЦ ОКС в адаптированную структуру | BuildFlatStructure (динамическая легенда: `GetSettingText("LegendRange", DEFAULT_LEGEND_RANGE)` вместо хардкода `legCells(1 To 6)`; при некорректном адресе — S011 + fallback B1:C3; восстановление prevScreenUpdating/prevDisplayAlerts/prevStatusBar, закрытие wbOut/wbSrc во всех ветках Fail/OpenErr/saveErr), **WriteFlatTable** (лист «Адаптированная_структура»; **FLAT_COLS = 7**, колонки A–G: «№шага/подшага», «Отображаемое имя», «Категория» (бывш. «Тип»), «Паттерн», «Входит в», «Состоит из», «Аномалия»; умная таблица `tblFlatStructure` A1:G<lastRow>; подсветка A:G; AutoFit A:G), WriteLog (лист «Аномалии схемы»; заголовки через Worksheet.Range("A1:H1")), SafeAutoFit, WriteTraceability (заголовок «Тип» → «Категория»), CheckNumberDuplicates, HighlightDuplicateRows (колонка «Аномалия» в диапазоне A:G), BackupFlatTableSheet, ArchiveOldSchemaArtifacts |
+| Mod_Prompt.bas | Генерация промтов | **BuildPromptForStep** (общая цепочка сборки промта шага по prompt_step_template_v1.md), **ApplyCorrectionsBlock**, **FillAllPlaceholders**, **BuildStepTypeList** (распознаёт новые канонические заголовки «Категория» и «№шага/подшага» наравне со старыми «Тип»/«Шаг» — обратная совместимость; буквенные индексы колонок не используются), **GenerateStepZeroPrompt** (устаревшая ветка: генерирует только Промт №0 по prompt_step_00_template.md — заменяется в W7.1; подставляет {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ} через GetSettingLong("MaxTypesPerTable", 50) — T3.1), **MakeNextStepPrompt**, MakeFixPrompt (не подключён — W-FIX-PROMPT), ReadStepList, ListFolderFiles, DECOMPOSITION_RULES_V713. **GetPromptProfile отсутствует** (W7.2) |
 | Mod_Assembler.bas | Сборка итоговых настроек | сборка файлов настроек по результатам шагов |
 | Mod_Docs.bas | Документация проекта | генерация отчётов/документов |
 | Mod_Registry.bas | Реестры | Реестр_типов.txt, Реестр_покрытия.txt |
 | Mod_TestGen.bas, Mod_TestGen_Assembler.bas | Генерация тестов | тестовые сценарии для собранных настроек |
-| Mod_UI.bas | Кнопки/обработчики интерфейса | BuildFlatStructure_Click и др.; RestoreUI создаёт 14 кнопок на листе «Препроцессор» (PRE-04c: добавлены «Сформировать таблицы» → CommandGenerateTables и «Разобрать ответ ИИ» → CommandParseAiResponse — пока заглушки, логика в W7) |
-| Mod_Patterns.bas | Лист «Паттерны» (PRE-04c): каркас для Промта №0.2 | EnsurePatternsSheet (создание/очистка листа, секция A–D «список паттернов», секция H–O «ИСКЛЮЧЕНИЯ паттернов» с предзаполненными правилами, Validation для колонок H/I/J/L/O, жирные заголовки, AutoFit, защита паролем "pilot" с разблокированными A2:D1000 и H2:O1000); вызывается из Mod_Util.EnsureSettingsSheet; коды PT001/PT002 |
+| Mod_UI.bas | Кнопки/обработчики интерфейса | BuildFlatStructure_Click и др.; **RestoreUI создаёт 14 кнопок** на листе «Препроцессор»; кнопка 13 «Сформировать таблицы» → **CommandGenerateTables** (заглушка, W7.1), кнопка 14 «Разобрать ответ ИИ» → **CommandParseAiResponse** (заглушка, W7.2); цикл общего форматирования пропускает лист «Паттерны» (PRE-04c-fix) |
+| Mod_Patterns.bas | Лист «Паттерны» (PRE-04c): каркас для Промта №0.2 | **EnsurePatternsSheet** (идемпотентна: создание листа в конце книги, **без Cells.Clear** на существующем листе — PRE-04c-fix; секция A–D: заголовки в строке 2 (A2 «Паттерн», B2 «Типы», C2 «Количество», D2 «Итерация»), данные с 3-й; секция H–O: заголовки в строке 2, данные с 3-й, **8 предзаполненных правил** — Папки ЦИМ, Год (Маска/Год*), маска bim_*, точные системные типы document/ecmDocument/folder/project/projectfolder; Validation H/I/J/L/O на строках 3–1000; заголовки A1/H1 — названия секций (жирным, объединены A1:D1, H1:O1); защита паролем «pilot», разблокированы A2:D1000 и H3:O1000; MigrateLegacyLayout, ShiftLegacyYearRule, SyncPrefillCell для миграции старых каркасов); вызывается из Mod_Util.EnsureSettingsSheet; коды PT001/PT002. **Функций чтения (GetPatternExceptions, GetKnownPatterns) нет — W7.1** |
 
 ## Папки рабочего проекта (создаются CreateProjectFolders вне репозитория)
 
@@ -57,17 +57,23 @@
 - При присвоении результата Split() динамическому массиву использовать Variant (Private arr As Variant), иначе ошибка компиляции.
 - Все Private Const должны находиться до первой процедуры Sub/Function в модуле.
 
-## templates/prompts (папка prompts/ в репозитории)
+## Карта промтов (templates/prompts — папка prompts/ в репозитории)
 
-| Файл | Назначение |
-|---|---|
-| prompt_step_00_template.md | Шаблон Промта №0 (декомпозиция): алгоритм декомпозиции, проверка файлов (.xml/.txt; .pilotcfx не принимается ИИ), вывод `NN|Имя_папки` |
-| prompt_step_template_v1.md | Шаблон промта следующего шага: **17 блоков** (инвариантное ядро — блоки 7–11: алгоритм, правила листов «Типы»/«Атрибуты», типы атрибутов, дедупликация; блок 16 — точечные корректировки и уточнения шага, заполняется ApplyCorrectionsBlock). Использует плейсхолдеры формата `{{...}}` ({{NN}}, {{ИМЯ_ШАГА}}, {{СТРУКТУРА_ФАЙЛ}}, {{ФАЙЛЫ_ДОП_ДАННЫХ}}, {{РЕЕСТР_ТИПОВ}}, {{РЕЕСТР_ПОКРЫТИЯ}}, {{СПИСОК_ТИПОВ_ШАГА}} и др.), которые подставляет FillAllPlaceholders внутри цепочки BuildPromptForStep |
-| prompt_fix_v1.0.md | Шаблон промта исправления (MakeFixPrompt) |
-| prompt_generator_v7.13.md | Общая версия генератора промтов |
-| prompt_settings_template.md | Шаблон-памятка настроек: описание 8 ключей `project_settings.md` и мест его поиска; **шаблон-памятка, в генерации промта не участвует** (код её НЕ читает, только включается в Readme) |
-| project_settings.md.example | Образец рабочего файла настроек `project_settings.md` (**8 ключей** формата `{{КЛЮЧ}} = значение`, таблица GUID с колонкой «Тип справочника»; читается кодом при генерации промтов шагов через FillAllPlaceholders; копируется Пользователем в `04_Промты\Шаблоны\project_settings.md`) |
-| reference/attribute_params_examples.md | Справочник образцов «Дополнительных параметров» для типов атрибутов Pilot-BIM (Enum/Object — корневой `<Attr>` без `<Configuration>`; ElementBook и остальные — по правилам корневого тега; НЕ инвариант) |
+Источник: отчёт QWEN (секция 2) с уточнениями W-DOCS-MAP.
+
+| Шаблон | Назначение | Плейсхолдеры (полный список) | Кто заполняет (процедура VBA) | Где вызывается | Статус |
+|---|---|---|---|---|---|
+| `prompt_step_00_template.md` | Декомпозиция (старая v7.13) | `{SCHEMA_FILENAME}`, `{DESCRIPTION_FILENAME}`, `{CONFIG_FILENAME}`, `{EXTRA_DATA_LIST}`, `{Decomposition_Rules}` | `GenerateStepZeroPrompt` | `MakeNextStepPrompt` | устаревший; перемещается в `prompts/archive/` после W7.1 |
+| `prompt_step_00_1_template.md` | Базовые типы из Конфигурации | `{CONFIG_FILENAME}` (вход), `{{СПИСОК_БАЗОВЫХ_ТИПОВ}}` (выход) | отсутствует | не вызывается | не подключён (ручной) |
+| `prompt_step_00_2_template.md` | Паттерны и типы-справочники из Схемы | `{{ИСКЛЮЧЕНИЯ_ПАТТЕРНОВ}}`, `{{СПИСОК_БАЗОВЫХ_ТИПОВ}}`, `{{СПИСОК_ИЗВЕСТНЫХ_ПАТТЕРНОВ}}`, `{{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}`, `{{ТИПЫ_СПРАВОЧНИКИ}}` | отсутствует | не вызывается | не подключён (W7.2 — BuildPrompt02Patterns) |
+| `prompt_step_00_3_template.md` | Список шагов (3 профиля: Папки / Паттерны / Документы) | `{{СПИСОК_БАЗОВЫХ_ТИПОВ}}`, `{{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}` | отсутствует | не вызывается | не подключён (W7.2 — BuildPrompt03Profile) |
+| `prompt_step_00_4_template.md` | Выжимка ГОСТа и Описания (PRE-05) | `{DOC_FILENAME}`, `{DESCRIPTION_FILENAME}` (одинарные) | отсутствует | не вызывается | не подключён (ручной) |
+| `prompt_step_template_v1.md` | Инвариантный шаблон шага NN (17 блоков; блок 16 — корректировки) | `{{NN}}`, `{{ИМЯ_ШАГА}}`, `{{ЗАДАЧА_ШАГА_ОСОБЕННОСТИ}}`, `{{СТРУКТУРА_ФАЙЛ}}`, `{{ОПИСАНИЕ_ФАЙЛ}}`, `{{КОНФИГУРАЦИЯ_ФАЙЛ}}`, `{{ФАЙЛЫ_ДОП_ДАННЫХ}}`, `{{ШАГИ_ФАЙЛ}}`, `{{СПИСОК_ВХОДОВ}}`, `{{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}`, `{{РЕЕСТР_ТИПОВ}}`, `{{РЕЕСТР_ПОКРЫТИЯ}}`, `{{СПИСОК_БАЗОВЫХ_ТИПОВ}}`, `{{ПРАВИЛО_ОБЪЕКТА}}`, `{{СПИСОК_ТИПОВ_ШАГА}}`, `{{ТЕКУЩИЙ_ШАГ}}`, `{{ДЕКОМПОЗИЦИЯ_ШАГОВ}}`, `{{ФОРМАТ_РЕЕСТРОВ}}`, `{{ПРОТОКОЛ_ШАГА}}`, `{{МАРКЕРЫ}}` | `BuildPromptForStep` / `FillAllPlaceholders` | `MakeNextStepPrompt` | работает |
+| `prompt_fix_v1.0.md` | Исправление ошибок шага | `{NN}`, `{ERRORS}`, `{REGISTRY_TYPES}`, `{REGISTRY_COVERAGE}`, `{SCHEMA}` | `MakeFixPrompt` | `MakeFixPrompt_Click` | заготовка; плейсхолдеры `{NN}`, `{ERRORS}`, `{REGISTRY_TYPES}`, `{REGISTRY_COVERAGE}`, `{SCHEMA}` будут добавлены вместе с этапом исправления ошибок генерации (W-FIX-PROMPT, после W7.2); до этого MakeFixPrompt не использовать |
+| `prompt_generator_v7.13.md` | Старый генератор | Н/Д | отсутствует | не вызывается | мёртвая ветка |
+| `prompt_settings_template.md` | Памятка по настройкам (8 ключей project_settings.md) | Н/Д (текстовый файл) | не читается кодом | не вызывается | шаблон-памятка; в генерации промта не участвует |
+| `project_settings.md.example` | Образец рабочего файла настроек `project_settings.md` (8 ключей) | `{{СПИСОК_ВХОДОВ}}`, `{{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}`, `{{СПИСОК_БАЗОВЫХ_ТИПОВ}}`, `{{ПРАВИЛО_ОБЪЕКТА}}`, `{{ФОРМАТ_РЕЕСТРОВ}}`, `{{ПРОТОКОЛ_ШАГА}}`, `{{МАРКЕРЫ}}` | `LoadProjectSettings` | `FillAllPlaceholders` | работает |
+| `reference/attribute_params_examples.md` | Справочник образцов «Дополнительных параметров» (НЕ инвариант) | Н/Д | не читается кодом | не вызывается | справочник |
 
 Внешняя папка "Шаблоны" (копия шаблонов у Пользователя) в репозиторий НЕ входит
 и обновляется Пользователем вручную после принятия PR.
@@ -75,7 +81,17 @@
 ## Поток данных
 
 1. Проверка/создание папок: Mod_Folders.CreateProjectFolders, CheckSourceFolders.
-2. Подготовка схемы: Mod_Structure.BuildFlatStructure (дубли → "Аномалии схемы", бэкап листа перед перезаписью).
+2. Подготовка схемы: Mod_Structure.BuildFlatStructure (7 колонок A–G, динамическая легенда из B8; дубли → «Аномалии схемы», бэкап листа перед перезаписью).
 3. Реестры: Mod_Registry.
 4. Промты: Mod_Prompt (№0 → Шаги.txt → промты шагов → фиксы); перед генерацией — CheckSourceFolders (F005).
 5. Сборка: Mod_Assembler; тесты: Mod_TestGen*.
+
+## Бэклог
+
+| ID | Область | Статус |
+|---|---|---|
+| W7.1 | Mod_Patterns, Mod_Prompt, Mod_UI, Mod_Structure (VBA): GetPatternExceptions, GetKnownPatterns, GetPromptProfile, CommandGenerateTables = S0, FLAT_SHEET_NAME → Public, GenerateStepZeroPrompt → комментирование + MsgBox, CommandParseAiResponse — заглушка | Не начато |
+| W7.1a | Mod_Patterns (VBA): умные таблицы на листе «Паттерны» | Не начато (после W7.1) |
+| W7.2 | Mod_Prompt, Mod_UI (VBA): BuildPrompt02Patterns, BuildPrompt03Profile, CommandParseAiResponse (реальный разбор) | Не начато (после W7.1) |
+| W-FIX-PROMPT | prompts/prompt_fix_v1.0.md, Mod_Prompt (VBA): плейсхолдеры промта исправления + формирование промта по сводной таблице и листу отчёта по проверкам | Не начато (после W7.2; зависимость — сводная таблица + лист отчёта по проверкам) |
+| W-DOCS-MAP | docs/Project_Map.md, docs/Spec_Optimization.md, docs/Journal.md, docs/Handoff.md, prompts/archive/README.md: привести документацию к состоянию dc288ac | Выполнено |
