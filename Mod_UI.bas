@@ -149,8 +149,13 @@ Public Sub RestoreUI()
     Next i
     
     ' Форматирование всех листов книги
+    ' PRE-04c-fix: лист «Паттерны» пропускается — его раскладка (названия
+    ' секций в строке 1, заголовки в строке 2) настраивается только
+    ' Mod_Patterns.EnsurePatternsSheet; общее форматирование (жирная строка
+    ' 1, закреплённая первая строка) применимо к нему некорректно.
     For Each wsAny In ThisWorkbook.Worksheets
-        If StrComp(wsAny.Name, "Препроцессор", vbTextCompare) <> 0 Then
+        If StrComp(wsAny.Name, "Препроцессор", vbTextCompare) <> 0 And _
+           StrComp(wsAny.Name, "Паттерны", vbTextCompare) <> 0 Then
             On Error Resume Next
             wsAny.Unprotect Password:="pilot"
             On Error GoTo ErrHandler

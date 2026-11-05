@@ -5,17 +5,29 @@ Option Explicit
 ' Модуль: Mod_Patterns
 ' Назначение: лист «Паттерны» (PRE-04c) — каркас листа для Промта №0.2
 '             («Паттерны и справочники»):
-'   Секция A-D  («Список паттернов», append-only): заголовки
-'               «Паттерн», «Типы», «Количество», «Итерация»; строки 2+
+'   Строка 1 — названия секций: A1 «СПИСОК ПАТТЕРНОВ» (объединено A1:D1),
+'               H1 «ИСКЛЮЧЕНИЯ ПАТТЕРНОВ» (объединено H1:O1); жирным.
+'   Секция A-D  («Список паттернов», append-only): заголовки в строке 2
+'               «Паттерн», «Типы», «Количество», «Итерация»; строки 3+
 '               пустые — заполняются кодом позже (разбор ответа ИИ, W7).
-'   Секция H-O  («ИСКЛЮЧЕНИЯ паттернов»): заголовки «Область», «Поле»,
-'               «Тип матчинга», «Значение», «Действие», «Примеры»,
+'   Секция H-O  («ИСКЛЮЧЕНИЯ ПАТТЕРНОВ»): заголовки в строке 2 «Область»,
+'               «Поле», «Тип матчинга», «Значение», «Действие», «Примеры»,
 '               «Причина», «Статус»; предзаполнены стартовые правила
 '               (папки ЦИМ/Год — ВКЛЮЧАТЬ; базовые системные типы —
-'               ИСКЛЮЧАТЬ).
+'               ИСКЛЮЧАТЬ) — только при создании нового листа, со строки 3.
 ' Выпадающие списки (Validation) навешаны на колонки H, I, J, L, O
-' (строки 2..PATTERNS_LAST_INPUT_ROW); защита листа паролем "pilot",
-' редактируемыми остаются только диапазоны ввода данных A2:D1000 и H2:O1000.
+' (строки 3..PATTERNS_LAST_INPUT_ROW — PRE-04c-fix2: заголовки строки 2
+' списками не перекрываются); защита листа паролем "pilot",
+' редактируемыми остаются только диапазоны ввода данных A2:D1000 и H3:O1000.
+' PRE-04c-fix: защита от потери данных — Cells.Clear убран; если лист
+' «Паттерны» уже существует, данные в A2:D1000 и H2:O1000 НЕ ТРОГАЮТСЯ —
+' процедура лишь дописывает недостающие заголовки, пересоздаёт Validation
+' и переустанавливает защиту. Полная очистка не выполняется ни в одном
+' из сценариев (новый лист создаётся пустым по определению).
+' PRE-04c-fix2: удалена дублирующая старая строка правила «Год»
+' (Категория/Отображаемое/Точное/Год) из предзаполнения — осталось одно
+' правило «Год» (Тип/Отображаемое/Маска/Год*); Validation применён со
+' строки 3; область ввода секции H-O — H3:O1000.
 ' Зависимости: Mod_Util (WriteLog / WriteError / WriteWarning).
 ' Реестр кодов ошибок/предупреждений модуля (единый реестр проекта):
 '   PT001 - ошибка подготовки листа «Паттерны» (EnsurePatternsSheet);
@@ -34,6 +46,10 @@ Option Explicit
 Private Const SHEET_NAME As String = "Паттерны"
 Private Const PATTERNS_PASSWORD As String = "pilot" ' пароль единый для книги
 Private Const PATTERNS_LAST_INPUT_ROW As Long = 1000 ' нижняя граница диапазонов ввода
+
+' Названия секций (строка 1)
+Private Const TITLE_LIST As String = "СПИСОК ПАТТЕРНОВ"
+Private Const TITLE_EXC As String = "ИСКЛЮЧЕНИЯ ПАТТЕРНОВ"
 
 ' Заголовки секции A-D (список паттернов)
 Private Const HDR_A As String = "Паттерн"
@@ -54,19 +70,26 @@ Private Const HDR_O As String = "Статус"
 ' ---------------------------------------------------------------------------
 ' Подготовка листа «Паттерны»: создание каркаса, предзаполнение исключений,
 ' выпадающие списки, форматирование и защита.
-' Идемпотентна: повторный вызов пересоздаёт каркас (Cells.Clear), список
-' паттернов (A2:D...) заполняется кодом позже и затирается только при
-' явном пересоздании листа этой процедурой.
+' Идемпотентна и безопасна для данных (PRE-04c-fix): безусловный Cells.Clear
+' убран.
+'   * Лист не существует -> создаётся, рисуются названия секций (строка 1) и
+'     заголовки (строка 2), навешивается Validation, предзаполняются
+'     исключения (со строки 3), лист защищается.
+'   * Лист уже существует -> данные НЕ ОЧИЩАЮТСЯ: проверяются заголовки
+'     (если отсутствуют или смещены в строку 1 старого каркаса PRE-04c —
+'     дописываются/переносятся в строку 2), пересоздаётся Validation,
+'     переустанавливается защита. Значения в диапазонах A2:D1000 и H2:O1000
+'     (кроме ячеек заголовков строки 2 и названий секций строки 1) не
+'     затрагиваются.
 ' ---------------------------------------------------------------------------
 Public Sub EnsurePatternsSheet()
     Dim wb As Workbook
     Dim ws As Worksheet
     Dim wsAny As Worksheet
-    Dim found As Boolean
+    Dim created As Boolean
     Dim excData As Variant
     Dim r As Long
     Dim c As Long
-    Dim lastCol As Long
 
     On Error GoTo ErrHandler
 
@@ -76,88 +99,174 @@ Public Sub EnsurePatternsSheet()
     For Each wsAny In wb.Worksheets
         If StrComp(wsAny.Name, SHEET_NAME, vbTextCompare) = 0 Then
             Set ws = wsAny
-            found = True
             Exit For
         End If
     Next wsAny
 
-    If Not found Then
+    created = (ws Is Nothing)
+
+    If created Then
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
         ws.Name = SHEET_NAME
     Else
         ws.Unprotect Password:=PATTERNS_PASSWORD   ' снять защиту перед правкой
+        ' КРИТИЧНО (PRE-04c-fix): полная очистка листа (Cells.Clear) НЕ
+        ' выполняется — пользовательские данные A2:D1000 и H2:O1000
+        ' сохраняются.
     End If
 
-    ' 2. Полная очистка листа (каркас пересоздаётся целиком)
-    ws.Cells.Clear
+    ' 2. Лист со старым каркасом PRE-04c (заголовки в строке 1, данные с
+    '    строки 2): перенос раскладки - строки данных 2..lastRow смещаются
+    '    вниз на одну строку (значения сохраняются), заголовки переносятся
+    '    в строку 2, объединения строки 1 снимаются. Операция выполняется
+    '    один раз: после переноса HasHeaderAt(ws,2) = True.
+    If Not created Then
+        If HasHeaderAt(ws, 1) And Not HasHeaderAt(ws, 2) Then
+            On Error Resume Next
+            ws.Range("A1:D1").MergeCells = False
+            ws.Range("H1:O1").MergeCells = False
+            On Error GoTo ErrHandler
+            MigrateLegacyLayout ws
+        End If
+    End If
 
-    ' 3. Секция A-D: список паттернов (заголовки; строки 2+ пустые —
-    '    заполняются кодом позже, например разбором ответа ИИ)
-    ws.Range("A1").Value = HDR_A
-    ws.Range("B1").Value = HDR_B
-    ws.Range("C1").Value = HDR_C
-    ws.Range("D1").Value = HDR_D
+    ' 3. Строка 1: названия секций (жирным, объединённые ячейки A1:D1 и
+    '    H1:O1). Существующие чужие значения не перезаписываются.
+    EnsureSectionTitle ws, "A1", TITLE_LIST, "A1:D1"
+    EnsureSectionTitle ws, "H1", TITLE_EXC, "H1:O1"
 
-    ' 4. Секция H-O: ИСКЛЮЧЕНИЯ паттернов (заголовки + предзаполнение)
-    ws.Range("H1").Value = HDR_H
-    ws.Range("I1").Value = HDR_I
-    ws.Range("J1").Value = HDR_J
-    ws.Range("K1").Value = HDR_K
-    ws.Range("L1").Value = HDR_L
-    ws.Range("M1").Value = HDR_M
-    ws.Range("N1").Value = HDR_N
-    ws.Range("O1").Value = HDR_O
+    ' 4. Секция A-D: список паттернов (заголовки «Паттерн», «Типы»,
+    '    «Количество», «Итерация» в строке 2; ниже — пустые строки ввода,
+    '    заполняются кодом позже, напр. разбором ответа ИИ - W7).
+    '    Если заголовков нет - они дописываются в строку 2; существующие
+    '    значения ячеек не трогаются.
+    EnsureHeaderCell ws, 2, 1, HDR_A
+    EnsureHeaderCell ws, 2, 2, HDR_B
+    EnsureHeaderCell ws, 2, 3, HDR_C
+    EnsureHeaderCell ws, 2, 4, HDR_D
 
-    ' Матрица предзаполненных правил: 8 строк x 8 колонок (H..O)
-    excData = Array( _
-        Array("Категория", "Отображаемое", "Точное", "Папка ЦИМ", "ВКЛЮЧАТЬ", _
-              "КЦИМ; ППЦИМ", "позиционный паттерн", "активно"), _
-        Array("Категория", "Отображаемое", "Точное", "Год", "ВКЛЮЧАТЬ", _
-              "Год 2024; Год 2025", "позиционный паттерн", "активно"), _
-        Array("Тип", "Системное", "маска", "bim_*", "ИСКЛЮЧАТЬ", _
-              "bim_coordinationModel; bim_modelPartFolder", "базовые типы", "активно"), _
-        Array("Тип", "Системное", "Точное", "document", "ИСКЛЮЧАТЬ", _
-              ChrW(9472), "базовый тип", "активно"), _
-        Array("Тип", "Системное", "Точное", "ecmDocument", "ИСКЛЮЧАТЬ", _
-              ChrW(9472), "базовый тип", "активно"), _
-        Array("Тип", "Системное", "Точное", "folder", "ИСКЛЮЧАТЬ", _
-              ChrW(9472), "базовый тип", "активно"), _
-        Array("Тип", "Системное", "Точное", "project", "ИСКЛЮЧАТЬ", _
-              ChrW(9472), "базовый тип", "активно"), _
-        Array("Тип", "Системное", "Точное", "projectfolder", "ИСКЛЮЧАТЬ", _
-              ChrW(9472), "базовый тип", "активно"))
+    ' 5. Секция H-O: ИСКЛЮЧЕНИЯ паттернов (заголовки «Область», «Поле»,
+    '    «Тип матчинга», «Значение», «Действие», «Примеры», «Причина»,
+    '    «Статус» в строке 2; дописываются, если отсутствуют)
+    EnsureHeaderCell ws, 2, 8, HDR_H
+    EnsureHeaderCell ws, 2, 9, HDR_I
+    EnsureHeaderCell ws, 2, 10, HDR_J
+    EnsureHeaderCell ws, 2, 11, HDR_K
+    EnsureHeaderCell ws, 2, 12, HDR_L
+    EnsureHeaderCell ws, 2, 13, HDR_M
+    EnsureHeaderCell ws, 2, 14, HDR_N
+    EnsureHeaderCell ws, 2, 15, HDR_O
 
-    For r = LBound(excData) To UBound(excData)
-        For c = LBound(excData(r)) To UBound(excData(r))
-            ws.Cells(r + 2, c + 8).Value = CStr(excData(r)(c))
-        Next c
-    Next r
+    ' 6. Предзаполнение стартовых правил исключений (матрица 8 строк x
+    '    8 колонок H..O; PRE-04c-fix2: старая строка правила «Год»
+    '    удалена) - ТОЛЬКО при создании нового листа, со строки 3
+    '    (строка 2 — заголовки). Для существующего листа правила НЕ
+    '    перезаписываются: пользовательские данные сохраняются; при этом
+    '    выполняется точечная сверка значений предзаполнения с эталоном
+    '    фикса (см. шаг 6.1).
+    If created Then
+        ' PRE-04c-fix2: старая строка правила «Год» (Категория, Отображаемое,
+        ' Точное, Год) удалена — осталась только одна строка для правила
+        ' «Год»: Тип / Отображаемое / Маска / Год* / ВКЛЮЧАТЬ.
+        excData = Array( _
+            Array("Категория", "Отображаемое", "Точное", "Папки ЦИМ", "ВКЛЮЧАТЬ", _
+                  "КЦИМ; ППЦИМ", "позиционный паттерн", "активно"), _
+            Array("Тип", "Отображаемое", "Маска", "Год*", "ВКЛЮЧАТЬ", _
+                  "Год 2024; Год 2025", "позиционный паттерн", "активно"), _
+            Array("Тип", "Системное", "Маска", "bim_*", "ИСКЛЮЧАТЬ", _
+                  "bim_coordinationModel; bim_modelPartFolder", "базовые типы", "активно"), _
+            Array("Тип", "Системное", "Точное", "document", "ИСКЛЮЧАТЬ", _
+                  ChrW(9472), "базовый тип", "активно"), _
+            Array("Тип", "Системное", "Точное", "ecmDocument", "ИСКЛЮЧАТЬ", _
+                  ChrW(9472), "базовый тип", "активно"), _
+            Array("Тип", "Системное", "Точное", "folder", "ИСКЛЮЧАТЬ", _
+                  ChrW(9472), "базовый тип", "активно"), _
+            Array("Тип", "Системное", "Точное", "project", "ИСКЛЮЧАТЬ", _
+                  ChrW(9472), "базовый тип", "активно"), _
+            Array("Тип", "Системное", "Точное", "projectfolder", "ИСКЛЮЧАТЬ", _
+                  ChrW(9472), "базовый тип", "активно"))
 
-    ' 5. Выпадающие списки (Validation) для колонок H, I, J, L, O
-    ApplyListValidation ws.Range("H2:H" & CStr(PATTERNS_LAST_INPUT_ROW)), "Тип,Категория"
-    ApplyListValidation ws.Range("I2:I" & CStr(PATTERNS_LAST_INPUT_ROW)), "Отображаемое,Системное"
-    ApplyListValidation ws.Range("J2:J" & CStr(PATTERNS_LAST_INPUT_ROW)), "Точное,маска"
-    ApplyListValidation ws.Range("L2:L" & CStr(PATTERNS_LAST_INPUT_ROW)), "ВКЛЮЧАТЬ,ИСКЛЮЧАТЬ"
-    ApplyListValidation ws.Range("O2:O" & CStr(PATTERNS_LAST_INPUT_ROW)), "активно,отменено"
+        For r = LBound(excData) To UBound(excData)
+            For c = LBound(excData(r)) To UBound(excData(r))
+                ws.Cells(r + 3, c + 8).Value = CStr(excData(r)(c))
+            Next c
+        Next r
+    Else
+        ' 6.1. Точечная сверка предзаполнения на существующем листе
+        '      (PRE-04c-fix2): старая строка правила «Год» (Категория,
+        '      Отображаемое, Точное, Год) удаляется — все правила, лежащие
+        '      ниже неё, поднимаются на одну строку вверх; если нижняя
+        '      строка содержит копию старого эталона предзаполнения
+        '      (не редактировалась пользователем), она очищается. После
+        '      сдвига значения приводятся к эталону только в тех ячейках
+        '      стартовых правил (строки 3..10 секции H-O после переноса
+        '      раскладки), которые ещё содержат старые эталонные значения
+        '      (до фикса); ячейки, изменённые пользователем или добавленные
+        '      позже, не затрагиваются. Колонки H..O = 8..15.
+        ShiftLegacyYearRule ws
+        SyncPrefillCell ws, 3, 8, "Категория", "Папки ЦИМ"     ' правило «Папки ЦИМ»
+        SyncPrefillCell ws, 4, 10, "маска", "Маска"            ' правило bim_*
+        ' Правило «Год» (вторая строка предзаполнения, PRE-04c-fix2):
+        ' Область Тип, Поле Отображаемое, Тип матчинга Маска, Значение Год*,
+        ' Действие ВКЛЮЧАТЬ, Примеры "Год 2024; Год 2025", Причина
+        ' "позиционный паттерн", Статус активно.
+        SyncPrefillCell ws, 4, 8, "Тип", "Тип"
+        SyncPrefillCell ws, 4, 9, "Отображаемое", "Отображаемое"
+        SyncPrefillCell ws, 4, 10, "Маска", "Маска"
+        SyncPrefillCell ws, 4, 11, "Год*", "Год*"
+        SyncPrefillCell ws, 4, 12, "ВКЛЮЧАТЬ", "ВКЛЮЧАТЬ"
+        SyncPrefillCell ws, 4, 13, "Год 2024; Год 2025", "Год 2024; Год 2025"
+        SyncPrefillCell ws, 4, 14, "позиционный паттерн", "позиционный паттерн"
+        SyncPrefillCell ws, 4, 15, "активно", "активно"
+    End If
 
-    ' 6. Форматирование: заголовки жирным, автоширина колонок
-    lastCol = 15 ' колонка O
-    With ws.Range(ws.Cells(1, 1), ws.Cells(1, lastCol)).Font
+    ' 7. Выпадающие списки (Validation) для колонок H, I, J, L, O
+    '    (навешиваются всегда: если списки сбились - восстанавливаются;
+    '     сами значения ячеек не изменяются).
+    '    PRE-04c-fix2: списки применяются начиная со строки 3 (строка 2 —
+    '    заголовки секции H-O, выпадающие списки на них не навешиваются).
+    ApplyListValidation ws.Range("H3:H" & CStr(PATTERNS_LAST_INPUT_ROW)), "Тип,Категория"
+    ApplyListValidation ws.Range("I3:I" & CStr(PATTERNS_LAST_INPUT_ROW)), "Отображаемое,Системное"
+    ApplyListValidation ws.Range("J3:J" & CStr(PATTERNS_LAST_INPUT_ROW)), "Точное,Маска"
+    ApplyListValidation ws.Range("L3:L" & CStr(PATTERNS_LAST_INPUT_ROW)), "ВКЛЮЧАТЬ,ИСКЛЮЧАТЬ"
+    ApplyListValidation ws.Range("O3:O" & CStr(PATTERNS_LAST_INPUT_ROW)), "активно,отменено"
+
+    ' 8. Форматирование: названия секций (строка 1) и заголовки (строка 2)
+    '    жирным, центрирование названий секций, автоширина колонок
+    '    (значения ячеек не меняются)
+    With ws.Range("A1:D1").Font
         .Bold = True
     End With
-    ws.Rows(1).AutoFit
+    With ws.Range("H1:O1").Font
+        .Bold = True
+    End With
+    ws.Range(ws.Cells(2, 1), ws.Cells(2, 15)).Font.Bold = True
+    ws.Range("A1").HorizontalAlignment = xlCenter
+    ws.Range("H1").HorizontalAlignment = xlCenter
     On Error Resume Next
+    ws.Rows("1:2").AutoFit
     ws.Columns("A:O").AutoFit
     On Error GoTo ErrHandler
 
-    ' 7. Защита листа: разблокированы только области ввода данных
+    ' 9. Защита листа: разблокированы только области ввода данных
+    '    (ячейки вне A2:D1000 и H2:O1000 блокируются заново — после
+    '     Unprotect свойство Locked могло быть сброшено пользователем)
     ws.Cells.Locked = True
     ws.Range("A2:D" & CStr(PATTERNS_LAST_INPUT_ROW)).Locked = False
-    ws.Range("H2:O" & CStr(PATTERNS_LAST_INPUT_ROW)).Locked = False
+    ' PRE-04c-fix2: заголовки строки 2 секции H-O защищены (область ввода
+    ' данных — строки 3..1000, как и диапазоны Validation)
+    ws.Range("H3:O" & CStr(PATTERNS_LAST_INPUT_ROW)).Locked = False
     ws.Protect Password:=PATTERNS_PASSWORD
 
-    WriteLog "EnsurePatternsSheet: лист '" & SHEET_NAME & "' создан/обновлён " & _
-             "(секции A-D и H-O, Validation, защита)"
+    If created Then
+        WriteLog "EnsurePatternsSheet: лист '" & SHEET_NAME & "' создан " & _
+                 "(названия секций A1/H1, заголовки строки 2, предзаполнение " & _
+                 "исключений со строки 3, Validation, защита)"
+    Else
+        WriteLog "EnsurePatternsSheet: лист '" & SHEET_NAME & "' обновлён без " & _
+                 "очистки (проверены заголовки, восстановлены Validation и " & _
+                 "защита; данные A2:D1000 и H2:O1000 сохранены)"
+    End If
     Exit Sub
 
 ErrHandler:
@@ -186,6 +295,177 @@ Private Sub ApplyListValidation(ByVal rng As Range, ByVal listItems As String)
 FailHandler:
     WriteWarning "PT002", "EnsurePatternsSheet: не удалось применить список """ & _
                listItems & """ к диапазону " & rng.Address(False, False) & _
+               ". Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' ---------------------------------------------------------------------------
+' Пишет название секции в строку 1 и объединяет ячейки (PRE-04c-fix).
+' Если в целевой ячейке уже лежит заголовок старого каркаса PRE-04c или
+' другое чужое значение - текст НЕ перезаписывается (переносом заголовков
+' занимается MigrateLegacyLayout); объединение выполняется только если
+' прочие ячейки диапазона пусты.
+' ---------------------------------------------------------------------------
+Private Sub EnsureSectionTitle(ByVal ws As Worksheet, ByVal targetCell As String, _
+                               ByVal titleText As String, ByVal mergeRange As String)
+    Dim cur As String
+    On Error GoTo FailHandler
+    cur = Trim(CStr(ws.Range(targetCell).Value))
+    If cur = "" Then
+        ws.Range(targetCell).Value = titleText
+    ElseIf StrComp(cur, titleText, vbTextCompare) <> 0 Then
+        ' в ячейке названия секции уже есть значение (старый каркас или
+        ' правка пользователя) - не трогаем данные
+        Exit Sub
+    End If
+    With ws.Range(mergeRange)
+        If Not .MergeCells Then
+            If Application.WorksheetFunction.CountA(.Cells) <= 1 Then .Merge
+        End If
+    End With
+    Exit Sub
+FailHandler:
+    WriteWarning "PT002", "EnsurePatternsSheet: не удалось оформить название " & _
+               "секции '" & titleText & "' (" & targetCell & "). Ошибка: " & _
+               Err.Description
+    Err.Clear
+End Sub
+
+' ---------------------------------------------------------------------------
+' Проверяет, стоят ли заголовки каркаса в указанной строке: достаточно
+' совпадения A<row> = «Паттерн» или H<row> = «Область».
+' ---------------------------------------------------------------------------
+Private Function HasHeaderAt(ByVal ws As Worksheet, ByVal rowNum As Long) As Boolean
+    On Error Resume Next
+    If Trim(CStr(ws.Cells(rowNum, 1).Value)) = HDR_A Then
+        HasHeaderAt = True
+    ElseIf Trim(CStr(ws.Cells(rowNum, 8).Value)) = HDR_H Then
+        HasHeaderAt = True
+    End If
+    On Error GoTo 0
+End Function
+
+' ---------------------------------------------------------------------------
+' Дописывает заголовок каркаса в ячейку (строка rowNum, колонка colNum),
+' если она пуста. Существующие значения (в т.ч. пользовательские) не
+' перезаписываются.
+' ---------------------------------------------------------------------------
+Private Sub EnsureHeaderCell(ByVal ws As Worksheet, ByVal rowNum As Long, _
+                             ByVal colNum As Long, ByVal hdrText As String)
+    Dim cur As String
+    On Error GoTo FailHandler
+    cur = Trim(CStr(ws.Cells(rowNum, colNum).Value))
+    If cur = "" Then
+        ws.Cells(rowNum, colNum).Value = hdrText
+    End If
+    Exit Sub
+FailHandler:
+    WriteWarning "PT002", "EnsurePatternsSheet: не удалось дописать заголовок " & _
+               "'" & hdrText & "' в " & ws.Cells(rowNum, colNum).Address(False, False) & _
+               ". Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' ---------------------------------------------------------------------------
+' Перенос каркаса со старой раскладки PRE-04c (заголовки в строке 1,
+' предзаполнение с строки 2) на новую (названия секций в строке 1,
+' заголовки в строке 2, данные с строки 3). Строки 2..lastRow смещаются
+' вниз на одну строку вместе со значениями — данные сохраняются, ничего
+' не удаляется. Объединения строк 1 снимаются вызывающей процедурой до
+' переноса; названия секций дописываются в строку 1 после переноса.
+' ---------------------------------------------------------------------------
+Private Sub MigrateLegacyLayout(ByVal ws As Worksheet)
+    Dim lastRow As Long
+    Dim aLast As Long
+    Dim hoLast As Long
+    On Error GoTo FailHandler
+    aLast = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    hoLast = ws.Cells(ws.Rows.Count, 8).End(xlUp).Row
+    lastRow = aLast
+    If hoLast > lastRow Then lastRow = hoLast
+    If lastRow < 2 Then lastRow = 2   ' заголовки всё равно переносятся в строку 2
+    If lastRow > PATTERNS_LAST_INPUT_ROW Then lastRow = PATTERNS_LAST_INPUT_ROW
+    ' смещение заполненных строк каркаса (2..lastRow) на одну строку вниз
+    ws.Range(ws.Rows(2), ws.Rows(lastRow)).Cut Destination:=ws.Rows(3)
+    ' очистка ячеек строки 1 от старых заголовков (названия секций будут
+    ' дописаны вызывающей процедурой)
+    ws.Range("A1:O1").ClearContents
+    Exit Sub
+FailHandler:
+    WriteWarning "PT002", "EnsurePatternsSheet: не удалось перенести старый " & _
+               "каркас листа '" & SHEET_NAME & "' (заголовки из строки 1 в " & _
+               "строку 2). Ошибка: " & Err.Description
+    Err.Clear
+End Sub
+
+' ---------------------------------------------------------------------------
+' Удаление старой строки правила «Год» (Категория / Отображаемое / Точное /
+' Год) на существующем листе (PRE-04c-fix2). Процедура срабатывает только
+' если в строке 4 секции H-O лежит именно старое эталонное правило «Год»
+' (т.е. пользователь его не редактировал): все заполненные строки ниже
+' (5..lastRow) поднимаются на одну строку вверх, последняя заполненная
+' строка очищается. Если правило изменено пользователем или отсутствует —
+' лист не затрагивается. Данные пользователя при этом сохраняются:
+' удаляется только копия устаревшего эталона предзаполнения.
+' ---------------------------------------------------------------------------
+Private Sub ShiftLegacyYearRule(ByVal ws As Worksheet)
+    Dim lastRow As Long
+    Dim hoLast As Long
+    Dim aLast As Long
+    Dim srcRow As Long
+    On Error GoTo FailHandler
+    ' проверка старого эталона правила «Год» в строке 4 (колонки H..O = 8..15)
+    If Trim(CStr(ws.Cells(4, 8).Value)) <> "Категория" Then Exit Sub
+    If Trim(CStr(ws.Cells(4, 9).Value)) <> "Отображаемое" Then Exit Sub
+    If StrComp(Trim(CStr(ws.Cells(4, 10).Value)), "Точное", vbBinaryCompare) <> 0 Then Exit Sub
+    If Trim(CStr(ws.Cells(4, 11).Value)) <> "Год" Then Exit Sub
+    If StrComp(Trim(CStr(ws.Cells(4, 12).Value)), "ВКЛЮЧАТЬ", vbBinaryCompare) <> 0 Then Exit Sub
+    ' границы диапазона секции H-O (строки 3..PATTERNS_LAST_INPUT_ROW)
+    hoLast = ws.Cells(ws.Rows.Count, 8).End(xlUp).Row
+    aLast = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastRow = hoLast
+    If aLast > lastRow Then lastRow = aLast
+    If lastRow > PATTERNS_LAST_INPUT_ROW Then lastRow = PATTERNS_LAST_INPUT_ROW
+    ' поднять строки 5..lastRow на одну строку вверх (значения сохраняются)
+    For srcRow = 5 To lastRow
+        ws.Range(ws.Cells(srcRow - 1, 8), ws.Cells(srcRow - 1, 15)).Value = _
+            ws.Range(ws.Cells(srcRow, 8), ws.Cells(srcRow, 15)).Value
+    Next srcRow
+    ' очистить нижнюю строку (копия предыдущей последней строки)
+    ws.Range(ws.Cells(lastRow, 8), ws.Cells(lastRow, 15)).ClearContents
+    WriteLog "EnsurePatternsSheet: удалена старая строка правила 'Год' " & _
+             "(Категория/Точное/Год) из предзаполнения листа '" & SHEET_NAME & "'"
+    Exit Sub
+FailHandler:
+    WriteWarning "PT002", "EnsurePatternsSheet: не удалось удалить старую " & _
+               "строку правила 'Год' на листе '" & SHEET_NAME & "'. Ошибка: " & _
+               Err.Description
+    Err.Clear
+End Sub
+
+' ---------------------------------------------------------------------------
+' Точечная сверка одного значения предзаполнения на существующем листе
+' (PRE-04c-fix, без очистки и без пересоздания данных): если в ячейке
+' (rowNum, colNum) секции H-O всё ещё лежит старое эталонное значение
+' oldValue (т.е. правило не редактировалось пользователем), оно заменяется
+' на эталон фикса newValue. Пустые и изменённые ячейки не затрагиваются.
+' ---------------------------------------------------------------------------
+Private Sub SyncPrefillCell(ByVal ws As Worksheet, ByVal rowNum As Long, _
+                            ByVal colNum As Long, ByVal oldValue As String, _
+                            ByVal newValue As String)
+    Dim cur As String
+    On Error GoTo FailHandler
+    If rowNum < 3 Or rowNum > PATTERNS_LAST_INPUT_ROW Then Exit Sub
+    cur = Trim(CStr(ws.Cells(rowNum, colNum).Value))
+    If cur <> "" And StrComp(cur, oldValue, vbBinaryCompare) = 0 Then
+        If StrComp(cur, newValue, vbBinaryCompare) <> 0 Then
+            ws.Cells(rowNum, colNum).Value = newValue
+        End If
+    End If
+    Exit Sub
+FailHandler:
+    WriteWarning "PT002", "EnsurePatternsSheet: не удалось сверить значение " & _
+               "предзаполнения в " & ws.Cells(rowNum, colNum).Address(False, False) & _
                ". Ошибка: " & Err.Description
     Err.Clear
 End Sub
