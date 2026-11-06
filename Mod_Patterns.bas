@@ -32,7 +32,10 @@ Option Explicit
 ' Реестр кодов ошибок/предупреждений модуля (единый реестр проекта):
 '   PT001 - ошибка подготовки листа «Паттерны» (EnsurePatternsSheet);
 '   PT002 - предупреждение: не удалось применить Validation к ячейкам
-'          секции H-O (лист подготовлен, списки нужно настроить вручную).
+'          секции H-O (лист подготовлен, списки нужно настроить вручную);
+'   PT003 - предупреждение: лист «Паттерны» отсутствует или секция пуста
+'          (чтение W7.1-A: GetPatternExceptions / GetKnownPatterns —
+'          функция возвращает "").
 ' Примечание: процедура EnsurePatternsSheet вызывается из
 ' Mod_Util.EnsureSettingsSheet (главная точка подготовки служебных листов
 ' книги), поэтому вызов защищён On Error Resume Next: сбой подготовки
@@ -469,3 +472,216 @@ FailHandler:
                ". Ошибка: " & Err.Description
     Err.Clear
 End Sub
+
+' ---------------------------------------------------------------------------
+' Возвращает Worksheet листа «Паттерны», если лист существует в книге;
+' если листа нет - Nothing. Только поиск, без создания и без изменения
+' чего-либо (W7.1-A).
+' ---------------------------------------------------------------------------
+Private Function GetPatternsSheetOrNull() As Worksheet
+    Dim wsAny As Worksheet
+    For Each wsAny In ThisWorkbook.Worksheets
+        If StrComp(wsAny.Name, SHEET_NAME, vbTextCompare) = 0 Then
+            Set GetPatternsSheetOrNull = wsAny
+            Exit Function
+        End If
+    Next wsAny
+    Set GetPatternsSheetOrNull = Nothing
+End Function
+
+' ---------------------------------------------------------------------------
+' Чтение одной ячейки секции H-O листа «Паттерны» (строка rowNum,
+' колонка colNum) с проверкой границ диапазона ввода
+' (строки 3..PATTERNS_LAST_INPUT_ROW).
+' Значение ячейки приводится к тексту через CStr + Trim (только чтение).
+' ---------------------------------------------------------------------------
+Private Function ExcCell(ByVal ws As Worksheet, ByVal rowNum As Long, _
+                         ByVal colNum As Long) As String
+    If rowNum < 3 Or rowNum > PATTERNS_LAST_INPUT_ROW Then
+        ExcCell = ""
+    Else
+        ExcCell = Trim(CStr(ws.Cells(rowNum, colNum).Value))
+    End If
+End Function
+
+' ---------------------------------------------------------------------------
+' W7.1-A: GetPatternExceptions — чтение секции H-O («ИСКЛЮЧЕНИЯ
+' ПАТТЕРНОВ») листа «Паттерны» (только чтение: лист не изменяется,
+' защита не снимается).
+'   Источник: заголовки в строке 2, данные со строки 3; колонки
+'   H=Область, I=Поле, J=Тип матчинга (Точное/Маска), K=Значение,
+'   L=Действие (ВКЛЮЧАТЬ/ИСКЛЮЧАТЬ), M=Примеры, N=Причина,
+'   O=Статус (активно/отменено).
+'   Фильтр: пропускаются пустые строки и строки, где O <> "активно".
+'   Формат строк вывода (J = "Маска" — с суффиксом " (маска)" и
+'   оператором "~"; иначе — "Точное" и оператор "="):
+'     "- <H>: <I> = '<K>' -> <L>"          (I непусто, Точное)
+'     "- <H>: <I> ~ '<K>' -> <L> (маска)"  (I непусто, Маска)
+'     "- <H> = '<K>' -> <L>"               (I пусто, Точное)
+'     "- <H> ~ '<K>' -> <L> (маска)"       (I пусто, Маска)
+'   Первая строка результата (при наличии хотя бы одной строки):
+'   "Правила обработки паттернов:".
+'   Лист отсутствует или секция H-O пуста (нет ни одной активной строки)
+'   — вернуть "" и WriteWarning PT003.
+' ---------------------------------------------------------------------------
+Public Function GetPatternExceptions() As String
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim r As Long
+    Dim resLines() As String
+    Dim nRes As Long
+    Dim sArea As String
+    Dim sField As String
+    Dim sMatch As String
+    Dim sValue As String
+    Dim sAction As String
+    Dim sStatus As String
+    Dim sLine As String
+    Dim sOp As String
+    Dim sSuffix As String
+
+    GetPatternExceptions = ""
+
+    On Error GoTo ErrHandler
+
+    ' 1. Лист «Паттерны» (только чтение, без создания/подготовки)
+    Set ws = GetPatternsSheetOrNull()
+    If ws Is Nothing Then
+        WriteWarning "PT003", "GetPatternExceptions: лист '" & SHEET_NAME & _
+                   "' отсутствует в книге - исключения паттернов не читаны."
+        Exit Function
+    End If
+
+    ' 2. Нижняя граница данных секции H-O (колонка H = 8)
+    lastRow = ws.Cells(ws.Rows.Count, 8).End(xlUp).Row
+    If lastRow > PATTERNS_LAST_INPUT_ROW Then lastRow = PATTERNS_LAST_INPUT_ROW
+
+    ' 3. Обход данных (со строки 3): фильтр пустых строк и O <> "активно"
+    ReDim resLines(1 To 1)
+    nRes = 0
+    For r = 3 To lastRow
+        sArea = ExcCell(ws, r, 8)    ' H - Область
+        sField = ExcCell(ws, r, 9)   ' I - Поле
+        sMatch = ExcCell(ws, r, 10)  ' J - Тип матчинга
+        sValue = ExcCell(ws, r, 11)  ' K - Значение
+        sAction = ExcCell(ws, r, 12) ' L - Действие
+        sStatus = ExcCell(ws, r, 15) ' O - Статус
+        ' пустая строка (нет ключевых значений) - пропустить
+        If sArea <> "" Or sValue <> "" Then
+            ' неактивные правила (отменено / пустой статус) - пропустить
+            If StrComp(sStatus, "активно", vbTextCompare) = 0 Then
+                If StrComp(sMatch, "Маска", vbTextCompare) = 0 Then
+                    sOp = "~"
+                    sSuffix = " (маска)"
+                Else
+                    ' "Точное" и любые прочие значения J — формат «Точное»
+                    sOp = "="
+                    sSuffix = ""
+                End If
+                If sField <> "" Then
+                    sLine = "- " & sArea & ": " & sField & " " & sOp & _
+                            "'" & sValue & "' -> " & sAction & sSuffix
+                Else
+                    sLine = "- " & sArea & " " & sOp & _
+                            "'" & sValue & "' -> " & sAction & sSuffix
+                End If
+                nRes = nRes + 1
+                If nRes > UBound(resLines) Then
+                    ReDim Preserve resLines(1 To nRes)
+                End If
+                resLines(nRes) = sLine
+            End If
+        End If
+    Next r
+
+    ' 4. Пустая секция H-O (ни одной активной строки) - "" + PT003
+    If nRes = 0 Then
+        WriteWarning "PT003", "GetPatternExceptions: секция H-O листа '" & _
+                   SHEET_NAME & "' пуста (нет активных правил) - " & _
+                   "исключения паттернов не сформированы."
+        Exit Function
+    End If
+
+    ' 5. Сборка результата: заголовок + строки правил
+    Dim sOut As String
+    sOut = "Правила обработки паттернов:"
+    Dim i As Long
+    For i = 1 To nRes
+        sOut = sOut & vbCrLf & resLines(i)
+    Next i
+    GetPatternExceptions = sOut
+    Exit Function
+
+ErrHandler:
+    WriteWarning "PT003", "GetPatternExceptions: ошибка чтения листа '" & _
+               SHEET_NAME & "'. Ошибка: " & Err.Description
+    GetPatternExceptions = ""
+    Err.Clear
+End Function
+
+' ---------------------------------------------------------------------------
+' W7.1-A: GetKnownPatterns — чтение секции A-D («СПИСОК ПАТТЕРНОВ») листа
+' «Паттерны» (только чтение: лист не изменяется, защита не снимается).
+'   Источник: заголовки в строке 2, данные со строки 3; используется
+'   только колонка A («Паттерн»).
+'   Формат: заголовок "Известные паттерны:" (первой строкой, только если
+'   есть хотя бы одна строка данных), далее каждая непустая строка
+'   колонки A с префиксом "- ".
+'   Пустая секция A-D — вернуть "" (без заголовка, без предупреждения);
+'   лист отсутствует — вернуть "" и WriteWarning PT003.
+' ---------------------------------------------------------------------------
+Public Function GetKnownPatterns() As String
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim r As Long
+    Dim pat As String
+    Dim sOut As String
+    Dim hasData As Boolean
+
+    GetKnownPatterns = ""
+
+    On Error GoTo ErrHandler
+
+    ' 1. Лист «Паттерны» (только чтение, без создания/подготовки)
+    Set ws = GetPatternsSheetOrNull()
+    If ws Is Nothing Then
+        WriteWarning "PT003", "GetKnownPatterns: лист '" & SHEET_NAME & _
+                   "' отсутствует в книге - список известных паттернов не читан."
+        Exit Function
+    End If
+
+    ' 2. Нижняя граница данных секции A-D (колонка A = 1)
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    If lastRow > PATTERNS_LAST_INPUT_ROW Then lastRow = PATTERNS_LAST_INPUT_ROW
+
+    ' 3. Обход данных (со строки 3): непустые значения колонки A
+    hasData = False
+    sOut = ""
+    For r = 3 To lastRow
+        If r >= 3 And r <= PATTERNS_LAST_INPUT_ROW Then
+            pat = Trim(CStr(ws.Cells(r, 1).Value))
+            If pat <> "" Then
+                If Not hasData Then
+                    sOut = "Известные паттерны:"
+                    hasData = True
+                End If
+                sOut = sOut & vbCrLf & "- " & pat
+            End If
+        End If
+    Next r
+
+    ' 4. Пустая секция A-D - вернуть "" (без заголовка)
+    If Not hasData Then
+        GetKnownPatterns = ""
+        Exit Function
+    End If
+
+    GetKnownPatterns = sOut
+    Exit Function
+
+ErrHandler:
+    WriteWarning "PT003", "GetKnownPatterns: ошибка чтения листа '" & _
+               SHEET_NAME & "'. Ошибка: " & Err.Description
+    GetKnownPatterns = ""
+    Err.Clear
+End Function
