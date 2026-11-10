@@ -35,7 +35,7 @@ Private Const FLAT_COLS As Long = 7
 
 ' W-PROMPT-00-SCHEMA-FIX: имя листа и префикс сохраняемого файла результата
 ' подготовки схемы (переименовано из "Плоская_таблица").
-Private Const FLAT_SHEET_NAME As String = "Адаптированная_структура"
+Public Const FLAT_SHEET_NAME As String = "Адаптированная_структура"
 ' Старое имя листа (обратная совместимость бэкапа листов в книге-инструменте).
 Private Const FLAT_SHEET_NAME_OLD As String = "Плоская_таблица"
 ' Подпапка архива старых версий файла результата в 02_Подготовка схемы.

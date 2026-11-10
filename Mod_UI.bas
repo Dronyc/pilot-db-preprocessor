@@ -348,6 +348,37 @@ End Sub
 ' зафиксированы: CommandGenerateTables / CommandParseAiResponse.
 ' ------------------------------------------------------------
 Public Sub CommandGenerateTables()
+    ' S0: Сбор начальных данных из листа «Паттерны» и проверка профиля промта
+    ' Состав вызовов, составляющих S0 (для проверки критериев приёмки):
+    ' 1. Mod_Patterns.GetPatternExceptions
+    ' 2. Mod_Patterns.GetKnownPatterns
+    ' 3. Mod_Prompt.GetPromptProfile
+    On Error GoTo ErrHandler
+    
+    Dim exc As String
+    Dim known As String
+    Dim profile As String
+    
+    exc = Mod_Patterns.GetPatternExceptions()
+    known = Mod_Patterns.GetKnownPatterns()
+    profile = Mod_Prompt.GetPromptProfile("нет") ' Тестовый вызов для проверки маршрутизации
+    
+    Mod_Util.WriteLog "CommandGenerateTables (S0): исключения=" & IIf(exc = "", "пусто", "OK") & _
+                      ", известные=" & IIf(known = "", "пусто", "OK") & _
+                      ", профиль(нет)=" & profile
+    
+    MsgBox "Данные листа «Паттерны» прочитаны (S0)." & vbCrLf & _
+           "Известные паттерны: " & IIf(known = "", "не найдены", "прочитаны") & vbCrLf & _
+           "Исключения: " & IIf(exc = "", "не найдены", "прочитаны"), vbInformation, "Сформировать таблицы"
+    Exit Sub
+    
+ErrHandler:
+    Mod_Util.WriteError "UI001", "CommandGenerateTables: " & Err.Description
+    MsgBox "Ошибка при формировании таблиц: " & Err.Description, vbCritical
+End Sub
+
+' CommandParseAiResponse оставить без изменений (заглушка W7.2):
+Public Sub CommandParseAiResponse()
     MsgBox "Команда в разработке (W7)", vbInformation
 End Sub
 

@@ -174,3 +174,13 @@
 - Как проверялось: самопроверка по чек-листу B'.
 - SHA: ___ (заполняет пользователь после создания PR).
 - Следующий шаг: W7.1-A доп. DoD (B'-A).
+
+### 2026-11-11 — W7.1-B/C — Доработка кода и архивация шаблона; закрытие W7.1
+- **Статус:** выполнено.
+- **Что сделано:** 
+  1. `Mod_Structure.FLAT_SHEET_NAME` изменён на `Public Const`.
+  2. `Mod_UI.CommandGenerateTables` реализует логику S0 (вызовы: `Mod_Patterns.GetPatternExceptions`, `Mod_Patterns.GetKnownPatterns`, `Mod_Prompt.GetPromptProfile`).
+  3. `Mod_Prompt.GenerateStepZeroPrompt` заменена на заглушку с MsgBox (старое тело удалено).
+  4. `prompt_step_00_template.md` перемещён в `prompts/archive/`.
+  5. `CommandParseAiResponse` оставлен без изменений (заглушка W7.2).
+- **SHA:** - (заполняет пользователь)
