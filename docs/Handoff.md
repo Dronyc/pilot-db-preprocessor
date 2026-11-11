@@ -43,7 +43,7 @@
 - **B'-A (attached)** — работа только с файлами, приложенными к сообщению.
   В репозиторий не ходит.
 - **B'-R (read-only repo)** — репозиторий на чтение:
-  https://github.com/Dronyc/pilot-db-preprocessor (public).
+  https://github.com/Dronyc/pilot-db-preprocessor/tree/for-coder (public).
   Только чтение; push/PR запрещены.
 - **B'-M (mixed)** — приложенные файлы + репозиторий на чтение.
   Правило приоритета:
@@ -108,7 +108,7 @@ PR #[N] — [W<n>] <название>. Задача: OPT-xx.
 
 ```text
 РОЛЬ: независимый ревьюер и арбитр. Репозиторий публичный:
-https://github.com/Dronyc/pilot-db-preprocessor — ревьюер сам скачает код и diff.
+https://github.com/Dronyc/pilot-db-preprocessor/tree/for-coder — ревьюер сам скачает код и diff.
 ВОПРОС: PR #[N] / конфликт QWEN и DeepSeek / спорное архитектурное решение.
 СУТЬ СПОРА: <1–2 предложения>.
 ```
