@@ -90,8 +90,10 @@
 
 | ID | Область | Статус |
 |---|---|---|
-| W7.1 | Mod_Patterns, Mod_Prompt, Mod_UI, Mod_Structure (VBA): GetPatternExceptions, GetKnownPatterns, GetPromptProfile, CommandGenerateTables = S0, FLAT_SHEET_NAME → Public, GenerateStepZeroPrompt → комментирование + MsgBox, CommandParseAiResponse — заглушка | Не начато |
-| W7.1a | Mod_Patterns (VBA): умные таблицы на листе «Паттерны» | Не начато (после W7.1) |
+| W7.1 | Mod_Patterns, Mod_Prompt, Mod_UI, Mod_Structure (VBA): GetPatternExceptions, GetKnownPatterns, GetPromptProfile, CommandGenerateTables = S0, FLAT_SHEET_NAME → Public, GenerateStepZeroPrompt → комментирование + MsgBox, CommandParseAiResponse — заглушка | Выполнено |
+| W7.1a | Mod_Patterns (VBA): умные таблицы на листе «Паттерны» | Выполнено |
 | W7.2 | Mod_Prompt, Mod_UI (VBA): BuildPrompt02Patterns, BuildPrompt03Profile, CommandParseAiResponse (реальный разбор) | Не начато (после W7.1) |
 | W-FIX-PROMPT | prompts/prompt_fix_v1.0.md, Mod_Prompt (VBA): плейсхолдеры промта исправления + формирование промта по сводной таблице и листу отчёта по проверкам | Не начато (после W7.2; зависимость — сводная таблица + лист отчёта по проверкам) |
 | W-DOCS-MAP | docs/Project_Map.md, docs/Spec_Optimization.md, docs/Journal.md, docs/Handoff.md, prompts/archive/README.md: привести документацию к состоянию dc288ac | Выполнено |
+
+*Примечание: ветка Script не используется.*
