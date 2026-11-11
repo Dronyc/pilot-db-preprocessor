@@ -31,15 +31,21 @@ Private Const LAST_COL  As Long = 30                       ' максималь�
 ' (переименовано из "Тип"), D "Паттерн", E "Входит в", F "Состоит из",
 ' G "Аномалия". Используется в WriteFlatTable/HighlightDuplicateRows для
 ' заголовков, записи данных, умной таблицы, подсветки и AutoFit.
-Private Const FLAT_COLS As Long = 7
+Public Const FLAT_COLS As Long = 7
 
 ' W-PROMPT-00-SCHEMA-FIX: имя листа и префикс сохраняемого файла результата
 ' подготовки схемы (переименовано из "Плоская_таблица").
 Public Const FLAT_SHEET_NAME As String = "Адаптированная_структура"
 ' Старое имя листа (обратная совместимость бэкапа листов в книге-инструменте).
-Private Const FLAT_SHEET_NAME_OLD As String = "Плоская_таблица"
+Public Const FLAT_SHEET_NAME_OLD As String = "Плоская_таблица"
 ' Подпапка архива старых версий файла результата в 02_Подготовка схемы.
 Private Const PREP_ARCHIVE_SUBFOLDER As String = "Архив"
+
+' W7.1a: имя умной таблицы (ListObject) на листе «Паттерны» (Public Const)
+Public Const PATTERNS_TABLE_NAME As String = "tblPatterns"
+
+Private Const SHEET_NAME As String = "Паттерны"
+Private Const PATTERNS_PASSWORD As String = "pilot"
 
 Private Type NodeRec
     Name       As String

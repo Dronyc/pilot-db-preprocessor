@@ -341,15 +341,12 @@ ErrHandler:
 End Sub
 
 ' ------------------------------------------------------------
-' PRE-04c: заглушки новых команд листа «Препроцессор» (кнопки 13-14).
-' Логика формирования таблиц и разбора ответа ИИ будет реализована в W7;
-' сейчас команды только информируют о том, что функция в разработке.
-' Кнопки вызываются по имени (OnAction), поэтому имена процедур
-' зафиксированы: CommandGenerateTables / CommandParseAiResponse.
+' PRE-04c / W7.1: Реализация команд листа «Препроцессор» (кнопки 13-14).
 ' ------------------------------------------------------------
+
 Public Sub CommandGenerateTables()
     ' S0: Сбор начальных данных из листа «Паттерны» и проверка профиля промта
-    ' Состав вызовов, составляющих S0 (для проверки критериев приёмки):
+    ' Состав вызовов для проверки критериев приёмки W7.1:
     ' 1. Mod_Patterns.GetPatternExceptions
     ' 2. Mod_Patterns.GetKnownPatterns
     ' 3. Mod_Prompt.GetPromptProfile
@@ -371,19 +368,15 @@ Public Sub CommandGenerateTables()
            "Известные паттерны: " & IIf(known = "", "не найдены", "прочитаны") & vbCrLf & _
            "Исключения: " & IIf(exc = "", "не найдены", "прочитаны"), vbInformation, "Сформировать таблицы"
     Exit Sub
-    
+
 ErrHandler:
     Mod_Util.WriteError "UI001", "CommandGenerateTables: " & Err.Description
     MsgBox "Ошибка при формировании таблиц: " & Err.Description, vbCritical
 End Sub
 
-' CommandParseAiResponse оставить без изменений (заглушка W7.2):
+' Заглушка для W7.2 (оставлена без изменений, но устранено дублирование)
 Public Sub CommandParseAiResponse()
-    MsgBox "Команда в разработке (W7)", vbInformation
-End Sub
-
-Public Sub CommandParseAiResponse()
-    MsgBox "Команда в разработке (W7)", vbInformation
+    MsgBox "Команда в разработке (W7.2: разбор ответа ИИ)", vbInformation
 End Sub
 
 ' ------------------------------------------------------------
@@ -700,3 +693,22 @@ Private Sub ReorderSheets(ByVal wb As Workbook)
     Next i
 End Sub
 
+' ---------------------------------------------------------------------------
+' W-AV-REFACTOR, п.4: безопасное удаление файла.
+' Единая точка удаления файлов проекта: проверяет существование через Dir(),
+' выполняет Kill под защитой обработки ошибок и возвращает результат.
+' Возвращает True, если файла уже нет или он успешно удалён;
+' False — если удалить не удалось (файл занят, нет прав и т.п.).
+' ---------------------------------------------------------------------------
+Public Function DeleteFileIfExists(ByVal filePath As String) As Boolean
+    DeleteFileIfExists = True
+    If Len(Dir(filePath)) = 0 Then Exit Function
+    
+    On Error Resume Next
+    Kill filePath
+    If Err.Number <> 0 Then
+        DeleteFileIfExists = False
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Function

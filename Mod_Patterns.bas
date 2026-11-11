@@ -251,7 +251,11 @@ Public Sub EnsurePatternsSheet()
     ws.Columns("A:O").AutoFit
     On Error GoTo ErrHandler
 
-    ' 9. Защита листа: разблокированы только области ввода данных
+    ' 9. Умная таблица (ListObject): создание или обновление диапазона
+    '    (W7.1a: идемпотентно, без дубликатов, стиль TableStyleMedium6)
+    Call EnsurePatternsListObject(ws)
+
+    ' 10. Защита листа: разблокированы только области ввода данных
     '    (ячейки вне A2:D1000 и H2:O1000 блокируются заново — после
     '     Unprotect свойство Locked могло быть сброшено пользователем)
     ws.Cells.Locked = True
@@ -685,3 +689,45 @@ ErrHandler:
     GetKnownPatterns = ""
     Err.Clear
 End Function
+
+' ---------------------------------------------------------------------------
+' W7.1a: Обеспечивает наличие умной таблицы (ListObject) на листе «Паттерны».
+' Идемпотентна: если таблица с именем PATTERNS_TABLE_NAME существует,
+' проверяет и при необходимости расширяет её диапазон до PATTERNS_LAST_INPUT_ROW.
+' Если таблицы нет — создаёт её на диапазоне A2:O<PATTERNS_LAST_INPUT_ROW>.
+' Стиль таблицы: TableStyleMedium6 (как в tblAnomalies).
+' ---------------------------------------------------------------------------
+Private Sub EnsurePatternsListObject(ByVal ws As Worksheet)
+    Dim lo As ListObject
+    Dim targetRange As Range
+    Dim tblName As String
+    
+    tblName = PATTERNS_TABLE_NAME
+    Set targetRange = ws.Range("A2:O" & CStr(PATTERNS_LAST_INPUT_ROW))
+    
+    On Error Resume Next
+    Set lo = ws.ListObjects(tblName)
+    On Error GoTo 0
+    
+    If lo Is Nothing Then
+        ' Таблица не найдена — создаём новую
+        On Error GoTo ErrHandler
+        Set lo = ws.ListObjects.Add(xlSrcRange, targetRange, , xlYes)
+        lo.Name = tblName
+        lo.TableStyle = "TableStyleMedium6"
+        On Error GoTo 0
+    Else
+        ' Таблица существует — проверяем и при необходимости расширяем диапазон
+        If lo.Range.Address <> targetRange.Address Then
+            On Error GoTo ErrHandler
+            lo.Resize targetRange
+            On Error GoTo 0
+        End If
+    End If
+    
+    Exit Sub
+ErrHandler:
+    WriteWarning "PT002", "EnsurePatternsListObject: не удалось создать или изменить " & _
+               "умную таблицу '" & tblName & "'. Ошибка: " & Err.Description
+    Err.Clear
+End Sub
