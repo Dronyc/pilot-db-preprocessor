@@ -49,6 +49,7 @@ Option Explicit
 Private Const SHEET_NAME As String = "Паттерны"
 Private Const PATTERNS_PASSWORD As String = "pilot" ' пароль единый для книги
 Private Const PATTERNS_LAST_INPUT_ROW As Long = 1000 ' нижняя граница диапазонов ввода
+Public Const PATTERNS_TABLE_NAME As String = "tblPatterns"
 
 ' Названия секций (строка 1)
 Private Const TITLE_LIST As String = "СПИСОК ПАТТЕРНОВ"
