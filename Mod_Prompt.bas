@@ -2476,10 +2476,10 @@ Public Sub MakeFixPrompt()
 
     ' 7. Фрагмент схемы текущего шага
     schema = GetSchemaFragment()
-
-    ' 8. Подстановка плейсхолдеров (только тех, что есть в шаблоне)
+    ' 8. Подстановка плейсхолдеров (согласно Spec_Dispatcher.md, Раздел 13)
     result = template
     result = ReplaceIfPresent(result, "{NN}", current)
+    result = ReplaceIfPresent(result, "{STEP_NAME}", current) ' Имя папки шага совпадает с номером в текущей логике
     result = ReplaceIfPresent(result, "{ERRORS}", errorsText)
     result = ReplaceIfPresent(result, "{REGISTRY_TYPES}", regTypes)
     result = ReplaceIfPresent(result, "{REGISTRY_COVERAGE}", regCoverage)
