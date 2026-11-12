@@ -218,18 +218,21 @@ Public Sub BuildFlatStructure()
     '---------- 1. Легенда: цвет -> тип ----------
     ' W-FLEX-STRUCTURE: диапазон легенды читается из настроек. 
     ' Лист легенды (wsLegend) определен выше с учетом правила "одного листа".
+    Dim sLeg As String          ' W-FLEX-STRUCTURE: строка диапазона легенды
     Dim rngLeg As Range
+    
+    sLeg = legendRangeStr       ' используем значение из настроек
+    
     On Error Resume Next
-    Set rngLeg = wsLegend.Range(legendRangeStr)
+    Set rngLeg = wsLegend.Range(sLeg)
     If Err.Number <> 0 Then
         Err.Clear
         ' Некорректный адрес в настройке - предупреждение и fallback на default.
         Mod_Util.WriteWarning "S011", "BuildFlatStructure: диапазон легенды '" & _
-            sLeg & "' (настройка LegendRange, поле B8 листа 'Настройки') " & _
-            "некорректен на листе схемы - использован диапазон по умолчанию " & _
-            Mod_Util.DEFAULT_LEGEND_RANGE & "."
+            sLeg & "' (настройка LegendRange) некорректен на листе схемы - " & _
+            "использован диапазон по умолчанию " & Mod_Util.DEFAULT_LEGEND_RANGE & "."
         sLeg = Mod_Util.DEFAULT_LEGEND_RANGE
-        Set rngLeg = ws.Range(sLeg)
+        Set rngLeg = wsLegend.Range(sLeg)
         If Err.Number <> 0 Then
             Err.Clear
             Set rngLeg = Nothing   ' легенда недоступна - сборка продолжится без неё
@@ -1596,12 +1599,12 @@ Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As 
         Mod_Util.DebugLog "WriteSchemaDuplicates: нет дублей для записи на лист"
     End If
 
+    Dim firstIdx As Long        ' W-FLEX-STRUCTURE: индекс первого узла группы дублей
     r = startRow
     For Each k In dictKey.Keys
         If dictKey(k).Count > 1 Then
             ' ИСПРАВЛЕНО (Вариант Б): так как ключ теперь содержит полное имя, а не только код,
             ' надежнее извлекать Тип и Код напрямую из первого узла группы, а не парсить строку ключа.
-            Dim firstIdx As Long
             firstIdx = CLng(dictKey(k)(1))
             
             typePart = Nodes(firstIdx).NodeType
@@ -1609,7 +1612,6 @@ Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As 
             
             ' каждое следующее наименование — в пару к первому
             For j = 2 To dictKey(k).Count
-                Dim idxA As Long, idxB As Long
                 idxA = firstIdx
                 idxB = CLng(dictKey(k)(j))
                 ws.Cells(r, 1).Value = "DUP_IN_TYPE"                            ' Код проблемы
