@@ -294,7 +294,7 @@ Private Function BuildStepZeroExtraDataList(ByVal root As String) As String
     Dim filesList As String
 
     BuildStepZeroExtraDataList = ""
-    filesList = ListFolderFiles(root & "\01_Исходные данные\04_Дополнительные данные")
+    filesList = ListFolderFiles(root & "\02_Подготовка данных\04_Дополнительные данные")
     If filesList = "" Then Exit Function
 
     BuildStepZeroExtraDataList = "- Найденные файлы доп. данных:" & _
@@ -688,7 +688,7 @@ Private Function GetSchemaFragment() As String
     ' W-PROMPT-PATHS-REFACTOR: нормализация корневого пути (защита от
     ' двойных слешей, если GetProjectRoot вернёт путь с завершающим "\")
     root = NormPath(Mod_Util.GetProjectRoot)
-    prepPath = root & "\02_Подготовка схемы"
+    prepPath = root & "\02_Подготовка данных\01_Схема"
     If Dir(prepPath, vbDirectory) = "" Then
         Mod_Util.WriteWarning "P002", "GetSchemaFragment: папка 02_Подготовка схемы не найдена, схема не включена."
         Exit Function

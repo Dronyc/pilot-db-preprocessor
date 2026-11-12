@@ -26,7 +26,16 @@ Private Const FOLDER_DESC As String = "01_Исходные данные\02_Оп�
 Private Const FOLDER_CONFIG As String = "01_Исходные данные\03_Конфигурация"
 ' W-CORRECTION-PACK-1, п.2.1: папка дополнительных данных пользователя.
 Private Const FOLDER_EXTRA As String = "01_Исходные данные\04_Дополнительные данные"
-Private Const FOLDER_PREP As String = "02_Подготовка схемы"
+' УДАЛИТЬ строку: Private Const FOLDER_PREP As String = "02_Подготовка схемы"
+' ДОБАВИТЬ новые константы:
+Private Const FOLDER_PREP_DATA As String = "02_Подготовка данных"
+Private Const FOLDER_PREP_SCHEMA As String = "02_Подготовка данных\01_Схема"
+Private Const FOLDER_PREP_DESC As String = "02_Подготовка данных\02_Описание"
+Private Const FOLDER_PREP_CONFIG As String = "02_Подготовка данных\03_Конфигурация"
+Private Const FOLDER_PREP_EXTRA As String = "02_Подготовка данных\04_Дополнительные данные"
+Private Const FOLDER_PREP_FRAGMENTS As String = "02_Подготовка данных\05_Фрагменты шагов"
+Private Const FOLDER_PREP_ARCHIVE As String = "02_Подготовка данных\Архив"
+
 Private Const FOLDER_RESULTS As String = "03_Результаты генерации"
 Private Const FOLDER_STEPS As String = "03_Результаты генерации\01_По шагам"
 Private Const FOLDER_SUMMARY As String = "03_Результаты генерации\02_Сводные"
@@ -137,7 +146,13 @@ Public Sub CreateProjectFolders()
                     FOLDER_DESC, _
                     FOLDER_CONFIG, _
                     FOLDER_EXTRA, _
-                    FOLDER_PREP, _
+                    FOLDER_PREP_DATA, _
+                    FOLDER_PREP_SCHEMA, _
+                    FOLDER_PREP_DESC, _
+                    FOLDER_PREP_CONFIG, _
+                    FOLDER_PREP_EXTRA, _
+                    FOLDER_PREP_FRAGMENTS, _
+                    FOLDER_PREP_ARCHIVE, _
                     FOLDER_RESULTS, _
                     FOLDER_STEPS, _
                     FOLDER_SUMMARY, _

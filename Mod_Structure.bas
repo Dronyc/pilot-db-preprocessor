@@ -168,7 +168,9 @@ Public Sub BuildFlatStructure()
     End If
 
     ' ИЗМЕНЕНИЕ 2: путь сохранения результатов
-    resultsPath = Mod_Util.GetProjectRoot & "\02_Подготовка схемы"
+    resultsPath = Mod_Util.GetProjectRoot & "\02_Подготовка данных\01_Схема"
+    'Примечание: ArchiveOldSchemaArtifacts использует prepPath, поэтому архивация 
+    'автоматически пойдёт в 02_Подготовка данных\01_Схема\Архив
 
     ' новая книга для результатов (не засоряем книгу инструмента листами)
     Set wbOut = Workbooks.Add
