@@ -43,6 +43,12 @@ Private Const NAME_LEGEND_RANGE As String = "LegendRange"
 ' GetSettingText("LegendRange", DEFAULT_LEGEND_RANGE) в Mod_Structure.
 Public Const DEFAULT_LEGEND_RANGE As String = "B1:C3"
 
+' W-FLEX-STRUCTURE: новые настройки для гибкого выбора листов и начала структуры
+Private Const NAME_LEGEND_SHEET As String = "LegendSheetName"
+Private Const NAME_DATA_SHEET As String = "DataSheetName"
+Private Const NAME_START_CELL As String = "StartCell"
+Public Const DEFAULT_START_CELL As String = "A8" ' Соответствует старому FIRST_ROW=8, Col=1
+
 ' Значение по умолчанию для MaxTypesPerTable (T3.1): используется
 ' Mod_Prompt при подстановке {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ} и как default
 ' для GetSettingLong.
@@ -583,20 +589,24 @@ Public Sub EnsureSettingsSheet()
     End If
 
     ' 2. Подписи (колонка A), имена диапазонов и значения по умолчанию -
-    '    семь полей B2:B8 (T3.1 + PRE-04: LegendRange)
+    '    десять полей B2:B11 (W-FLEX-STRUCTURE: добавлены листы и начало структуры)
     labels = Array("Корневая папка проекта", _
                "Режим проверки", _
                "Автооткрытие папки результатов", _
                "Версия промта-генератора", _
                "Версия промта-исправления", _
                "Максимум типов в таблице", _
-               "Диапазон легенды")
+               "Диапазон легенды", _
+               "Лист легенды (имя)", _
+               "Лист данных (имя)", _
+               "Начало структуры (ячейка)")
     namesArr = Array(NAME_PROJECT_ROOT, NAME_CHECK_MODE, NAME_AUTO_OPEN_RESULTS, _
                      NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION, _
-                     NAME_MAX_TYPES_PER_TABLE, NAME_LEGEND_RANGE)
+                     NAME_MAX_TYPES_PER_TABLE, NAME_LEGEND_RANGE, _
+                     NAME_LEGEND_SHEET, NAME_DATA_SHEET, NAME_START_CELL)
     ' ProjectRoot остаётся пустым: пусто = ThisWorkbook.Path (см. GetProjectRoot).
     defaults = Array("", "Черновик", "да", "7.13", "1.0", CStr(DEFAULT_MAX_TYPES_PER_TABLE), _
-                     DEFAULT_LEGEND_RANGE)
+                     DEFAULT_LEGEND_RANGE, "", "", DEFAULT_START_CELL)
 
     For i = 0 To 6
         RowIdx = i + 2
@@ -611,18 +621,32 @@ Public Sub EnsureSettingsSheet()
     Next i
 
     ws.Range("A1").value = "Настройки Препроцессора"
-    ' PRE-04: подсказка по новому полю "Диапазон легенды" (C8) - адрес
-    ' диапазона легенды цветов на первом листе книги-схемы.
+    ' PRE-04: подсказка по полю "Диапазон легенды" (C8)
     ws.Range("C8").value = "Адрес диапазона легенды на листе схемы, напр. B1:C3"
-    ws.Columns("A:B").AutoFit
+    ' W-FLEX-STRUCTURE: подсказки по новым полям
+    ws.Range("C9").value = "Имя листа с легендой. Если 1 лист в файле - игнорируется"
+    ws.Range("C10").value = "Имя листа со структурой. Если 1 лист в файле - игнорируется"
+    ws.Range("C11").value = "Ячейка начала таблицы, напр. A8. Если пусто - A8"
+    ws.Columns("A:C").AutoFit
 
-    ' 3. Validation строго на своих ячейках (H1 исправлен):
-    '    B3 CheckMode - список; B4 AutoOpenResults - список;
-    '    B7 MaxTypesPerTable - целое >= 1; B2/B5/B6/B8 - без списков
-    '    (старое смещённое правило на B3 пересоздаётся ниже корректно,
-    '     правило на B2 снимается).
+    ' 3. Validation строго на своих ячейках.
+    ' Снимаем старую валидацию и настраиваем новые текстовые поля (B9, B10, B11)
     ws.Range("B2").Validation.Delete
-    ws.Range("B8").Validation.Delete
+    ws.Range("B8:B11").Validation.Delete
+    
+    ' Добавляем подсказки для новых текстовых полей (валидация как текст, чтобы принять "Лист1" или "A8")
+    Dim iValidate As Long
+    For iValidate = 9 To 11
+        With ws.Range("B" & iValidate).Validation
+            .Delete
+            .Add Type:=xlValidateTextLength, AlertStyle:=xlValidAlertInformation, _
+                 Operator:=xlGreaterEqual, Formula1:="0"
+            .IgnoreBlank = True
+            .InCellDropdown = False
+            .InputTitle = "Текстовое значение"
+            .InputMessage = "Введите имя листа или адрес ячейки (напр., A8)."
+        End With
+    Next iValidate
     With ws.Range("B3").Validation
         .Delete
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
@@ -649,10 +673,10 @@ Public Sub EnsureSettingsSheet()
         .ErrorMessage = "MaxTypesPerTable должно быть целым числом >= 1."
     End With
 
-    ' 4. Именованные диапазоны для всех семи полей - создавать, если их
+    ' 4. Именованные диапазоны для всех десяти полей - создавать, если их
     '    ещё нет (существующие имена не трогаем, чтобы не переопределить
     '    ссылку)
-    For i = 0 To 6
+    For i = 0 To 9
         On Error Resume Next
         Dim nmChk As Name
         Set nmChk = wb.Names(namesArr(i))
@@ -666,9 +690,9 @@ Public Sub EnsureSettingsSheet()
         Set nmChk = Nothing
     Next i
 
-    ' 5. Защита листа от случайной правки: разблокированы B2:B8 (PRE-04)
+    ' 5. Защита листа от случайной правки: разблокированы B2:B11 (W-FLEX-STRUCTURE)
     ws.Cells.Locked = True
-    ws.Range("B2:B8").Locked = False
+    ws.Range("B2:B11").Locked = False
     ws.Protect Password:=SHEET_PASSWORD
 
     WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён"

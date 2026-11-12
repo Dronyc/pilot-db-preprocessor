@@ -156,16 +156,41 @@ Public Sub BuildFlatStructure()
     End If
     ' === КОНЕЦ ПРАВКИ B ===
 
-    ' лист-источник структуры - так же, как раньше работал с SRC_SHEET
+    ' W-FLEX-STRUCTURE: Гибкое определение листов источника и начала структуры
+    Dim isSingleSheet As Boolean
+    isSingleSheet = (wbSrc.Worksheets.Count = 1)
+    
+    Dim legendSheetName As String, dataSheetName As String
+    Dim legendRangeStr As String, startCellStr As String
+    
+    legendSheetName = Mod_Util.GetSettingText("LegendSheetName", "")
+    dataSheetName = Mod_Util.GetSettingText("DataSheetName", "")
+    legendRangeStr = Mod_Util.GetSettingText("LegendRange", Mod_Util.DEFAULT_LEGEND_RANGE)
+    startCellStr = Mod_Util.GetSettingText("StartCell", DEFAULT_START_CELL)
+    
+    Dim wsLegend As Worksheet, wsData As Worksheet
+    Set wsLegend = GetTargetSheet(wbSrc, legendSheetName, isSingleSheet)
+    Set wsData = GetTargetSheet(wbSrc, dataSheetName, isSingleSheet)
+    
+    ' Определение начальной строки и столбца сканирования
+    Dim startRow As Long, startCol As Long
+    startRow = FIRST_ROW ' Fallback по умолчанию (8)
+    startCol = 1         ' Fallback по умолчанию
+    
     On Error Resume Next
-    ' работаем с первым листом книги-источника
-    ' (в будущем можно расширить до обхода нескольких листов)
-    Set ws = wbSrc.Worksheets(1)
-    On Error GoTo Fail
-    If ws Is Nothing Then
-        Err.Clear
-        GoTo OpenErr
+    Dim rngStart As Range
+    Set rngStart = wsData.Range(startCellStr)
+    If Not rngStart Is Nothing Then
+        startRow = rngStart.Row
+        startCol = rngStart.Column
+    Else
+        ' Если ячейка некорректна, логируем предупреждение и используем дефолт
+        Mod_Util.WriteWarning "S011", "BuildFlatStructure: ячейка начала структуры '" & _
+            startCellStr & "' некорректна - использовано значение по умолчанию " & DEFAULT_START_CELL & "."
     End If
+    On Error GoTo Fail
+    
+    Set ws = wsData ' Для обратной совместимости с остальным кодом процедуры
 
     ' ИЗМЕНЕНИЕ 2: путь сохранения результатов
     resultsPath = Mod_Util.GetProjectRoot & "\02_Подготовка данных\01_Схема"
@@ -191,18 +216,11 @@ Public Sub BuildFlatStructure()
     ' основной сборки оно остаётся в прежнем состоянии пользователя.
 
     '---------- 1. Легенда: цвет -> тип ----------
-    ' PRE-04: убран хардкод адресов легенды (ранее - фиксированный массив
-    ' legCells(1 To 6): "B1", "C1", "B2", "C2", "B3", "C3"). Адрес диапазона
-    ' легенды читается из листа "Настройки" (поле B8, именованный диапазон
-    ' LegendRange; по умолчанию "B1:C3") через Mod_Util.GetSettingText.
-    ' Порядок обхода ячеек - построчно слева направо (RowMajor), как в
-    ' старом хардкоде; количество элементов легенды определяется размером
-    ' диапазона (legCount), а не константой 6.
-    Dim sLeg As String
-    sLeg = Mod_Util.GetSettingText("LegendRange", Mod_Util.DEFAULT_LEGEND_RANGE)
+    ' W-FLEX-STRUCTURE: диапазон легенды читается из настроек. 
+    ' Лист легенды (wsLegend) определен выше с учетом правила "одного листа".
     Dim rngLeg As Range
     On Error Resume Next
-    Set rngLeg = ws.Range(sLeg)
+    Set rngLeg = wsLegend.Range(legendRangeStr)
     If Err.Number <> 0 Then
         Err.Clear
         ' Некорректный адрес в настройке - предупреждение и fallback на default.
@@ -268,8 +286,9 @@ Public Sub BuildFlatStructure()
         If lr > lastRow Then lastRow = lr
     Next c
 
-    For r = FIRST_ROW To lastRow
-        For c = 1 To LAST_COL
+    ' W-FLEX-STRUCTURE: сканирование начинается с динамически определенных startRow и startCol
+    For r = startRow To lastRow
+        For c = startCol To LAST_COL
             Dim v As Variant
             v = ws.Cells(r, c).value
             If Not IsEmpty(v) Then
@@ -658,6 +677,28 @@ Fail:                                       ' прочие ошибки (нап�
 End Sub
 
 '---------------- Вспомогательные функции ----------------
+
+' W-FLEX-STRUCTURE: Возвращает целевой лист книги.
+' Если forceFirst = True (файл содержит только 1 лист), возвращает Worksheets(1),
+' игнорируя sheetName. Иначе пытается найти лист по имени.
+' Если лист не найден или имя пустое, возвращает Worksheets(1) как fallback.
+Private Function GetTargetSheet(ByVal wb As Workbook, ByVal sheetName As String, ByVal forceFirst As Boolean) As Worksheet
+    If forceFirst Then
+        Set GetTargetSheet = wb.Worksheets(1)
+        Exit Function
+        End If
+    
+    If Trim(sheetName) <> "" Then
+        On Error Resume Next
+        Set GetTargetSheet = wb.Worksheets(sheetName)
+        On Error GoTo 0
+    End If
+    
+    ' Fallback: если имя не задано или лист не найден, берем первый лист
+    If GetTargetSheet Is Nothing Then
+        Set GetTargetSheet = wb.Worksheets(1)
+    End If
+End Function
 
 ' W-T-SCHEMA-FIX (очистка имён): возвращает очищенное имя узла:
 '   1. неразрывные пробелы (Chr(160)) заменяются на обычные;
