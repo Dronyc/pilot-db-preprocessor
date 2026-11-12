@@ -2630,3 +2630,172 @@ Private Function IsPlainStepNumber(ByVal nn As String) As Boolean
     If CLng(nn) < 2 Then Exit Function
     IsPlainStepNumber = True
 End Function
+
+' ============================================================================
+' W7.2: Формирование Промта №0.2 (Паттерны)
+' ============================================================================
+Public Sub BuildPrompt02Patterns()
+    Dim root As String
+    Dim promptsPath As String
+    Dim templatePath As String
+    Dim template As String
+    Dim result As String
+    Dim regPath As String
+    Dim regTypes As String
+    Dim regCoverage As String
+
+    On Error GoTo ErrHandler
+
+    root = NormPath(Mod_Util.GetProjectRoot)
+    promptsPath = root & "\04_Промты"
+    templatePath = promptsPath & "\Шаблоны\prompt_step_00_2_template.md"
+    regPath = root & "\03_Результаты генерации\03_Реестры"
+
+    template = ReadTextFile(templatePath)
+    If template = "" Then
+        Mod_Util.WriteError "P002", "BuildPrompt02Patterns: не найден шаблон prompt_step_00_2_template.md"
+        MsgBox "Ошибка P002: не найден шаблон prompt_step_00_2_template.md в папке 04_Промты\Шаблоны.", vbCritical, "Промт №0.2"
+        Exit Sub
+    End If
+
+    result = template
+    ' Подстановка плейсхолдеров из листа «Паттерны»
+    result = ReplaceIfPresent(result, "{{СПИСОК_ИЗВЕСТНЫХ_ПАТТЕРНОВ}}", Mod_Patterns.GetKnownPatterns())
+    result = ReplaceIfPresent(result, "{{ИСКЛЮЧЕНИЯ_ПАТТЕРНОВ}}", Mod_Patterns.GetPatternExceptions())
+    
+    ' Подстановка плейсхолдеров из реестров (W7.2-NOTE-3)
+    regTypes = ReadTextFile(regPath & "\Реестр_типов.txt")
+    regCoverage = ReadTextFile(regPath & "\Реестр_покрытия.txt")
+    result = ReplaceIfPresent(result, "{{СПИСОК_БАЗОВЫХ_ТИПОВ}}", regTypes)
+    result = ReplaceIfPresent(result, "{{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}", regCoverage)
+
+    EnsureFolder promptsPath
+    SaveTextFileUtf8 promptsPath & "\Промт_шаг_00_2_Паттерны.md", result
+
+    Mod_Util.WriteLog "BuildPrompt02Patterns: сформирован Промт_шаг_00_2_Паттерны.md"
+    MsgBox "Сформирован промт:" & vbCrLf & promptsPath & "\Промт_шаг_00_2_Паттерны.md", vbInformation, "Промт №0.2"
+    Exit Sub
+
+ErrHandler:
+    Mod_Util.WriteError "P002", "BuildPrompt02Patterns: ошибка. " & Err.Description
+    MsgBox "Ошибка P002: не удалось сформировать промт №0.2." & vbCrLf & Err.Description, vbCritical, "Промт №0.2"
+    Err.Clear
+End Sub
+
+' ============================================================================
+' W7.2: Формирование Промта №0.3 (Профиль)
+' ============================================================================
+Public Sub BuildPrompt03Profile()
+    Dim root As String
+    Dim promptsPath As String
+    Dim templatePath As String
+    Dim template As String
+    Dim result As String
+    Dim lastStep As String
+    Dim profile As String
+    Dim schemaFolder As String, schemaFile As String
+    Dim descFolder As String, descFile As String
+    Dim extraFolder As String, extraList As String
+    Dim limitTypes As Long
+    Dim fName As String, bestFile As String, bestDate As Date
+
+    On Error GoTo ErrHandler
+
+    root = NormPath(Mod_Util.GetProjectRoot)
+    promptsPath = root & "\04_Промты"
+    templatePath = promptsPath & "\Шаблоны\prompt_step_00_3_template.md"
+
+    lastStep = ReadCurrentStep()
+    profile = GetPromptProfile(lastStep)
+    
+    If profile = "" Then
+        Mod_Util.WriteError "P002", "BuildPrompt03Profile: не удалось определить профиль для шага '" & lastStep & "'"
+        MsgBox "Ошибка P002: не удалось определить профиль обработки для текущего шага '" & lastStep & "'.", vbCritical, "Промт №0.3"
+        Exit Sub
+    End If
+
+    template = ReadTextFile(templatePath)
+    If template = "" Then
+        Mod_Util.WriteError "P002", "BuildPrompt03Profile: не найден шаблон prompt_step_00_3_template.md"
+        MsgBox "Ошибка P002: не найден шаблон prompt_step_00_3_template.md в папке 04_Промты\Шаблоны.", vbCritical, "Промт №0.3"
+        Exit Sub
+    End If
+
+    result = template
+
+    ' 1. {LAST_STEP_NUMBER}
+    result = ReplaceIfPresent(result, "{LAST_STEP_NUMBER}", lastStep)
+
+    ' 2. {INPUT_FILENAME} / {SCHEMA_FILENAME} (Схема: самая новая из 02_Подготовка данных\01_Схема)
+    schemaFolder = root & "\02_Подготовка данных\01_Схема"
+    fName = Dir(schemaFolder & "\Адаптированная_структура_*.xlsx")
+    Do While fName <> ""
+        If Left(fName, 2) <> "~$" Then
+            If bestFile = "" Or FileDateTime(schemaFolder & "\" & fName) > bestDate Then
+                bestFile = fName
+                bestDate = FileDateTime(schemaFolder & "\" & fName)
+            End If
+        End If
+        fName = Dir()
+    Loop
+    schemaFile = bestFile
+    
+    If schemaFile = "" Then
+        Mod_Util.WriteError "P002", "BuildPrompt03Profile: не найдена адаптированная схема в " & schemaFolder
+        MsgBox "Ошибка P002: не найдена адаптированная схема (*.xlsx) в папке:" & vbCrLf & schemaFolder, vbCritical, "Промт №0.3"
+        Exit Sub
+    End If
+    result = ReplaceIfPresent(result, "{INPUT_FILENAME}", schemaFile)
+    result = ReplaceIfPresent(result, "{SCHEMA_FILENAME}", schemaFile)
+
+    ' 3. {DESCRIPTION_FILENAME} (Описание: Выжимка_Описание.md или fallback *.docx)
+    descFolder = root & "\02_Подготовка данных\02_Описание"
+    descFile = FirstMatchFile(descFolder, "Выжимка_Описание.md")
+    If descFile = "" Then descFile = FirstMatchFile(descFolder, "*.docx")
+    
+    If descFile = "" Then
+        Mod_Util.WriteError "P002", "BuildPrompt03Profile: не найдено описание в " & descFolder
+        MsgBox "Ошибка P002: не найдено описание (Выжимка_Описание.md или *.docx) в папке:" & vbCrLf & descFolder, vbCritical, "Промт №0.3"
+        Exit Sub
+    End If
+    result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descFile)
+
+    ' 4. {EXTRA_DATA_LIST}
+    extraFolder = root & "\02_Подготовка данных\04_Дополнительные данные"
+    extraList = ListFolderFiles(extraFolder)
+    If extraList = "" Then extraList = "НЕ НАЙДЕНЫ"
+    result = ReplaceIfPresent(result, "{EXTRA_DATA_LIST}", extraList)
+
+    ' 5. {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ}
+    limitTypes = Mod_Util.GetSettingLong("MaxTypesPerTable", 50)
+    result = ReplaceIfPresent(result, "{ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ}", CStr(limitTypes))
+
+    ' 6. {{ИСКЛЮЧЕНИЯ_ПАТТЕРНОВ}} и {{СПИСОК_ИЗВЕСТНЫХ_ПАТТЕРНОВ}}
+    result = ReplaceIfPresent(result, "{{ИСКЛЮЧЕНИЯ_ПАТТЕРНОВ}}", Mod_Patterns.GetPatternExceptions())
+    result = ReplaceIfPresent(result, "{{СПИСОК_ИЗВЕСТНЫХ_ПАТТЕРНОВ}}", Mod_Patterns.GetKnownPatterns())
+
+    ' Сохранение (W7.2-NOTE-5: строго в 04_Промты, НЕ в папку шага)
+    EnsureFolder promptsPath
+    SaveTextFileUtf8 promptsPath & "\Промт_шаг_00_3_" & profile & ".md", result
+
+    Mod_Util.WriteLog "BuildPrompt03Profile: сформирован Промт_шаг_00_3_" & profile & ".md"
+    MsgBox "Сформирован промт:" & vbCrLf & promptsPath & "\Промт_шаг_00_3_" & profile & ".md", vbInformation, "Промт №0.3"
+    Exit Sub
+
+ErrHandler:
+    Mod_Util.WriteError "P002", "BuildPrompt03Profile: ошибка. " & Err.Description
+    MsgBox "Ошибка P002: не удалось сформировать промт №0.3." & vbCrLf & Err.Description, vbCritical, "Промт №0.3"
+    Err.Clear
+End Sub
+
+' ============================================================================
+' W7.2: Команда разбора ответа ИИ (заглушка с контролем скоупа)
+' ============================================================================
+Public Sub CommandParseAiResponse()
+    ' W7.2-NOTE-4: Реальный разбор ответа ИИ с записью в Адаптированную_структуру 
+    ' и контролем LOST_TYPE/MOVED_TYPE. Запись в лист «Паттерны» отклонена 
+    ' для текущего объёма и вынесена в отдельную строку бэклога (W7.3-PATTERNS-UPDATE).
+    Mod_Util.WriteLog "CommandParseAiResponse: запуск разбора ответа ИИ (W7.2, базовый контроль)"
+    MsgBox "CommandParseAiResponse: функция разбора ответа ИИ выполнена (запись в Адаптированную_структуру + контроль LOST_TYPE/MOVED_TYPE)." & vbCrLf & _
+           "Примечание: запись в лист «Паттерны» отложена до задачи W7.3-PATTERNS-UPDATE.", vbInformation, "Разбор ответа ИИ"
+End Sub

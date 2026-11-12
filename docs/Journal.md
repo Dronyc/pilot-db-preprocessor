@@ -393,3 +393,6 @@ ID: W7.2-NOTE-5…7, W-FOLDERS-02. Метка коммита: [W7.2-NOTE-5..7]. 
 **SHA:** не заполняется (W-DOCS-MAP-6).
 
 **Следующий шаг:** W7.2 (VBA-реализация `BuildPrompt02Patterns` и `BuildPrompt03Profile`).
+
+## 2026-11-12 — `W7.2-TEMPLATES`
+- Выполнена VBA-реализация формирования Промтов №0.2 и №0.3 (`BuildPrompt02Patterns`, `BuildPrompt03Profile`) и базовая заглушка `CommandParseAiResponse` с контролем скоупа (без записи в лист «Паттерны», вынесено в W7.3). Пути выходных файлов строго в `04_Промты\`. Базовый коммит: `2a567a9`. SHA: `-`
