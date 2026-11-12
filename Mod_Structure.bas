@@ -1401,8 +1401,9 @@ Private Function BuildDupKeyDict() As Object
             code = LeadCode(nm)
             If code <> "" Then
                 nodesWithCode = nodesWithCode + 1
-                ' КЛЮЧ УЧИТЫВАЕТ ТИП: дубли считаем только внутри одного типа
-                key = Nodes(i).NodeType & "|" & code
+                ' ИСПРАВЛЕНО (Вариант Б): Ключ включает полное очищенное имя, а не только код.
+                ' Это гарантирует, что дублем считается только полное совпадение (Категория + Код + Имя).
+                key = Nodes(i).NodeType & "|" & Nodes(i).Name
                 If Not dictKey.Exists(key) Then
                     Set col = New Collection
                     col.Add i
@@ -1465,7 +1466,8 @@ Private Function BuildDupKeyDict() As Object
         If dictKey(k).Count > 1 Then
             For j = 1 To dictKey(k).Count
                 idx = CLng(dictKey(k)(j))
-                dupCountDict(Nodes(idx).NodeType & "|" & LeadCode(Nodes(idx).Name)) = True
+                ' ИСПРАВЛЕНО: ключ в dupCountDict должен строго соответствовать новому формату ключа выше
+                dupCountDict(Nodes(idx).NodeType & "|" & Nodes(idx).Name) = True
             Next j
         End If
     Next k
@@ -1533,12 +1535,18 @@ Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As 
     r = startRow
     For Each k In dictKey.Keys
         If dictKey(k).Count > 1 Then
-            posBar = InStr(CStr(k), "|")
-            typePart = Left$(CStr(k), posBar - 1)      ' Тип
-            numPart = Mid$(CStr(k), posBar + 1)         ' Номер
+            ' ИСПРАВЛЕНО (Вариант Б): так как ключ теперь содержит полное имя, а не только код,
+            ' надежнее извлекать Тип и Код напрямую из первого узла группы, а не парсить строку ключа.
+            Dim firstIdx As Long
+            firstIdx = CLng(dictKey(k)(1))
+            
+            typePart = Nodes(firstIdx).NodeType
+            numPart = LeadCode(Nodes(firstIdx).Name)
+            
             ' каждое следующее наименование — в пару к первому
             For j = 2 To dictKey(k).Count
-                idxA = CLng(dictKey(k)(1))
+                Dim idxA As Long, idxB As Long
+                idxA = firstIdx
                 idxB = CLng(dictKey(k)(j))
                 ws.Cells(r, 1).Value = "DUP_IN_TYPE"                            ' Код проблемы
                 ws.Cells(r, 2).Value = Nodes(idxA).RowIdx                       ' Строка
@@ -1656,10 +1664,9 @@ Private Sub HighlightDuplicateRows(ByVal wbOut As Workbook)
     For i = 1 To NodeCount
         If Nodes(i).NodeType <> "УДАЛЕН" Then
             isDup = False
-            dupKey = Nodes(i).NodeType & "|" & LeadCode(Nodes(i).Name)
-            If Right$(dupKey, 1) <> "|" Then
-                If dupCountDict.Exists(dupKey) Then isDup = True
-            End If
+            ' ИСПРАВЛЕНО (Вариант Б): ключ для проверки должен строго совпадать с ключом в BuildDupKeyDict
+            dupKey = Nodes(i).NodeType & "|" & Nodes(i).Name
+            If dupCountDict.Exists(dupKey) Then isDup = True
             If isDup Then
                 ' не перекрашиваем строки ошибок (розовая подсветка WriteFlatTable)
                 If Not problemsDict.Exists(Nodes(i).Name) And _
