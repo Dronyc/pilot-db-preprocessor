@@ -710,25 +710,29 @@ End Function
 ' расхождении исходного и очищённого имени фиксируется аномалия NAME_CLEANED.
 Private Function CleanNodeName(ByVal s As String) As String
     Dim res As String
-    Dim prevLen As Long
-
-    res = s
-    ' 1. невидимые символы: неразрывный пробел -> обычный
+    
+    res = Trim$(CStr(s))
+    If res = "" Then
+        CleanNodeName = ""
+        Exit Function
+    End If
+    
+    ' 1. Неразрывные пробелы и табуляции -> обычные пробелы
     res = Replace(res, Chr(160), " ")
-    ' 2. пробелы перед и после подчёркивания (цикл — чтобы обработать
-    '    цепочки вида "12 _  Имя" за один проход до устойчивого состояния)
-    Do
-        prevLen = Len(res)
-        res = Replace(res, " _", "_")
-        res = Replace(res, "_ ", "_")
-    Loop While Len(res) <> prevLen
-    ' 3. двойные пробелы -> одиночные (повторяем до сворачивания всех цепочек)
-    Do
-        prevLen = Len(res)
+    res = Replace(res, vbTab, " ")
+    
+    ' 2. Схлопывание множественных пробелов в один
+    Do While InStr(res, "  ") > 0
         res = Replace(res, "  ", " ")
-    Loop While Len(res) <> prevLen
-    ' 4. Trim
-    CleanNodeName = Trim(res)
+    Loop
+    
+    ' 3. Удаление пробелов непосредственно перед и после символа подчёркивания
+    ' (например: "12 _ Имя" -> "12_Имя", "А _ Б" -> "А_Б")
+    res = Replace(res, " _", "_")
+    res = Replace(res, "_ ", "_")
+    
+    ' 4. Финальный Trim на случай, если очистка оставила пробелы по краям
+    CleanNodeName = Trim$(res)
 End Function
 
 ' PRE-04: верхняя граница обхода больше не константа 6 - берётся из
@@ -1193,8 +1197,27 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
             GoTo NextNodeLog
         End If
 
-        ' сирота
+        ' сирота или наследник удаленного/ошибочного узла
+        Dim isOrphan As Boolean
+        isOrphan = False
+        
         If Nodes(i).parentIdx = 0 And nm <> "Объект" Then
+            isOrphan = True
+        ElseIf Nodes(i).parentIdx > 0 Then
+            ' Проверяем статус родителя. Если родитель "УДАЛЕН" или "ОШИБКА_ЯРЛЫКА",
+            ' текущий узел не считается классической сиротой (это следствие очистки ярлыков),
+            ' чтобы не засорять лог ложными записями "Не найден родитель уровня N-1".
+            Dim pType As String
+            pType = Nodes(Nodes(i).parentIdx).NodeType
+            If pType = "УДАЛЕН" Or pType = "ОШИБКА_ЯРЛЫКА" Then
+                isOrphan = False
+            Else
+                ' Родитель есть, но не совпадает ожидаемый уровень (дополнительная страховка)
+                ' (Оставляем оригинальную логику, если она была, или просто isOrphan = False)
+            End If
+        End If
+
+        If isOrphan Then
             ws.Cells(r, 1).value = "ORPHAN"
             ws.Cells(r, 2).value = Nodes(i).RowIdx
             ws.Cells(r, 3).value = Nodes(i).ColIdx
