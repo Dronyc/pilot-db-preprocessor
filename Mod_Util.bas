@@ -38,6 +38,10 @@ Private Const NAME_PROMPT_FIX_VERSION As String = "PromptFixVersion"
 Private Const NAME_MAX_TYPES_PER_TABLE As String = "MaxTypesPerTable"
 Private Const NAME_LEGEND_RANGE As String = "LegendRange"
 
+Private Const NAME_LEGEND_SHEET As String = "LegendSheet"
+Private Const NAME_STRUCTURE_SHEET As String = "StructureSheet"
+Private Const NAME_START_CELL As String = "StartCell"
+
 ' PRE-04: значение по умолчанию для LegendRange (адрес диапазона легенды
 ' цветов на первом листе книги-схемы): используется как default для
 ' GetSettingText("LegendRange", DEFAULT_LEGEND_RANGE) в Mod_Structure.
@@ -585,68 +589,50 @@ Public Sub EnsureSettingsSheet()
         ws.Name = "Настройки"
     Else
         On Error GoTo ErrHandler
-        ws.Unprotect Password:=SHEET_PASSWORD   ' снимаем защиту перед правкой
+        ws.Unprotect Password:="pilot"   ' снимаем защиту перед правкой
     End If
 
-    ' 2. Подписи (колонка A), имена диапазонов и значения по умолчанию -
-    '    десять полей B2:B11 (W-FLEX-STRUCTURE: добавлены листы и начало структуры)
+    ' 2. Подписи (колонка A), имена диапазонов и значения по умолчанию (10 полей, строки 2-11)
     labels = Array("Корневая папка проекта", _
-               "Режим проверки", _
-               "Автооткрытие папки результатов", _
-               "Версия промта-генератора", _
-               "Версия промта-исправления", _
-               "Максимум типов в таблице", _
-               "Диапазон легенды", _
-               "Лист легенды (имя)", _
-               "Лист данных (имя)", _
-               "Начало структуры (ячейка)")
+                   "Режим проверки", _
+                   "Автооткрытие папки результатов", _
+                   "Версия промта-генератора", _
+                   "Версия промта-исправления", _
+                   "Максимум типов в таблице", _
+                   "Имя листа с легендой", _
+                   "Диапазон легенды", _
+                   "Имя листа со структурой", _
+                   "Ячейка начала таблицы")
+                   
     namesArr = Array(NAME_PROJECT_ROOT, NAME_CHECK_MODE, NAME_AUTO_OPEN_RESULTS, _
                      NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION, _
-                     NAME_MAX_TYPES_PER_TABLE, NAME_LEGEND_RANGE, _
-                     NAME_LEGEND_SHEET, NAME_DATA_SHEET, NAME_START_CELL)
-    ' ProjectRoot остаётся пустым: пусто = ThisWorkbook.Path (см. GetProjectRoot).
+                     NAME_MAX_TYPES_PER_TABLE, NAME_LEGEND_SHEET, NAME_LEGEND_RANGE, _
+                     NAME_STRUCTURE_SHEET, NAME_START_CELL)
+                     
+    ' Значения по умолчанию: B9 (Диапазон легенды) = "B1:C3", остальные новые поля пустые
     defaults = Array("", "Черновик", "да", "7.13", "1.0", CStr(DEFAULT_MAX_TYPES_PER_TABLE), _
-                     DEFAULT_LEGEND_RANGE, "", "", DEFAULT_START_CELL)
+                     "", DEFAULT_LEGEND_RANGE, "", "")
 
-    For i = 0 To 6
+    For i = 0 To 9
         RowIdx = i + 2
-        ws.Cells(RowIdx, 1).value = CStr(labels(i))
-        ' значение по умолчанию ставим только если ячейка пуста -
-        ' пользовательские значения при повторном запуске НЕ затираются
-        If Trim(CStr(ws.Cells(RowIdx, 2).value)) = "" Then
+        ws.Cells(RowIdx, 1).Value = CStr(labels(i))
+        ' значение по умолчанию ставим только если ячейка пуста
+        If Trim(CStr(ws.Cells(RowIdx, 2).Value)) = "" Then
             If CStr(defaults(i)) <> "" Then
-                ws.Cells(RowIdx, 2).value = CStr(defaults(i))
+                ws.Cells(RowIdx, 2).Value = CStr(defaults(i))
             End If
         End If
     Next i
 
-    ws.Range("A1").value = "Настройки Препроцессора"
-    ' PRE-04: подсказка по полю "Диапазон легенды" (C8)
-    ws.Range("C8").value = "Адрес диапазона легенды на листе схемы, напр. B1:C3"
-    ' W-FLEX-STRUCTURE: подсказки по новым полям
-    ws.Range("C9").value = "Имя листа с легендой. Если 1 лист в файле - игнорируется"
-    ws.Range("C10").value = "Имя листа со структурой. Если 1 лист в файле - игнорируется"
-    ws.Range("C11").value = "Ячейка начала таблицы, напр. A8. Если пусто - A8"
+    ws.Range("A1").Value = "Настройки Препроцессора"
     ws.Columns("A:C").AutoFit
 
-    ' 3. Validation строго на своих ячейках.
-    ' Снимаем старую валидацию и настраиваем новые текстовые поля (B9, B10, B11)
+    ' 3. Validation строго на своих ячейках: B3, B4, B7. Остальные (B8, B10, B11) очищаем от списков.
     ws.Range("B2").Validation.Delete
-    ws.Range("B8:B11").Validation.Delete
+    ws.Range("B8").Validation.Delete
+    ws.Range("B10").Validation.Delete
+    ws.Range("B11").Validation.Delete
     
-    ' Добавляем подсказки для новых текстовых полей (валидация как текст, чтобы принять "Лист1" или "A8")
-    Dim iValidate As Long
-    For iValidate = 9 To 11
-        With ws.Range("B" & iValidate).Validation
-            .Delete
-            .Add Type:=xlValidateTextLength, AlertStyle:=xlValidAlertInformation, _
-                 Operator:=xlGreaterEqual, Formula1:="0"
-            .IgnoreBlank = True
-            .InCellDropdown = False
-            .InputTitle = "Текстовое значение"
-            .InputMessage = "Введите имя листа или адрес ячейки (напр., A8)."
-        End With
-    Next iValidate
     With ws.Range("B3").Validation
         .Delete
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
@@ -654,6 +640,7 @@ Public Sub EnsureSettingsSheet()
         .IgnoreBlank = True
         .InCellDropdown = True
     End With
+    
     With ws.Range("B4").Validation
         .Delete
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
@@ -661,6 +648,7 @@ Public Sub EnsureSettingsSheet()
         .IgnoreBlank = True
         .InCellDropdown = True
     End With
+    
     With ws.Range("B7").Validation
         .Delete
         .Add Type:=xlValidateWholeNumber, AlertStyle:=xlValidAlertStop, _
@@ -673,9 +661,7 @@ Public Sub EnsureSettingsSheet()
         .ErrorMessage = "MaxTypesPerTable должно быть целым числом >= 1."
     End With
 
-    ' 4. Именованные диапазоны для всех десяти полей - создавать, если их
-    '    ещё нет (существующие имена не трогаем, чтобы не переопределить
-    '    ссылку)
+    ' 4. Именованные диапазоны для всех 10 полей
     For i = 0 To 9
         On Error Resume Next
         Dim nmChk As Name
@@ -690,26 +676,19 @@ Public Sub EnsureSettingsSheet()
         Set nmChk = Nothing
     Next i
 
-    ' 5. Защита листа от случайной правки: разблокированы B2:B11 (W-FLEX-STRUCTURE)
+    ' 5. Защита листа: разблокированы B2:B11
     ws.Cells.Locked = True
     ws.Range("B2:B11").Locked = False
-    ws.Protect Password:=SHEET_PASSWORD
+    ws.Protect Password:="pilot"
 
-    WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён"
+    WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён (10 полей, B2:B11)"
 
-    ' 6. T3.1 (H4): фиксируем в журнале статус полей, которые пока не
-    '    используются кодом (это не ошибка - информационная запись).
-    WriteLog "EnsureSettingsSheet: поля CheckMode/AutoOpenResults/PromptGenVersion/" & _
-             "PromptFixVersion созданы; чтение этих настроек кодом пока не " & _
-             "реализовано (зарезервировано на след. задачи). MaxTypesPerTable " & _
-             "читается через GetSettingLong (Mod_Prompt: {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ}). " & _
-             "LegendRange (B8) читается через GetSettingText " & _
-             "(Mod_Structure.BuildFlatStructure: диапазон легенды цветов)."
+    ' 6. Информационная запись в журнал о зарезервированных полях
+    WriteLog "EnsureSettingsSheet: поля CheckMode, AutoOpenResults, PromptGenVersion, " & _
+             "PromptFixVersion, LegendSheet, StructureSheet, StartCell созданы. " & _
+             "Чтение некоторых настроек кодом пока не реализовано (зарезервировано)."
 
-    ' 7. PRE-04c: автоматическая подготовка листа "Паттерны" (каркас секций
-    '    A-D и H-O, предзаполненные ИСКЛЮЧЕНИЯ, выпадающие списки, защита).
-    '    Вызов защищён: сбой подготовки "Паттернов" не блокирует работу с
-    '    листом "Настройки" (U008 - предупреждение).
+    ' 7. Подготовка листа "Паттерны"
     patErr = False
     On Error Resume Next
     Mod_Patterns.EnsurePatternsSheet
@@ -719,8 +698,7 @@ Public Sub EnsureSettingsSheet()
     If patErr Then
         WriteWarning "U008", "EnsureSettingsSheet: не удалось подготовить лист " & _
                    "'Паттерны' (Mod_Patterns.EnsurePatternsSheet). Лист 'Настройки' " & _
-                   "готов; создайте лист 'Паттерны' через 'Восстановить кнопки и " & _
-                   "оформление'."
+                   "готов; создайте лист 'Паттерны' через 'Восстановить кнопки и оформление'."
     End If
     Exit Sub
 
