@@ -38,10 +38,6 @@ Private Const NAME_PROMPT_FIX_VERSION As String = "PromptFixVersion"
 Private Const NAME_MAX_TYPES_PER_TABLE As String = "MaxTypesPerTable"
 Private Const NAME_LEGEND_RANGE As String = "LegendRange"
 
-Private Const NAME_LEGEND_SHEET As String = "LegendSheet"
-Private Const NAME_STRUCTURE_SHEET As String = "StructureSheet"
-Private Const NAME_START_CELL As String = "StartCell"
-
 ' PRE-04: значение по умолчанию для LegendRange (адрес диапазона легенды
 ' цветов на первом листе книги-схемы): используется как default для
 ' GetSettingText("LegendRange", DEFAULT_LEGEND_RANGE) в Mod_Structure.
@@ -52,6 +48,7 @@ Private Const NAME_LEGEND_SHEET As String = "LegendSheetName"
 Private Const NAME_DATA_SHEET As String = "DataSheetName"
 Private Const NAME_START_CELL As String = "StartCell"
 Public Const DEFAULT_START_CELL As String = "A8" ' Соответствует старому FIRST_ROW=8, Col=1
+Private Const NAME_STRUCTURE_SHEET As String = "StructureSheet"
 
 ' Значение по умолчанию для MaxTypesPerTable (T3.1): используется
 ' Mod_Prompt при подстановке {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ} и как default
