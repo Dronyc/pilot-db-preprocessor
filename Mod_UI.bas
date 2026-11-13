@@ -62,15 +62,12 @@ Public Sub RestoreUI()
     
     ' Установка ширины столбцов До создания кнопок
     ws.Columns("B").ColumnWidth = 40
-    ws.Columns("C").ColumnWidth = 60
+    ws.Columns("C").ColumnWidth = 80
     ws.Columns("C").Font.Italic = True
     ws.Columns("C").Font.Color = RGB(89, 89, 89)
 
-    ' Подготовка списков кнопок (13 кнопок: Служебные 1-4, Проектные 5-13)
-    Dim captions As Variant
-    Dim actions As Variant
-    Dim tips As Variant
-    Dim colors As Variant
+       ' Подготовка списков кнопок (13 кнопок: Служебные 1-4, Проектные 5-13)
+
 
     captions = Array( _
         "Создать папки проекта", _
@@ -117,25 +114,21 @@ Public Sub RestoreUI()
         "Формирует таблицы для Промта №0.2 (Паттерны)", _
         "Разбирает ответ ИИ и обновляет лист «Паттерны»")
 
-    colors = Array( _
-        RGB(200, 200, 200), _ ' серый (Служебные)
-        RGB(200, 200, 200), _
-        RGB(200, 200, 200), _
-        RGB(200, 200, 200), _
-        RGB(255, 255, 153), _ ' светло-жёлтый (Проектные)
-        RGB(255, 255, 153), _
-        RGB(255, 255, 153), _
-        RGB(255, 255, 153), _
-        RGB(255, 255, 153), _
-        RGB(255, 255, 153), _
-        RGB(255, 255, 153), _
-        RGB(255, 255, 153), _
-        RGB(255, 255, 153))
-
     ' Создание 13 кнопок в столбце B с визуальным разделением групп
     rowBtn = 2
+    
+    ' Сначала устанавливаем высоту всех строк для кнопок
     For i = LBound(captions) To UBound(captions)
-        ' Добавляем визуальный разделитель (пропуск строки) перед проектными кнопками (индекс 4, т.е. 5-я кнопка)
+        If i = 4 Then
+            rowBtn = rowBtn + 2
+        End If
+        ws.Rows(rowBtn).RowHeight = 24
+        rowBtn = rowBtn + 2
+    Next i
+    
+    ' Теперь создаём кнопки (высота строк уже установлена)
+    rowBtn = 2
+    For i = LBound(captions) To UBound(captions)
         If i = 4 Then
             rowBtn = rowBtn + 2
         End If
@@ -146,7 +139,7 @@ Public Sub RestoreUI()
             ws.Cells(rowBtn, 2).Left, _
             ws.Cells(rowBtn, 2).Top, _
             200, 22)
-        shpBtn.Placement = xlFreeFloating
+        shpBtn.Placement = xlMove
         shpBtn.Name = "btnPilot_" & CStr(i + 1)
         shpBtn.OnAction = CStr(actions(i))
         With shpBtn.TextFrame
@@ -155,11 +148,14 @@ Public Sub RestoreUI()
             .VerticalAlignment = xlCenter
         End With
         
-        ' Применяем цвет из массива вместо жесткой логики If
-        shpBtn.Fill.ForeColor.RGB = colors(i)
-        shpBtn.Line.ForeColor.RGB = RGB(0, 0, 0)           ' чёрная рамка
+        shpBtn.Line.ForeColor.RGB = RGB(0, 0, 0)
         shpBtn.Line.Weight = 1
+        
+        ' Пояснение в столбце C
         ws.Cells(rowBtn, 3).value = CStr(tips(i))
+        ws.Cells(rowBtn, 3).WrapText = True
+        ws.Cells(rowBtn, 3).VerticalAlignment = xlTop
+        
         rowBtn = rowBtn + 2
     Next i
     
@@ -219,7 +215,7 @@ Public Sub RestoreUI()
     ' Упорядочить листы: Препроцессор, Настройки, Readme, остальные
     Call ReorderSheets(ThisWorkbook)
 
-    Mod_Util.WriteLog "UI восстановлен: 14 кнопок, оформление, защита"
+    Mod_Util.WriteLog "UI восстановлен: 13 кнопок, оформление, защита"
     Exit Sub
 
 ErrHandler:
