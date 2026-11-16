@@ -273,6 +273,39 @@ Private Function ListFolderFiles(ByVal folderPath As String) As String
     ListFolderFiles = res
 End Function
 
+' W-ANALYTIC-04-FIX: собирает имена файлов папки folderPath в массив
+' (1 To N) одноразовым итератором Dir() БЕЗ вложенных вызовов Dir() с
+' аргументом внутри цикла. Внутренний итератор Dir() в VBA глобален и
+' stateful: любой вызов Dir(<путь>) в цикле (в т.ч. вложенно, напр.
+' SaveTextFileUtf8 -> StripUtf8Bom -> Dir(filePath, vbNormal)) сбрасывает
+' его, и следующий Dir() без аргумента возвращает "" - Do While обрывается
+' после первой итерации (симптом W-ANALYTIC-04: 1 промт за запуск).
+' Сбор списка в массив ДО обработки устраняет проблему полностью.
+' Папка отсутствует или пуста -> возвращается пустой массив Array().
+Private Function GetFileListArray(ByVal folderPath As String) As Variant
+    Dim col As Collection
+    Dim fName As String
+    Dim arr() As String
+    Dim i As Long
+
+    GetFileListArray = Array()
+    If Not FolderExistsSafe(folderPath) Then Exit Function
+
+    Set col = New Collection
+    fName = Dir(folderPath & "\*.*")
+    Do While fName <> ""
+        col.Add fName
+        fName = Dir()
+    Loop
+    If col.Count = 0 Then Exit Function
+
+    ReDim arr(1 To col.Count)
+    For i = 1 To col.Count
+        arr(i) = CStr(col(i))
+    Next i
+    GetFileListArray = arr
+End Function
+
 ' УСТАРЕЛО (W-PROMPT-INVARIANTS-CODE-2): функция BuildExtraDataBlock удалена -
 ' старая сборка блока "ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ПРОЕКТА" для промта шага заменена на
 ' BuildExtraDataListBlock (блок 3.4, вызывается из FillAllPlaceholders внутри
@@ -2801,7 +2834,14 @@ Public Sub CommandParseAiResponse()
 End Sub
 
 ' ---------------------------------------------------------------------------
-' W-ANALYTIC-04: Генерация аналитических промтов 00_1 и 00_4
+' W-ANALYTIC-04 / W-ANALYTIC-04-FIX: Генерация аналитических промтов 00_1 и 00_4
+' ИСПРАВЛЕНИЕ: список файлов каждой папки собирается в массив ДО начала
+' обработки (GetFileListArray), обход - через For. Это защищает от сброса
+' stateful-итератора Dir() вложенными вызовами (SaveTextFileUtf8 ->
+' StripUtf8Bom -> Dir(...)) и проверки существования файла промта
+' (FileExistsSafe вместо Dir(promptPath)). За один запуск теперь создаются
+' промты для ВСЕХ файлов папок 02_Описание, 03_Конфигурация,
+' 04_Дополнительные данные.
 ' ---------------------------------------------------------------------------
 Public Sub GenerateAnalyticalPrompts_Click()
     Dim root As String
@@ -2813,38 +2853,43 @@ Public Sub GenerateAnalyticalPrompts_Click()
     Dim ws As Worksheet, r As Long, found As Boolean
     Dim tpl001 As String, tpl004 As String
     Dim paths As Variant, p As Variant
-    
+    Dim fileArr As Variant
+    Dim i As Long
+
     On Error GoTo ErrHandler
-    
-    root = Mod_Util.GetProjectRoot()
+
+    root = NormPath(Mod_Util.GetProjectRoot())
     If root = "" Then
         MsgBox "Корневая папка проекта не задана.", vbExclamation, "Ошибка"
         Exit Sub
     End If
-    
+
     configPath = root & "\01_Исходные данные\03_Конфигурация"
     descPath = root & "\01_Исходные данные\02_Описание"
     extraPath = root & "\01_Исходные данные\04_Дополнительные данные"
-    
+
     template001Path = root & "\04_Промты\Шаблоны\prompt_step_00_1_template.md"
     template004Path = root & "\04_Промты\Шаблоны\prompt_step_00_4_template.md"
-    
-    ' Чтение шаблонов (используем существующую безопасную функцию чтения UTF-8)
+
+    ' Чтение шаблонов (безопасное чтение UTF-8/CP1251)
     tpl001 = ReadTextFile(template001Path)
     tpl004 = ReadTextFile(template004Path)
-    
+
     If tpl001 = "" Then Mod_Util.WriteWarning "P001", "Шаблон prompt_step_00_1_template.md не найден или пуст."
     If tpl004 = "" Then Mod_Util.WriteWarning "P001", "Шаблон prompt_step_00_4_template.md не найден или пуст."
-    
-    ' 1. Генерация 00_1 (Конфигурация)
-    If Dir(configPath, vbDirectory) <> "" Then
-        fName = Dir(configPath & "\*.*")
-        Do While fName <> ""
-            ' Пропускаем временные файлы Office (~$), уже созданные промты (Prompt_*) и файлы без расширения
-            If Left(fName, 2) <> "~$" And LCase(Left(fName, 7)) <> "prompt_" And InStr(fName, ".") > 0 Then
+
+    ' 1. Генерация 00_1 (Конфигурация) - обход по массиву файлов
+    If FolderExistsSafe(configPath) Then
+        fileArr = GetFileListArray(configPath)
+        For i = LBound(fileArr) To UBound(fileArr)
+            fName = CStr(fileArr(i))
+            ' Пропуск: временные файлы Office (~$), уже созданные промты
+            ' (Prompt_* - защита от рекурсии), файлы без расширения
+            If Left$(fName, 2) <> "~$" And LCase$(Left$(fName, 7)) <> "prompt_" And InStr(fName, ".") > 0 Then
                 promptName = "Prompt_" & fName & ".md"
                 promptPath = configPath & "\" & promptName
-                If Dir(promptPath) = "" Then
+                ' FileExistsSafe (GetAttr) - НЕ сбрасывает итератор Dir()
+                If Not FileExistsSafe(promptPath) Then
                     If tpl001 <> "" Then
                         SaveTextFileUtf8 promptPath, Replace(tpl001, "{CONFIG_FILENAME}", fName)
                         created001 = created001 + 1
@@ -2853,21 +2898,20 @@ Public Sub GenerateAnalyticalPrompts_Click()
                     skipped001 = skipped001 + 1
                 End If
             End If
-            fName = Dir()
-        Loop
+        Next i
     End If
-    
-    ' 2. Генерация 00_4 (Описание и Доп. данные)
+
+    ' 2. Генерация 00_4 (Описание и Доп. данные) - обход по массиву файлов
     paths = Array(descPath, extraPath)
     For Each p In paths
-        If Dir(CStr(p), vbDirectory) <> "" Then
-            fName = Dir(CStr(p) & "\*.*")
-            Do While fName <> ""
-                ' Пропускаем временные файлы Office (~$), уже созданные промты (Prompt_*) и файлы без расширения
-                If Left(fName, 2) <> "~$" And LCase(Left(fName, 7)) <> "prompt_" And InStr(fName, ".") > 0 Then
+        If FolderExistsSafe(CStr(p)) Then
+            fileArr = GetFileListArray(CStr(p))
+            For i = LBound(fileArr) To UBound(fileArr)
+                fName = CStr(fileArr(i))
+                If Left$(fName, 2) <> "~$" And LCase$(Left$(fName, 7)) <> "prompt_" And InStr(fName, ".") > 0 Then
                     promptName = "Prompt_" & fName & ".md"
                     promptPath = CStr(p) & "\" & promptName
-                    If Dir(promptPath) = "" Then
+                    If Not FileExistsSafe(promptPath) Then
                         If tpl004 <> "" Then
                             SaveTextFileUtf8 promptPath, Replace(tpl004, "{DOC_FILENAME}", fName)
                             created004 = created004 + 1
@@ -2876,12 +2920,11 @@ Public Sub GenerateAnalyticalPrompts_Click()
                         skipped004 = skipped004 + 1
                     End If
                 End If
-                fName = Dir()
-            Loop
+            Next i
         End If
     Next p
-    
-    ' 3. Обновление настроек
+
+    ' 3. Обновление настроек (лист "Настройки")
     On Error Resume Next
     Set ws = ThisWorkbook.Worksheets("Настройки")
     On Error GoTo ErrHandler
@@ -2900,18 +2943,18 @@ Public Sub GenerateAnalyticalPrompts_Click()
             Mod_Util.WriteWarning "U009", "Параметр 'Выжимки и анализ конфигурации' не найден на листе 'Настройки'."
         End If
     End If
-    
-    ' 4. Логирование и уведомление
+
+    ' 4. Логирование и уведомление (количество создано/пропущено)
     Dim msg As String
     msg = "Генерация аналитических промтов завершена." & vbCrLf & _
           "Создано промтов 00_1: " & created001 & " (пропущено: " & skipped001 & ")" & vbCrLf & _
           "Создано промтов 00_4: " & created004 & " (пропущено: " & skipped004 & ")"
-    
+
     Mod_Util.WriteLog msg
     MsgBox msg, vbInformation, "Генерация аналитических промтов"
-    
+
     Exit Sub
-    
+
 ErrHandler:
     Mod_Util.WriteError "P007", "GenerateAnalyticalPrompts_Click: " & Err.Description
     MsgBox "Ошибка: " & Err.Description, vbCritical, "Генерация аналитических промтов"

@@ -1,6 +1,6 @@
 # Карта проекта (Project Map)
 
-Обновлено: 2026-11-11 (W7.2-GAPS-6: W7.1-A/B/C, W7.1a — функции чтения листа «Паттерны», PT003, GetPromptProfile, CommandGenerateTables = S0, умная таблица tblPatterns)
+Обновлено: 2026-11-17 (W-ANALYTIC-04-FIX: GetFileListArray, исправление цикла Dir() в GenerateAnalyticalPrompts_Click)
 
 ## VBA-модули (корень репозитория, формат .bas)
 
@@ -16,6 +16,7 @@
 | Mod_TestGen.bas, Mod_TestGen_Assembler.bas | Генерация тестов | тестовые сценарии для собранных настроек |
 | Mod_UI.bas | Кнопки/обработчики интерфейса | BuildFlatStructure_Click и др.; **RestoreUI создаёт 14 кнопок** на листе «Препроцессор»; кнопка 13 «Сформировать таблицы» → **CommandGenerateTables** (W7.1-B: реализует S0, вызывает Mod_Patterns.GetPatternExceptions / GetKnownPatterns и Mod_Prompt.GetPromptProfile; не заглушка), кнопка 14 «Разобрать ответ ИИ» → **CommandParseAiResponse** (заглушка W7.2; вызов только по кнопке 14, не из MakeNextStepPrompt; запись в лист «Паттерны» — W7.3-PATTERNS-UPDATE) |
 | Mod_Patterns.bas | Лист «Паттерны» (PRE-04c): каркас для Промта №0.2 | **EnsurePatternsSheet** (идемпотентна: создание листа в конце книги, **без Cells.Clear** на существующем листе — PRE-04c-fix; секция A–D: заголовки в строке 2 (A2 «Паттерн», B2 «Типы», C2 «Количество», D2 «Итерация»), данные с 3-й; секция H–O: заголовки в строке 2, данные с 3-й, **8 предзаполненных правил** — Папки ЦИМ, Год (Маска/Год*), маска bim_*, точные системные типы document/ecmDocument/folder/project/projectfolder; Validation H/I/J/L/O на строках 3–1000; заголовки A1/H1 — названия секций (жирным, объединены A1:D1, H1:O1); защита паролем «pilot», разблокированы A2:D1000 и H3:O1000; MigrateLegacyLayout, ShiftLegacyYearRule, SyncPrefillCell для миграции старых каркасов); вызывается из Mod_Util.EnsureSettingsSheet; коды PT001/PT002/PT003. **GetPatternExceptions** (W7.1-A: секция H–O, фильтр O = «активно», PT003 при отсутствии листа/пустой секции) и **GetKnownPatterns** (W7.1-A: секция A–D, колонка A, заголовок «Известные паттерны:» внутри функции, "" при пустой секции, PT003 при отсутствии листа); лист не изменяется, защита не снимается. H–O предзаполнено 8 правилами, A–D пополняется по итерациям (пустая A–D — защитный сценарий, маркер не вводится). **W7.1a: PATTERNS_TABLE_NAME = "tblPatterns" (Public Const), EnsurePatternsListObject** — идемпотентное создание/расширение умной таблицы A2:O1000, стиль TableStyleMedium6, вызов из EnsurePatternsSheet до установки защиты |
+**GenerateAnalyticalPrompts_Click** (W-ANALYTIC-04-FIX: обход файлов папок 02_Описание/03_Конфигурация/04_Дополнительные данные через массив `GetFileListArray` + `For`, проверка существования промта — `FileExistsSafe`; за один запуск создаёт промты для всех файлов)
 
 ## Папки рабочего проекта (создаются CreateProjectFolders вне репозитория)
 
@@ -81,6 +82,7 @@
 - В VBA строковые литералы с кавычками внутри требуют экранирования (""), иначе Syntax error. Проверять компиляцию (Debug -> Compile) перед коммитом.
 - При присвоении результата Split() динамическому массиву использовать Variant (Private arr As Variant), иначе ошибка компиляции.
 - Все Private Const должны находиться до первой процедуры Sub/Function в модуле.
+- - Глобальный итератор `Dir()`: любой вызов `Dir(<путь>)` с аргументом сбрасывает единственный stateful-итератор VBA; внутри `Do While fName <> "" ... fName = Dir()` (в т.ч. во вложенных вызовах `SaveTextFileUtf8` → `StripUtf8Bom` → `Dir(filePath, vbNormal)`) цикл молча завершается после первой итерации. Обход файлов — только по массиву (`Mod_Prompt.GetFileListArray`), проверка существования — `FileExistsSafe` (GetAttr). (W-ANALYTIC-04-FIX)
 
 ## Карта промтов (templates/prompts — папка prompts/ в репозитории)
 
