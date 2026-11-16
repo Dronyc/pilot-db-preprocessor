@@ -368,7 +368,7 @@ End Function
 ' перечитывается в байтовый поток и, при наличии BOM, перезаписывается
 ' без первых трёх байт. При ошибке записи - запись в лог (код P005)
 ' и возврат без прерывания вызывающей процедуры.
-Private Sub SaveTextFileUtf8(ByVal filePath As String, ByVal content As String)
+Public Sub SaveTextFileUtf8(ByVal filePath As String, ByVal content As String)
     On Error GoTo ErrHandler
 
     Dim stream As Object
@@ -2798,4 +2798,122 @@ Public Sub CommandParseAiResponse()
     Mod_Util.WriteLog "CommandParseAiResponse: запуск разбора ответа ИИ (W7.2, базовый контроль)"
     MsgBox "CommandParseAiResponse: функция разбора ответа ИИ выполнена (запись в Адаптированную_структуру + контроль LOST_TYPE/MOVED_TYPE)." & vbCrLf & _
            "Примечание: запись в лист «Паттерны» отложена до задачи W7.3-PATTERNS-UPDATE.", vbInformation, "Разбор ответа ИИ"
+End Sub
+
+' ---------------------------------------------------------------------------
+' W-ANALYTIC-04: Генерация аналитических промтов 00_1 и 00_4
+' ---------------------------------------------------------------------------
+Public Sub GenerateAnalyticalPrompts_Click()
+    Dim root As String
+    Dim configPath As String, descPath As String, extraPath As String
+    Dim template001Path As String, template004Path As String
+    Dim fName As String, promptName As String, promptPath As String
+    Dim created001 As Long, skipped001 As Long
+    Dim created004 As Long, skipped004 As Long
+    Dim ws As Worksheet, r As Long, found As Boolean
+    Dim tpl001 As String, tpl004 As String
+    Dim paths As Variant, p As Variant
+    
+    On Error GoTo ErrHandler
+    
+    root = Mod_Util.GetProjectRoot()
+    If root = "" Then
+        MsgBox "Корневая папка проекта не задана.", vbExclamation, "Ошибка"
+        Exit Sub
+    End If
+    
+    configPath = root & "\01_Исходные данные\03_Конфигурация"
+    descPath = root & "\01_Исходные данные\02_Описание"
+    extraPath = root & "\01_Исходные данные\04_Дополнительные данные"
+    
+    template001Path = root & "\04_Промты\Шаблоны\prompt_step_00_1_template.md"
+    template004Path = root & "\04_Промты\Шаблоны\prompt_step_00_4_template.md"
+    
+    ' Чтение шаблонов (используем существующую безопасную функцию чтения UTF-8)
+    tpl001 = ReadTextFile(template001Path)
+    tpl004 = ReadTextFile(template004Path)
+    
+    If tpl001 = "" Then Mod_Util.WriteWarning "P001", "Шаблон prompt_step_00_1_template.md не найден или пуст."
+    If tpl004 = "" Then Mod_Util.WriteWarning "P001", "Шаблон prompt_step_00_4_template.md не найден или пуст."
+    
+    ' 1. Генерация 00_1 (Конфигурация)
+    If Dir(configPath, vbDirectory) <> "" Then
+        fName = Dir(configPath & "\*.*")
+        Do While fName <> ""
+            ' Пропускаем временные файлы Office (~$), уже созданные промты (Prompt_*) и файлы без расширения
+            If Left(fName, 2) <> "~$" And LCase(Left(fName, 7)) <> "prompt_" And InStr(fName, ".") > 0 Then
+                promptName = "Prompt_" & fName & ".md"
+                promptPath = configPath & "\" & promptName
+                If Dir(promptPath) = "" Then
+                    If tpl001 <> "" Then
+                        SaveTextFileUtf8 promptPath, Replace(tpl001, "{CONFIG_FILENAME}", fName)
+                        created001 = created001 + 1
+                    End If
+                Else
+                    skipped001 = skipped001 + 1
+                End If
+            End If
+            fName = Dir()
+        Loop
+    End If
+    
+    ' 2. Генерация 00_4 (Описание и Доп. данные)
+    paths = Array(descPath, extraPath)
+    For Each p In paths
+        If Dir(CStr(p), vbDirectory) <> "" Then
+            fName = Dir(CStr(p) & "\*.*")
+            Do While fName <> ""
+                ' Пропускаем временные файлы Office (~$), уже созданные промты (Prompt_*) и файлы без расширения
+                If Left(fName, 2) <> "~$" And LCase(Left(fName, 7)) <> "prompt_" And InStr(fName, ".") > 0 Then
+                    promptName = "Prompt_" & fName & ".md"
+                    promptPath = CStr(p) & "\" & promptName
+                    If Dir(promptPath) = "" Then
+                        If tpl004 <> "" Then
+                            SaveTextFileUtf8 promptPath, Replace(tpl004, "{DOC_FILENAME}", fName)
+                            created004 = created004 + 1
+                        End If
+                    Else
+                        skipped004 = skipped004 + 1
+                    End If
+                End If
+                fName = Dir()
+            Loop
+        End If
+    Next p
+    
+    ' 3. Обновление настроек
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("Настройки")
+    On Error GoTo ErrHandler
+    If Not ws Is Nothing Then
+        found = False
+        For r = 2 To 100
+            If StrComp(Trim(CStr(ws.Cells(r, 1).Value)), "Выжимки и анализ конфигурации", vbTextCompare) = 0 Then
+                ws.Unprotect Password:="pilot"
+                ws.Cells(r, 2).Value = "Да"
+                ws.Protect Password:="pilot"
+                found = True
+                Exit For
+            End If
+        Next r
+        If Not found Then
+            Mod_Util.WriteWarning "U009", "Параметр 'Выжимки и анализ конфигурации' не найден на листе 'Настройки'."
+        End If
+    End If
+    
+    ' 4. Логирование и уведомление
+    Dim msg As String
+    msg = "Генерация аналитических промтов завершена." & vbCrLf & _
+          "Создано промтов 00_1: " & created001 & " (пропущено: " & skipped001 & ")" & vbCrLf & _
+          "Создано промтов 00_4: " & created004 & " (пропущено: " & skipped004 & ")"
+    
+    Mod_Util.WriteLog msg
+    MsgBox msg, vbInformation, "Генерация аналитических промтов"
+    
+    Exit Sub
+    
+ErrHandler:
+    Mod_Util.WriteError "P007", "GenerateAnalyticalPrompts_Click: " & Err.Description
+    MsgBox "Ошибка: " & Err.Description, vbCritical, "Генерация аналитических промтов"
+    Err.Clear
 End Sub
