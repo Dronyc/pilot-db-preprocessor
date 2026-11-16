@@ -97,15 +97,15 @@ Public Function GetProjectRoot() As String
     ' T3.1-fix: читаем фактическое значение диапазона (nm.RefersToRange.Value),
     ' а не строку определения имени (nm.Value).
     On Error Resume Next
-    Dim nm As Name
-    Set nm = wb.Names(NAME_PROJECT_ROOT)
+    Dim nm As name
+    Set nm = wb.names(NAME_PROJECT_ROOT)
     If Err.Number = 0 Then
-        v = CStr(nm.RefersToRange.Value)
+        v = CStr(nm.RefersToRange.value)
         If Err.Number <> 0 Then v = "": Err.Clear
     Else
         Err.Clear
         Set ws = wb.Worksheets("Настройки")
-        If Err.Number = 0 Then v = CStr(ws.Range("B2").Value)
+        If Err.Number = 0 Then v = CStr(ws.Range("B2").value)
         Err.Clear
     End If
     On Error GoTo 0
@@ -146,7 +146,7 @@ Public Function GetSettingLong(ByVal name As String, ByVal defaultValue As Long)
     ' а не строку определения имени (Names(...).Value); при ошибке/недоступности
     ' raw = "" - далее штатный fallback на defaultValue.
     On Error Resume Next
-    raw = Trim$(CStr(ThisWorkbook.Names(name).RefersToRange.Value))
+    raw = Trim$(CStr(ThisWorkbook.names(name).RefersToRange.value))
     If Err.Number <> 0 Then raw = "": Err.Clear
     On Error GoTo 0
     If raw = "" Then
@@ -204,7 +204,7 @@ Public Function GetSettingText(ByVal name As String, ByVal defaultValue As Strin
     ' Читаем фактическое значение диапазона (RefersToRange.Value), а не
     ' строку определения имени (Names(...).Value) - см. T3.1-fix.
     On Error Resume Next
-    raw = Trim$(CStr(ThisWorkbook.Names(name).RefersToRange.Value))
+    raw = Trim$(CStr(ThisWorkbook.names(name).RefersToRange.value))
     If Err.Number <> 0 Then raw = "": Err.Clear
     On Error GoTo 0
     If raw = "" Then
@@ -543,179 +543,144 @@ Public Function DeleteFileIfExists(ByVal filePath As String) As Boolean
     On Error GoTo 0
 End Function
 
-' Создаёт лист "Настройки" (если его нет), заполняет поля, выпадающие
-' списки и именованные диапазоны по разделу 5 спецификации
-' Spec_Dispatcher.md (T3.1 - шесть полей B2:B7; PRE-04 - седьмое поле B8):
-'   B2 ProjectRoot       - Корневая папка проекта (текст; пусто = ThisWorkbook.Path);
-'   B3 CheckMode         - Режим проверки (список: Черновик / Строгая; по умолчанию Черновик);
-'   B4 AutoOpenResults   - Автооткрытие папки результатов (список: да / нет; по умолчанию да);
-'   B5 PromptGenVersion  - Версия промта-генератора (текст; по умолчанию 7.13);
-'   B6 PromptFixVersion  - Версия промта-исправления (текст; по умолчанию 1.0);
-'   B7 MaxTypesPerTable  - Лимит типов в таблице (целое >= 1; по умолчанию 50);
-'   B8 LegendRange       - Диапазон легенды (текст; адрес диапазона легенды
-'                          цветов на первом листе книги-схемы; по умолчанию
-'                          "B1:C3"; PRE-04 - читается кодом через
-'                          GetSettingText в Mod_Structure.BuildFlatStructure).
-' Validation навешивается СТРОГО на свою ячейку (H1 исправлен):
-' CheckMode -> B3, AutoOpenResults -> B4, MaxTypesPerTable -> B7;
-' B2/B5/B6/B8 - текстовые поля без списков.
-' Именованные диапазоны создаются для ВСЕХ семи полей; существующие имена
-' не переопределяются. Лист защищается паролем "pilot", редактируемыми
-' остаются только B2:B8. Существующие значения пользовательских настроек
-' при повторном запуске не перезаписываются (значения по умолчанию
-' проставляются только в пустые ячейки новых/существующих полей).
-' PRE-04c: в конце процедуры вызывается Mod_Patterns.EnsurePatternsSheet -
-' лист «Паттерны» создаётся автоматически вместе с листом «Настройки»
-' (обе точки входа книги идут через EnsureSettingsSheet: RestoreUI и
-' главная процедура подготовки). Вызов защищён On Error Resume Next:
-' сбой подготовки «Паттернов» не блокирует «Настройки»; при ошибке
-' пишется предупреждение U008.
-' W-ANALYTIC-08: добавлена инициализация трёх параметров состояния
-' (шаг 5а, вызов EnsureAnalyticStateFields): "Выжимки и анализ
-' конфигурации", "Разбивка на паттерны", "Разбивка на шаги" - строки
-' после последнего существующего поля (после B11), значения по
-' умолчанию "Нет", выпадающий список "Да;Нет", подсказки в колонке C
-' (тексты - раздел 5 Spec_Dispatcher.md). Логика идемпотентна:
-' существующие подписи не дублируются, пользовательские значения не
-' перезаписываются, B2:B11 не затрагиваются.
+' ============================================================================
+' Создаёт лист "Настройки" (если его нет), заполняет все 13 полей, выпадающие
+' списки и именованные диапазоны. Использует единый массив конфигурации.
+' Логика строго идемпотентна: существующие подписи не дублируются,
+' пользовательские значения в столбце B не перезаписываются.
+' ============================================================================
 Public Sub EnsureSettingsSheet()
     Dim ws As Worksheet
     Dim wb As Workbook
-    Dim RowIdx As Long
-    Dim labels As Variant
-    Dim namesArr As Variant
-    Dim defaults As Variant
     Dim i As Long
+    Dim lastRow As Long
+    Dim targetRow As Long
+    Dim foundCell As Range
+    Dim nmChk As name
     Dim patErr As Boolean
+    Dim r As Long
+    
+    ' Единый массив конфигурации: 0=Название, 1=Значение по умолчанию, 2=Подсказка, 3=Нужен список "Да;Нет" (1=Да, 0=Нет)
+    Dim config As Variant
+    config = Array( _
+        Array("Корень проекта", "", "Путь к корневой папке проекта. Если пусто, используется путь к файлу .xlsm", 0), _
+        Array("Режим проверки", "Строгий", "Режим проверки исходных данных (Строгий / Черновик)", 0), _
+        Array("Автооткрытие папки результатов", "Да", "Автоматически открывать папку результатов после успешной операции", 0), _
+        Array("Версия промта-генератора", "7.13", "Версия промта-генератора", 0), _
+        Array("Версия промта-исправления", "1.0", "Версия промта исправления ошибок", 0), _
+        Array("Макс. кол-во типов в таблице", "50", "Максимальное количество типов для обработки в одной итерации", 0), _
+        Array("Имя листа с легендой", "", "Имя листа в исходной схеме, содержащего легенду", 0), _
+        Array("Диапазон легенды", "", "Адрес диапазона ячеек с легендой (например, B1:C3)", 0), _
+        Array("Имя листа со структурой", "", "Имя листа в исходной схеме, содержащего данные структуры", 0), _
+        Array("Ячейка начала таблицы", "", "Адрес ячейки начала таблицы данных (например, A4)", 0), _
+        Array("Выжимки и анализ конфигурации", "Нет", "Фиксирует генерацию промтов выдержек (00_4) и анализа конфигурации (00_1). Ставится автоматически при нажатии кнопки «Сгенерировать аналитические промты».", 1), _
+        Array("Разбивка на паттерны", "Нет", "Фиксирует завершение итераций по промту 00_2. Ставится вручную пользователем.", 1), _
+        Array("Разбивка на шаги", "Нет", "Фиксирует завершение распределения типов по шагам. Ставится автоматически после успешного парсинга промта 00_3 при полном покрытии.", 1) _
+    )
+    
+    ' Массив имён для именованных диапазонов (должен строго соответствовать порядку в config)
+    Dim namesArr As Variant
+    namesArr = Array( _
+        "ProjectRoot", "CheckMode", "AutoOpenResults", _
+        "PromptGenVersion", "PromptFixVersion", "MaxTypesPerTable", _
+        "LegendSheetName", "LegendRange", "StructureSheet", "StartCell", _
+        "AnalyticsState", "PatternsState", "StepsState" _
+    )
 
     On Error GoTo ErrHandler
-
+    Application.ScreenUpdating = False
     Set wb = ThisWorkbook
 
-    ' 1. Поиск листа "Настройки"; если нет - создать в конце книги
+    ' 1. Поиск или создание листа "Настройки"
     On Error Resume Next
     Set ws = wb.Worksheets("Настройки")
     If Err.Number <> 0 Then
         Err.Clear
         On Error GoTo ErrHandler
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
-        ws.Name = "Настройки"
+        ws.name = "Настройки"
     Else
         On Error GoTo ErrHandler
-        ws.Unprotect Password:="pilot"   ' снимаем защиту перед правкой
+        ws.Unprotect Password:="pilot"
     End If
 
-    ' 2. Подписи (колонка A), имена диапазонов и значения по умолчанию (10 полей, строки 2-11)
-    labels = Array("Корневая папка проекта", _
-                   "Режим проверки", _
-                   "Автооткрытие папки результатов", _
-                   "Версия промта-генератора", _
-                   "Версия промта-исправления", _
-                   "Максимум типов в таблице", _
-                   "Имя листа с легендой", _
-                   "Диапазон легенды", _
-                   "Имя листа со структурой", _
-                   "Ячейка начала таблицы")
-                   
-    namesArr = Array(NAME_PROJECT_ROOT, NAME_CHECK_MODE, NAME_AUTO_OPEN_RESULTS, _
-                     NAME_PROMPT_GEN_VERSION, NAME_PROMPT_FIX_VERSION, _
-                     NAME_MAX_TYPES_PER_TABLE, NAME_LEGEND_SHEET, NAME_LEGEND_RANGE, _
-                     NAME_STRUCTURE_SHEET, NAME_START_CELL)
-                     
-    ' Значения по умолчанию: B9 (Диапазон легенды) = "B1:C3", остальные новые поля пустые
-    defaults = Array("", "Черновик", "да", "7.13", "1.0", CStr(DEFAULT_MAX_TYPES_PER_TABLE), _
-                     "", DEFAULT_LEGEND_RANGE, "", "")
-
-    For i = 0 To 9
-        RowIdx = i + 2
-        ws.Cells(RowIdx, 1).Value = CStr(labels(i))
-        ' значение по умолчанию ставим только если ячейка пуста
-        If Trim(CStr(ws.Cells(RowIdx, 2).Value)) = "" Then
-            If CStr(defaults(i)) <> "" Then
-                ws.Cells(RowIdx, 2).Value = CStr(defaults(i))
-            End If
+    ' 2. Определение последней заполненной строки в столбце A для корректного добавления новых
+    lastRow = 1
+    For r = 2 To 100
+        If Trim$(CStr(ws.Cells(r, 1).value)) <> "" Then
+            lastRow = r
         End If
-    Next i
+    Next r
 
-    ws.Range("A1").Value = "Настройки Препроцессора"
-    ws.Columns("A:C").AutoFit
-
-    ' 3. Validation строго на своих ячейках: B3, B4, B7. Остальные (B8, B10, B11) очищаем от списков.
-    ws.Range("B2").Validation.Delete
-    ws.Range("B8").Validation.Delete
-    ws.Range("B10").Validation.Delete
-    ws.Range("B11").Validation.Delete
-    
-    With ws.Range("B3").Validation
-        .Delete
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, Formula1:="Черновик,Строгая"
-        .IgnoreBlank = True
-        .InCellDropdown = True
-    End With
-    
-    With ws.Range("B4").Validation
-        .Delete
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-             Operator:=xlBetween, Formula1:="да,нет"
-        .IgnoreBlank = True
-        .InCellDropdown = True
-    End With
-    
-    With ws.Range("B7").Validation
-        .Delete
-        .Add Type:=xlValidateWholeNumber, AlertStyle:=xlValidAlertStop, _
-             Operator:=xlGreaterEqual, Formula1:="1"
-        .IgnoreBlank = True
-        .InCellDropdown = True
-        .InputTitle = "Лимит типов в таблице"
-        .ErrorTitle = "Некорректное значение"
-        .InputMessage = "Целое число >= 1 (по умолчанию 50)."
-        .ErrorMessage = "MaxTypesPerTable должно быть целым числом >= 1."
-    End With
-
-    ' 4. Именованные диапазоны для всех 10 полей
-    For i = 0 To 9
+    ' 3. Обработка всех 13 параметров в едином цикле
+    For i = 0 To UBound(config)
+        ' Поиск существующей строки по названию в столбце A
+        Set foundCell = ws.Columns(1).Find(What:=CStr(config(i)(0)), LookIn:=xlValues, LookAt:=xlWhole, MatchCase:=False)
+        
+        If Not foundCell Is Nothing Then
+            targetRow = foundCell.row
+        Else
+            ' Если не найдено, добавляем в первую свободную строку после lastRow
+            targetRow = lastRow + 1
+            ' Дополнительная защита от наложения на случайно заполненные строки ниже
+            Do While Trim$(CStr(ws.Cells(targetRow, 1).value)) <> ""
+                targetRow = targetRow + 1
+            Loop
+            lastRow = targetRow
+        End If
+        
+        ' Запись названия (если строка была создана новой)
+        If foundCell Is Nothing Then
+            ws.Cells(targetRow, 1).value = CStr(config(i)(0))
+        End If
+        
+        ' Запись значения по умолчанию ТОЛЬКО если ячейка B пуста (идемпотентность)
+        If Trim$(CStr(ws.Cells(targetRow, 2).value)) = "" Then
+            ws.Cells(targetRow, 2).value = CStr(config(i)(1))
+        End If
+        
+        ' Запись подсказки в столбец C, если он пуст
+        If Trim$(CStr(ws.Cells(targetRow, 3).value)) = "" Then
+            ws.Cells(targetRow, 3).value = CStr(config(i)(2))
+        End If
+        
+        ' Применение Data Validation
+        If CInt(config(i)(3)) = 1 Then
+            With ws.Cells(targetRow, 2).Validation
+                .Delete
+                .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="Да,Нет" ' <--- ИСПРАВЛЕНО: запятая
+                .IgnoreBlank = True
+                .InCellDropdown = True
+            End With
+        Else
+            ' Очистка валидации для текстовых полей (на случай, если она там была ошибочно)
+            ws.Cells(targetRow, 2).Validation.Delete
+        End If
+        
+        ' Создание именованного диапазона (если не существует)
         On Error Resume Next
-        Dim nmChk As Name
-        Set nmChk = wb.Names(namesArr(i))
+        Set nmChk = wb.names(CStr(namesArr(i)))
         If Err.Number <> 0 Then
             Err.Clear
             On Error GoTo ErrHandler
-            wb.Names.Add Name:=namesArr(i), _
-                         RefersTo:="=" & ws.Name & "!$B$" & (i + 2)
+            wb.names.Add name:=CStr(namesArr(i)), RefersTo:="=" & ws.name & "!$B$" & targetRow
         End If
         On Error GoTo ErrHandler
         Set nmChk = Nothing
     Next i
 
-    ' 5. Снятие защиты на время доработки листа (W-ANALYTIC-08): поля
-    ' B2:B11 остаются разблокированными, добавляются новые строки.
-    ws.Unprotect Password:=SHEET_PASSWORD
+    ' 4. Форматирование и защита листа
+    ws.Range("A1").value = "Настройки Препроцессора"
+    ws.Columns("A:C").AutoFit
 
-    ' 5а. W-ANALYTIC-08: три параметра состояния (первая пустая строка
-    ' после последнего существующего поля, фактически после B11): подписи
-    ' в A, значения по умолчанию "Нет" в B со списком "Да;Нет", подсказки
-    ' в C. Идемпотентно: существующие строки не дублируются,
-    ' пользовательские значения не перезаписываются, B2:B11 не затрагиваются.
-    ' Внутри - своя строгая обработка ошибок (WriteError U003).
-    EnsureAnalyticStateFields wb, ws
-
-    ' 5б. Защита листа: разблокированы все ячейки ввода B2:B14
-    ' (включая новые параметры состояния, .Locked = False).
+    ' Разблокируем все ячейки, затем блокируем только столбец B от 2-й до последней строки настроек
     ws.Cells.Locked = True
-    ws.Range("B2:B14").Locked = False
-    ws.Protect Password:=SHEET_PASSWORD
+    ws.Range("B2:B" & lastRow).Locked = False
+    ws.Protect Password:="pilot"
 
-    WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён (10 полей, B2:B11; " & _
-             "W-ANALYTIC-08: +3 параметра состояния, список Да;Нет)"
+    WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён (13 полей, идемпотентная инициализация)"
 
-    ' 6. Информационная запись в журнал о зарезервированных полях
-    WriteLog "EnsureSettingsSheet: поля CheckMode, AutoOpenResults, PromptGenVersion, " & _
-             "PromptFixVersion, LegendSheet, StructureSheet, StartCell созданы. " & _
-             "Чтение некоторых настроек кодом пока не реализовано (зарезервировано)."
-
-    ' 7. Подготовка листа "Паттерны"
+    ' 5. Подготовка листа "Паттерны" (сохраняем существующую логику вызова)
     patErr = False
     On Error Resume Next
     Mod_Patterns.EnsurePatternsSheet
@@ -723,16 +688,16 @@ Public Sub EnsureSettingsSheet()
     Err.Clear
     On Error GoTo 0
     If patErr Then
-        WriteWarning "U008", "EnsureSettingsSheet: не удалось подготовить лист " & _
-                   "'Паттерны' (Mod_Patterns.EnsurePatternsSheet). Лист 'Настройки' " & _
-                   "готов; создайте лист 'Паттерны' через 'Восстановить кнопки и оформление'."
+        WriteWarning "U008", "EnsureSettingsSheet: не удалось подготовить лист 'Паттерны' (Mod_Patterns.EnsurePatternsSheet)."
     End If
+    
+    Application.ScreenUpdating = True
     Exit Sub
 
 ErrHandler:
+    Application.ScreenUpdating = True
     WriteError "U003", "EnsureSettingsSheet: ошибка подготовки листа 'Настройки'. Ошибка: " & Err.Description
-    MsgBox "Ошибка U003: не удалось подготовить лист 'Настройки'." & vbCrLf & Err.Description, _
-           vbCritical, "Настройки"
+    MsgBox "Ошибка U003: не удалось подготовить лист 'Настройки'." & vbCrLf & Err.Description, vbCritical, "Настройки"
     Err.Clear
 End Sub
 
@@ -769,7 +734,7 @@ Private Sub EnsureAnalyticStateFields(ByVal wb As Workbook, ByVal ws As Workshee
     Dim cellHint As Range
     Dim rw As Long
     Dim found As Boolean
-    Dim nmChk As Name
+    Dim nmChk As name
 
     On Error GoTo ErrHandler
 
@@ -790,7 +755,7 @@ Private Sub EnsureAnalyticStateFields(ByVal wb As Workbook, ByVal ws As Workshee
     ' после существующих настроек; ограничимся разумным диапазоном A2:A100).
     lastRow = 1
     For rw = 2 To 100
-        If Trim$(CStr(ws.Cells(rw, 1).Value)) <> "" Then lastRow = rw
+        If Trim$(CStr(ws.Cells(rw, 1).value)) <> "" Then lastRow = rw
     Next rw
 
     For i = 0 To 2
@@ -801,13 +766,13 @@ Private Sub EnsureAnalyticStateFields(ByVal wb As Workbook, ByVal ws As Workshee
                         LookIn:=xlValues, LookAt:=xlWhole, MatchCase:=False)
         If Not cellLabel Is Nothing Then
             found = True
-            targetRow = cellLabel.Row
+            targetRow = cellLabel.row
         End If
 
         ' 2. Не найдено - первая пустая строка колонки A после последнего поля.
         If Not found Then
             targetRow = lastRow + 1
-            ws.Cells(targetRow, 1).Value = CStr(labels(i))
+            ws.Cells(targetRow, 1).value = CStr(labels(i))
             lastRow = targetRow
         End If
 
@@ -816,8 +781,8 @@ Private Sub EnsureAnalyticStateFields(ByVal wb As Workbook, ByVal ws As Workshee
 
         ' 3. Значение по умолчанию "Нет" - только в пустую ячейку
         ' (повторный вызов не сбрасывает установленное пользователем).
-        If Trim$(CStr(cellValue.Value)) = "" Then
-            cellValue.Value = "Нет"
+        If Trim$(CStr(cellValue.value)) = "" Then
+            cellValue.value = "Нет"
         End If
 
         ' 4. Выпадающий список "Да;Нет" строго на своей ячейке B
@@ -825,25 +790,25 @@ Private Sub EnsureAnalyticStateFields(ByVal wb As Workbook, ByVal ws As Workshee
         With cellValue.Validation
             .Delete
             .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-                 Operator:=xlBetween, Formula1:="Да;Нет"
+                 Operator:=xlBetween, Formula1:="Да; Нет"
             .IgnoreBlank = True
             .InCellDropdown = True
         End With
 
         ' 5. Подсказка в колонке C (обновляется актуальным текстом).
-        cellHint.Value = CStr(hints(i))
+        cellHint.value = CStr(hints(i))
 
         ' 6. Ячейка ввода разблокирована под защитой "pilot".
         cellValue.Locked = False
 
         ' 7. Именованный диапазон (существующие имена не переопределяются).
         On Error Resume Next
-        Set nmChk = wb.Names(CStr(namesArr(i)))
+        Set nmChk = wb.names(CStr(namesArr(i)))
         If Err.Number <> 0 Then
             Err.Clear
             On Error GoTo ErrHandler
-            wb.Names.Add Name:=CStr(namesArr(i)), _
-                         RefersTo:="=" & ws.Name & "!$B$" & targetRow
+            wb.names.Add name:=CStr(namesArr(i)), _
+                         RefersTo:="=" & ws.name & "!$B$" & targetRow
         End If
         On Error GoTo ErrHandler
         Set nmChk = Nothing
