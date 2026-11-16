@@ -50,6 +50,14 @@ Private Const NAME_START_CELL As String = "StartCell"
 Public Const DEFAULT_START_CELL As String = "A8" ' Соответствует старому FIRST_ROW=8, Col=1
 Private Const NAME_STRUCTURE_SHEET As String = "StructureSheet"
 
+' W-ANALYTIC-08: имена именованных диапазонов трёх параметров состояния
+' (раздел 5 спецификации Spec_Dispatcher.md): "Выжимки и анализ конфигурации",
+' "Разбивка на паттерны", "Разбивка на шаги". Значения по умолчанию - "Нет";
+' значения ставятся только в пустые ячейки (идемпотентность).
+Private Const NAME_ANALYTICS_STATE As String = "AnalyticsState"
+Private Const NAME_PATTERNS_STATE As String = "PatternsState"
+Private Const NAME_STEPS_STATE As String = "StepsState"
+
 ' Значение по умолчанию для MaxTypesPerTable (T3.1): используется
 ' Mod_Prompt при подстановке {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ} и как default
 ' для GetSettingLong.
@@ -562,6 +570,14 @@ End Function
 ' главная процедура подготовки). Вызов защищён On Error Resume Next:
 ' сбой подготовки «Паттернов» не блокирует «Настройки»; при ошибке
 ' пишется предупреждение U008.
+' W-ANALYTIC-08: добавлена инициализация трёх параметров состояния
+' (шаг 5а, вызов EnsureAnalyticStateFields): "Выжимки и анализ
+' конфигурации", "Разбивка на паттерны", "Разбивка на шаги" - строки
+' после последнего существующего поля (после B11), значения по
+' умолчанию "Нет", выпадающий список "Да;Нет", подсказки в колонке C
+' (тексты - раздел 5 Spec_Dispatcher.md). Логика идемпотентна:
+' существующие подписи не дублируются, пользовательские значения не
+' перезаписываются, B2:B11 не затрагиваются.
 Public Sub EnsureSettingsSheet()
     Dim ws As Worksheet
     Dim wb As Workbook
@@ -673,12 +689,26 @@ Public Sub EnsureSettingsSheet()
         Set nmChk = Nothing
     Next i
 
-    ' 5. Защита листа: разблокированы B2:B11
-    ws.Cells.Locked = True
-    ws.Range("B2:B11").Locked = False
-    ws.Protect Password:="pilot"
+    ' 5. Снятие защиты на время доработки листа (W-ANALYTIC-08): поля
+    ' B2:B11 остаются разблокированными, добавляются новые строки.
+    ws.Unprotect Password:=SHEET_PASSWORD
 
-    WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён (10 полей, B2:B11)"
+    ' 5а. W-ANALYTIC-08: три параметра состояния (первая пустая строка
+    ' после последнего существующего поля, фактически после B11): подписи
+    ' в A, значения по умолчанию "Нет" в B со списком "Да;Нет", подсказки
+    ' в C. Идемпотентно: существующие строки не дублируются,
+    ' пользовательские значения не перезаписываются, B2:B11 не затрагиваются.
+    ' Внутри - своя строгая обработка ошибок (WriteError U003).
+    EnsureAnalyticStateFields wb, ws
+
+    ' 5б. Защита листа: разблокированы все ячейки ввода B2:B14
+    ' (включая новые параметры состояния, .Locked = False).
+    ws.Cells.Locked = True
+    ws.Range("B2:B14").Locked = False
+    ws.Protect Password:=SHEET_PASSWORD
+
+    WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён (10 полей, B2:B11; " & _
+             "W-ANALYTIC-08: +3 параметра состояния, список Да;Нет)"
 
     ' 6. Информационная запись в журнал о зарезервированных полях
     WriteLog "EnsureSettingsSheet: поля CheckMode, AutoOpenResults, PromptGenVersion, " & _
@@ -703,5 +733,129 @@ ErrHandler:
     WriteError "U003", "EnsureSettingsSheet: ошибка подготовки листа 'Настройки'. Ошибка: " & Err.Description
     MsgBox "Ошибка U003: не удалось подготовить лист 'Настройки'." & vbCrLf & Err.Description, _
            vbCritical, "Настройки"
+    Err.Clear
+End Sub
+
+' ---------------------------------------------------------------------------
+' W-ANALYTIC-08: инициализация трёх параметров состояния на листе "Настройки"
+' (раздел 5 спецификации Spec_Dispatcher.md):
+'   A) "Выжимки и анализ конфигурации" (AnalyticsState);
+'   B) "Разбивка на паттерны"         (PatternsState);
+'   C) "Разбивка на шаги"             (StepsState).
+' Поведение по каждому параметру:
+'   * если подпись уже есть в колонке A диапазона A2:A100 - строка
+'     переиспользуется (строки не дублируются, B2:B11 не сдвигаются);
+'   * иначе находится первая пустая строка колонки A после последнего
+'     заполненного поля (фактически следующая за B11) и поле создаётся;
+'   * значение по умолчанию "Нет" ставится ТОЛЬКО в пустую ячейку B
+'     (пользовательские значения не сбрасываются при повторном вызове);
+'   * Data Validation xlValidateList Formula1:="Да;Нет" перенавешивается
+'     на свою ячейку B (идемпотентно);
+'   * подсказка (текст назначения из раздела 5) записывается в колонку C;
+'   * именованный диапазон создаётся, если ещё не существует.
+' Процедура вызывается из EnsureSettingsSheet при снятой защите листа;
+' новые ячейки ввода (B) разблокируются (.Locked = False) до повторной
+' защиты. Строгая обработка ошибок: On Error GoTo, код ошибки U003
+' (реестр Mod_Util), логирование через WriteLog / WriteError.
+Private Sub EnsureAnalyticStateFields(ByVal wb As Workbook, ByVal ws As Worksheet)
+    Dim labels As Variant
+    Dim namesArr As Variant
+    Dim hints As Variant
+    Dim i As Long
+    Dim lastRow As Long
+    Dim targetRow As Long
+    Dim cellLabel As Range
+    Dim cellValue As Range
+    Dim cellHint As Range
+    Dim rw As Long
+    Dim found As Boolean
+    Dim nmChk As Name
+
+    On Error GoTo ErrHandler
+
+    labels = Array("Выжимки и анализ конфигурации", _
+                   "Разбивка на паттерны", _
+                   "Разбивка на шаги")
+
+    namesArr = Array(NAME_ANALYTICS_STATE, NAME_PATTERNS_STATE, NAME_STEPS_STATE)
+
+    hints = Array( _
+        "Фиксирует генерацию промтов выдержек (00_4) и анализа конфигурации (00_1). " & _
+        "Ставится автоматически при нажатии кнопки «Сгенерировать аналитические промты».", _
+        "Фиксирует завершение итераций по промту 00_2. Ставится вручную пользователем.", _
+        "Фиксирует завершение распределения типов по шагам. Ставится автоматически " & _
+        "после успешного парсинга промта 00_3 при полном покрытии.")
+
+    ' Последняя заполненная строка подписей (для поиска первой пустой строки
+    ' после существующих настроек; ограничимся разумным диапазоном A2:A100).
+    lastRow = 1
+    For rw = 2 To 100
+        If Trim$(CStr(ws.Cells(rw, 1).Value)) <> "" Then lastRow = rw
+    Next rw
+
+    For i = 0 To 2
+        ' 1. Ищем существующую подпись (идемпотентность: не дублируем поле).
+        found = False
+        targetRow = 0
+        Set cellLabel = ws.Range("A2:A100").Find(What:=CStr(labels(i)), _
+                        LookIn:=xlValues, LookAt:=xlWhole, MatchCase:=False)
+        If Not cellLabel Is Nothing Then
+            found = True
+            targetRow = cellLabel.Row
+        End If
+
+        ' 2. Не найдено - первая пустая строка колонки A после последнего поля.
+        If Not found Then
+            targetRow = lastRow + 1
+            ws.Cells(targetRow, 1).Value = CStr(labels(i))
+            lastRow = targetRow
+        End If
+
+        Set cellValue = ws.Cells(targetRow, 2)
+        Set cellHint = ws.Cells(targetRow, 3)
+
+        ' 3. Значение по умолчанию "Нет" - только в пустую ячейку
+        ' (повторный вызов не сбрасывает установленное пользователем).
+        If Trim$(CStr(cellValue.Value)) = "" Then
+            cellValue.Value = "Нет"
+        End If
+
+        ' 4. Выпадающий список "Да;Нет" строго на своей ячейке B
+        ' (перенавешивание идемпотентно: Delete + Add).
+        With cellValue.Validation
+            .Delete
+            .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
+                 Operator:=xlBetween, Formula1:="Да;Нет"
+            .IgnoreBlank = True
+            .InCellDropdown = True
+        End With
+
+        ' 5. Подсказка в колонке C (обновляется актуальным текстом).
+        cellHint.Value = CStr(hints(i))
+
+        ' 6. Ячейка ввода разблокирована под защитой "pilot".
+        cellValue.Locked = False
+
+        ' 7. Именованный диапазон (существующие имена не переопределяются).
+        On Error Resume Next
+        Set nmChk = wb.Names(CStr(namesArr(i)))
+        If Err.Number <> 0 Then
+            Err.Clear
+            On Error GoTo ErrHandler
+            wb.Names.Add Name:=CStr(namesArr(i)), _
+                         RefersTo:="=" & ws.Name & "!$B$" & targetRow
+        End If
+        On Error GoTo ErrHandler
+        Set nmChk = Nothing
+    Next i
+
+    WriteLog "EnsureAnalyticStateFields: параметры состояния 'Выжимки и анализ " & _
+             "конфигурации', 'Разбивка на паттерны', 'Разбивка на шаги' " & _
+             "проверены/созданы (список Да;Нет, подсказки в колонке C)"
+    Exit Sub
+
+ErrHandler:
+    WriteError "U003", "EnsureAnalyticStateFields: ошибка добавления параметров " & _
+               "состояния на лист 'Настройки'. Ошибка: " & Err.Description
     Err.Clear
 End Sub
