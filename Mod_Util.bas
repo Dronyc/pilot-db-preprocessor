@@ -58,6 +58,9 @@ Private Const NAME_ANALYTICS_STATE As String = "AnalyticsState"
 Private Const NAME_PATTERNS_STATE As String = "PatternsState"
 Private Const NAME_STEPS_STATE As String = "StepsState"
 
+' W-ANALYTIC-09: имя именованного диапазона для номера последнего шага
+Private Const NAME_LAST_STEP_NUMBER As String = "LastStepNumber"
+
 ' Значение по умолчанию для MaxTypesPerTable (T3.1): используется
 ' Mod_Prompt при подстановке {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ} и как default
 ' для GetSettingLong.
@@ -544,7 +547,7 @@ Public Function DeleteFileIfExists(ByVal filePath As String) As Boolean
 End Function
 
 ' ============================================================================
-' Создаёт лист "Настройки" (если его нет), заполняет все 13 полей, выпадающие
+' Создаёт лист "Настройки" (если его нет), заполняет все 14 полей, выпадающие
 ' списки и именованные диапазоны. Использует единый массив конфигурации.
 ' Логика строго идемпотентна: существующие подписи не дублируются,
 ' пользовательские значения в столбце B не перезаписываются.
@@ -556,7 +559,7 @@ Public Sub EnsureSettingsSheet()
     Dim lastRow As Long
     Dim targetRow As Long
     Dim foundCell As Range
-    Dim nmChk As name
+    Dim nmChk As Name
     Dim patErr As Boolean
     Dim r As Long
     
@@ -575,7 +578,8 @@ Public Sub EnsureSettingsSheet()
         Array("Ячейка начала таблицы", "", "Адрес ячейки начала таблицы данных (например, A4)", 0), _
         Array("Выжимки и анализ конфигурации", "Нет", "Фиксирует генерацию промтов выдержек (00_4) и анализа конфигурации (00_1). Ставится автоматически при нажатии кнопки «Сгенерировать аналитические промты».", 1), _
         Array("Разбивка на паттерны", "Нет", "Фиксирует завершение итераций по промту 00_2. Ставится вручную пользователем.", 1), _
-        Array("Разбивка на шаги", "Нет", "Фиксирует завершение распределения типов по шагам. Ставится автоматически после успешного парсинга промта 00_3 при полном покрытии.", 1) _
+        Array("Разбивка на шаги", "Нет", "Фиксирует завершение распределения типов по шагам. Ставится автоматически после успешного парсинга промта 00_3 при полном покрытии.", 1), _
+        Array("Номер последнего шага", "нет", "Номер последнего обработанного шага (нет, 00, 01, 01.1, 02 и т.д.). Обновляется автоматически при разборе ответа ИИ.", 0) _
     )
     
     ' Массив имён для именованных диапазонов (должен строго соответствовать порядку в config)
@@ -584,7 +588,7 @@ Public Sub EnsureSettingsSheet()
         "ProjectRoot", "CheckMode", "AutoOpenResults", _
         "PromptGenVersion", "PromptFixVersion", "MaxTypesPerTable", _
         "LegendSheetName", "LegendRange", "StructureSheet", "StartCell", _
-        "AnalyticsState", "PatternsState", "StepsState" _
+        "AnalyticsState", "PatternsState", "StepsState", "LastStepNumber" _
     )
 
     On Error GoTo ErrHandler
@@ -598,7 +602,7 @@ Public Sub EnsureSettingsSheet()
         Err.Clear
         On Error GoTo ErrHandler
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
-        ws.name = "Настройки"
+        ws.Name = "Настройки"
     Else
         On Error GoTo ErrHandler
         ws.Unprotect Password:="pilot"
@@ -607,23 +611,23 @@ Public Sub EnsureSettingsSheet()
     ' 2. Определение последней заполненной строки в столбце A для корректного добавления новых
     lastRow = 1
     For r = 2 To 100
-        If Trim$(CStr(ws.Cells(r, 1).value)) <> "" Then
+        If Trim$(CStr(ws.Cells(r, 1).Value)) <> "" Then
             lastRow = r
         End If
     Next r
 
-    ' 3. Обработка всех 13 параметров в едином цикле
+    ' 3. Обработка всех 14 параметров в едином цикле
     For i = 0 To UBound(config)
         ' Поиск существующей строки по названию в столбце A
         Set foundCell = ws.Columns(1).Find(What:=CStr(config(i)(0)), LookIn:=xlValues, LookAt:=xlWhole, MatchCase:=False)
         
         If Not foundCell Is Nothing Then
-            targetRow = foundCell.row
+            targetRow = foundCell.Row
         Else
             ' Если не найдено, добавляем в первую свободную строку после lastRow
             targetRow = lastRow + 1
             ' Дополнительная защита от наложения на случайно заполненные строки ниже
-            Do While Trim$(CStr(ws.Cells(targetRow, 1).value)) <> ""
+            Do While Trim$(CStr(ws.Cells(targetRow, 1).Value)) <> ""
                 targetRow = targetRow + 1
             Loop
             lastRow = targetRow
@@ -631,24 +635,24 @@ Public Sub EnsureSettingsSheet()
         
         ' Запись названия (если строка была создана новой)
         If foundCell Is Nothing Then
-            ws.Cells(targetRow, 1).value = CStr(config(i)(0))
+            ws.Cells(targetRow, 1).Value = CStr(config(i)(0))
         End If
         
         ' Запись значения по умолчанию ТОЛЬКО если ячейка B пуста (идемпотентность)
-        If Trim$(CStr(ws.Cells(targetRow, 2).value)) = "" Then
-            ws.Cells(targetRow, 2).value = CStr(config(i)(1))
+        If Trim$(CStr(ws.Cells(targetRow, 2).Value)) = "" Then
+            ws.Cells(targetRow, 2).Value = CStr(config(i)(1))
         End If
         
         ' Запись подсказки в столбец C, если он пуст
-        If Trim$(CStr(ws.Cells(targetRow, 3).value)) = "" Then
-            ws.Cells(targetRow, 3).value = CStr(config(i)(2))
+        If Trim$(CStr(ws.Cells(targetRow, 3).Value)) = "" Then
+            ws.Cells(targetRow, 3).Value = CStr(config(i)(2))
         End If
         
         ' Применение Data Validation
         If CInt(config(i)(3)) = 1 Then
             With ws.Cells(targetRow, 2).Validation
                 .Delete
-                .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="Да,Нет" ' <--- ИСПРАВЛЕНО: запятая
+                .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="Да;Нет"
                 .IgnoreBlank = True
                 .InCellDropdown = True
             End With
@@ -659,18 +663,18 @@ Public Sub EnsureSettingsSheet()
         
         ' Создание именованного диапазона (если не существует)
         On Error Resume Next
-        Set nmChk = wb.names(CStr(namesArr(i)))
+        Set nmChk = wb.Names(CStr(namesArr(i)))
         If Err.Number <> 0 Then
             Err.Clear
             On Error GoTo ErrHandler
-            wb.names.Add name:=CStr(namesArr(i)), RefersTo:="=" & ws.name & "!$B$" & targetRow
+            wb.Names.Add Name:=CStr(namesArr(i)), RefersTo:="=" & ws.Name & "!$B$" & targetRow
         End If
         On Error GoTo ErrHandler
         Set nmChk = Nothing
     Next i
 
     ' 4. Форматирование и защита листа
-    ws.Range("A1").value = "Настройки Препроцессора"
+    ws.Range("A1").Value = "Настройки Препроцессора"
     ws.Columns("A:C").AutoFit
 
     ' Разблокируем все ячейки, затем блокируем только столбец B от 2-й до последней строки настроек
@@ -678,7 +682,7 @@ Public Sub EnsureSettingsSheet()
     ws.Range("B2:B" & lastRow).Locked = False
     ws.Protect Password:="pilot"
 
-    WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён (13 полей, идемпотентная инициализация)"
+    WriteLog "EnsureSettingsSheet: лист 'Настройки' создан/обновлён (14 полей, идемпотентная инициализация)"
 
     ' 5. Подготовка листа "Паттерны" (сохраняем существующую логику вызова)
     patErr = False
