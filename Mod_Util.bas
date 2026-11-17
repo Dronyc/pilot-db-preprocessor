@@ -652,7 +652,7 @@ Public Sub EnsureSettingsSheet()
         If CInt(config(i)(3)) = 1 Then
             With ws.Cells(targetRow, 2).Validation
                 .Delete
-                .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="Да;Нет"
+                .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, Formula1:="Да,Нет"
                 .IgnoreBlank = True
                 .InCellDropdown = True
             End With

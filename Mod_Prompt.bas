@@ -2833,6 +2833,201 @@ Public Sub CommandParseAiResponse()
            "Примечание: запись в лист «Паттерны» отложена до задачи W7.3-PATTERNS-UPDATE.", vbInformation, "Разбор ответа ИИ"
 End Sub
 
+' ============================================================================
+' W-ANALYTIC-05: Итеративная генерация промтов 00_2 / 00_3 (кнопка 13).
+' Выбор шаблона: "Разбивка на паттерны" (PatternsState) = "Нет" -> 00_2,
+' "Да" -> 00_3. Номер итерации N - максимум из Prompt_00_X_iter*.md в
+' папках "05_Фрагменты шагов" и "Архив" + 1 (GetNextIterationNumber,
+' безопасный обход через GetFileListArray). Подстановка плейсхолдеров -
+' по актуальным шаблонам W-ANALYTIC-01. {LAST_STEP_NUMBER} читается из
+' параметра LastStepNumber (W-ANALYTIC-09).
+' ЕДИНСТВЕННАЯ реализация имени CommandGenerateTables в проекте (заглушка
+' S0 из Mod_UI удалена - W-ANALYTIC-05-FIX, иначе "Ambiguous name detected").
+' ============================================================================
+Public Sub CommandGenerateTables()
+    Dim root As String
+    Dim promptsPath As String
+    Dim fragmentsPath As String
+    Dim archivePath As String
+    Dim templatePath As String
+    Dim template As String
+    Dim result As String
+    Dim patternsState As String
+    Dim promptType As String
+    Dim nextIter As Long
+    Dim fileName As String
+    Dim filePath As String
+    Dim schemaFolder As String
+    Dim descFolder As String
+    Dim extraFolder As String
+    Dim schemaFile As String
+    Dim descFile As String
+    Dim extraList As String
+    Dim lastStep As String
+    Dim profile As String
+    Dim limitTypes As Long
+
+    On Error GoTo ErrHandler
+
+    root = NormPath(Mod_Util.GetProjectRoot())
+    If root = "" Then
+        MsgBox "Корневая папка проекта не задана.", vbExclamation, "Ошибка"
+        Exit Sub
+    End If
+
+    promptsPath = root & "\04_Промты\Шаблоны"
+    fragmentsPath = root & "\02_Подготовка данных\05_Фрагменты шагов"
+    archivePath = root & "\02_Подготовка данных\Архив"
+
+    ' 1. Выбор шаблона по настройке "Разбивка на паттерны"
+    patternsState = Mod_Util.GetSettingText("PatternsState", "Нет")
+
+    If StrComp(patternsState, "Да", vbTextCompare) = 0 Then
+        promptType = "3"
+        templatePath = promptsPath & "\prompt_step_00_3_template.md"
+    Else
+        promptType = "2"
+        templatePath = promptsPath & "\prompt_step_00_2_template.md"
+    End If
+
+    ' 2. Чтение шаблона (безопасное UTF-8/CP1251)
+    template = ReadTextFile(templatePath)
+    If template = "" Then
+        Mod_Util.WriteError "P002", "CommandGenerateTables: не найден шаблон " & templatePath
+        MsgBox "Ошибка P002: не найден шаблон промта 00_" & promptType & ":" & vbCrLf & templatePath, _
+               vbCritical, "Сформировать таблицы"
+        Exit Sub
+    End If
+
+    ' 3. Номер следующей итерации (безопасно: GetFileListArray, без вложенных Dir())
+    nextIter = GetNextIterationNumber(fragmentsPath, archivePath, promptType)
+
+    ' 4. Общие входы для обоих шаблонов
+    schemaFolder = root & "\02_Подготовка данных\01_Схема"
+    descFolder = root & "\02_Подготовка данных\02_Описание"
+    extraFolder = root & "\02_Подготовка данных\04_Дополнительные данные"
+
+    schemaFile = GetNewestSchemaArtifactName(schemaFolder)
+    If schemaFile = "" Then schemaFile = FirstMatchFile(schemaFolder, "*.xlsx")
+
+    ' Поиск файла описания: универсальная маска (любой формат)
+    descFile = FirstMatchFile(descFolder, "Выжимка_Описание.*")
+    If descFile = "" Then descFile = "нет"
+
+    extraList = ListFolderFiles(extraFolder)
+    If extraList = "" Then extraList = "нет"
+
+    ' 5. Подстановка плейсхолдеров по типу промта
+    If promptType = "2" Then
+        ' Промт 00_2: Схема обязательна (шаблон: "Пусто - недопустимо")
+        If schemaFile = "" Then
+            Mod_Util.WriteError "P002", "CommandGenerateTables: не найдена адаптированная схема в " & schemaFolder
+            MsgBox "Ошибка P002: не найдена адаптированная схема (*.xlsx) в папке:" & vbCrLf & schemaFolder, _
+                   vbCritical, "Сформировать таблицы"
+            Exit Sub
+        End If
+        result = template
+        result = ReplaceIfPresent(result, "{SCHEMA_FILENAME}", schemaFile)
+        result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descFile)
+        result = ReplaceIfPresent(result, "{EXTRA_DATA_LIST}", extraList)
+        result = ReplaceIfPresent(result, "{{СПИСОК_ИЗВЕСТНЫХ_ПАТТЕРНОВ}}", Mod_Patterns.GetKnownPatterns())
+        result = ReplaceIfPresent(result, "{{ИСКЛЮЧЕНИЯ_ПАТТЕРНОВ}}", Mod_Patterns.GetPatternExceptions())
+    Else
+        ' Промт 00_3: {LAST_STEP_NUMBER} из настройки LastStepNumber (W-ANALYTIC-09)
+        lastStep = Mod_Util.GetSettingText("LastStepNumber", "нет")
+        If Trim$(lastStep) = "" Then lastStep = "нет"
+        profile = GetPromptProfile(lastStep)
+        If profile = "" Then
+            Mod_Util.WriteError "P002", "CommandGenerateTables: невалидный номер последнего шага '" & lastStep & "'"
+            MsgBox "Ошибка P002: невалидное значение «Номер последнего шага»: '" & lastStep & "'." & vbCrLf & _
+                   "Допустимые формы: нет, 0, 00, 00.i, 01, 01.i, 01.i.k, NN (>= 02)." & vbCrLf & _
+                   "Обновите значение на листе «Настройки».", vbCritical, "Сформировать таблицы"
+            Exit Sub
+        End If
+        If schemaFile = "" Then
+            Mod_Util.WriteError "P002", "CommandGenerateTables: не найдена адаптированная схема (вход 00_3) в " & schemaFolder
+            MsgBox "Ошибка P002: не найден входной файл схемы для промта 00_3 в папке:" & vbCrLf & schemaFolder, _
+                   vbCritical, "Сформировать таблицы"
+            Exit Sub
+        End If
+        limitTypes = Mod_Util.GetSettingLong("MaxTypesPerTable", 50)
+        result = template
+        result = ReplaceIfPresent(result, "{LAST_STEP_NUMBER}", lastStep)
+        result = ReplaceIfPresent(result, "{INPUT_FILENAME}", schemaFile)
+        result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descFile)
+        result = ReplaceIfPresent(result, "{EXTRA_DATA_LIST}", extraList)
+        result = ReplaceIfPresent(result, "{ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ}", CStr(limitTypes))
+    End If
+
+    ' 6. Сохранение (папка создаётся при необходимости)
+    EnsureFolder fragmentsPath
+    fileName = "Prompt_00_" & promptType & "_iter" & CStr(nextIter) & ".md"
+    filePath = fragmentsPath & "\" & fileName
+    SaveTextFileUtf8 filePath, result
+
+    ' 7. Уведомление и лог
+    Dim msg As String
+    msg = "Сформирован промт 00_" & promptType & " (итерация " & CStr(nextIter) & "):" & vbCrLf & filePath
+    Mod_Util.WriteLog "CommandGenerateTables: " & msg
+    MsgBox msg, vbInformation, "Сформировать таблицы"
+
+    Exit Sub
+
+ErrHandler:
+    Mod_Util.WriteError "P002", "CommandGenerateTables: " & Err.Description
+    MsgBox "Ошибка P002: не удалось сформировать промт." & vbCrLf & Err.Description, _
+           vbCritical, "Сформировать таблицы"
+    Err.Clear
+End Sub
+
+' ---------------------------------------------------------------------------
+' Вспомогательная функция: определяет следующий номер итерации для промта 00_2 или 00_3.
+' Сканирует папки "05_Фрагменты шагов" и "Архив" с использованием безопасного
+' обхода GetFileListArray (защита от сброса stateful-итератора Dir()).
+' ---------------------------------------------------------------------------
+Private Function GetNextIterationNumber(ByVal folderFragments As String, ByVal folderArchive As String, ByVal promptType As String) As Long
+    Dim maxN As Long
+    Dim fileArr As Variant
+    Dim i As Long
+    Dim fName As String
+    Dim prefix As String
+    Dim numStr As String
+    
+    maxN = 0
+    prefix = "Prompt_00_" & promptType & "_iter"
+    
+    ' Сканирование папки фрагментов
+    If FolderExistsSafe(folderFragments) Then
+        fileArr = GetFileListArray(folderFragments)
+        For i = LBound(fileArr) To UBound(fileArr)
+            fName = CStr(fileArr(i))
+            If Left$(fName, Len(prefix)) = prefix And Right$(fName, 3) = ".md" Then
+                numStr = Mid$(fName, Len(prefix) + 1, Len(fName) - Len(prefix) - 3)
+                If IsNumeric(numStr) Then
+                    If CLng(numStr) > maxN Then maxN = CLng(numStr)
+                End If
+            End If
+        Next i
+    End If
+    
+    ' Сканирование папки архива
+    If FolderExistsSafe(folderArchive) Then
+        fileArr = GetFileListArray(folderArchive)
+        For i = LBound(fileArr) To UBound(fileArr)
+            fName = CStr(fileArr(i))
+            If Left$(fName, Len(prefix)) = prefix And Right$(fName, 3) = ".md" Then
+                numStr = Mid$(fName, Len(prefix) + 1, Len(fName) - Len(prefix) - 3)
+                If IsNumeric(numStr) Then
+                    If CLng(numStr) > maxN Then maxN = CLng(numStr)
+                End If
+            End If
+        Next i
+    End If
+    
+    ' Если файлов не найдено, maxN = 0, функция вернёт 1
+    GetNextIterationNumber = maxN + 1
+End Function
+
 ' ---------------------------------------------------------------------------
 ' W-ANALYTIC-04 / W-ANALYTIC-04-FIX: Генерация аналитических промтов 00_1 и 00_4
 ' ИСПРАВЛЕНИЕ: список файлов каждой папки собирается в массив ДО начала

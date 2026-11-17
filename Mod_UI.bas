@@ -353,43 +353,12 @@ ErrHandler:
 End Sub
 
 ' ------------------------------------------------------------
-' PRE-04c / W7.1: Реализация команд листа «Препроцессор» (кнопки 13-14).
+' W-ANALYTIC-05 / W-ANALYTIC-06: команды кнопок 13-14 реализованы
+' в Mod_Prompt (CommandGenerateTables, CommandParseAiResponse).
+' Заглушки из этого модуля удалены: неквалифицированный OnAction
+' ("CommandGenerateTables") при двух одноимённых Public Sub в разных
+' модулях даёт runtime-ошибку "Ambiguous name detected".
 ' ------------------------------------------------------------
-
-Public Sub CommandGenerateTables()
-    ' S0: Сбор начальных данных из листа «Паттерны» и проверка профиля промта
-    ' Состав вызовов для проверки критериев приёмки W7.1:
-    ' 1. Mod_Patterns.GetPatternExceptions
-    ' 2. Mod_Patterns.GetKnownPatterns
-    ' 3. Mod_Prompt.GetPromptProfile
-    On Error GoTo ErrHandler
-    
-    Dim exc As String
-    Dim known As String
-    Dim profile As String
-    
-    exc = Mod_Patterns.GetPatternExceptions()
-    known = Mod_Patterns.GetKnownPatterns()
-    profile = Mod_Prompt.GetPromptProfile("нет") ' Тестовый вызов для проверки маршрутизации
-    
-    Mod_Util.WriteLog "CommandGenerateTables (S0): исключения=" & IIf(exc = "", "пусто", "OK") & _
-                      ", известные=" & IIf(known = "", "пусто", "OK") & _
-                      ", профиль(нет)=" & profile
-    
-    MsgBox "Данные листа «Паттерны» прочитаны (S0)." & vbCrLf & _
-           "Известные паттерны: " & IIf(known = "", "не найдены", "прочитаны") & vbCrLf & _
-           "Исключения: " & IIf(exc = "", "не найдены", "прочитаны"), vbInformation, "Сформировать таблицы"
-    Exit Sub
-
-ErrHandler:
-    Mod_Util.WriteError "UI001", "CommandGenerateTables: " & Err.Description
-    MsgBox "Ошибка при формировании таблиц: " & Err.Description, vbCritical
-End Sub
-
-' Заглушка для W7.2 (оставлена без изменений, но устранено дублирование)
-Public Sub CommandParseAiResponse()
-    MsgBox "Команда в разработке (W7.2: разбор ответа ИИ)", vbInformation
-End Sub
 
 ' ------------------------------------------------------------
 ' 9. Показать, что нашёл Препроцессор
