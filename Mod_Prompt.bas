@@ -617,54 +617,7 @@ Private Function FirstMatchFile(ByVal folderPath As String, ByVal mask As String
     Loop
 End Function
 
-' W-PROMPT-00-SCHEMA-FIX: возвращает имя самого свежего файла артефакта
-' "Адаптированная структура" (маска Адаптированная_структура_*.xlsx) в папке
-' 02_Подготовка схемы. Файл выбирается по максимальной дате, встроенной в
-' имя (формат yyyy-mm-dd_hhnnss); если даты из имён извлечь не удалось -
-' берётся файл с последней датой изменения на диске. Если подходящих
-' файлов несколько - возвращается последний (самый свежий), если ни одного
-' - пустая строка. Временные файлы Office (~$...) пропускаются.
-Private Function GetNewestSchemaArtifactName(ByVal prepPath As String) As String
-    Dim fName As String
-    Dim best As String
-    Dim bestStamp As String
-    Dim curStamp As String
-    Dim bestDate As Date
-    Dim curDate As Date
 
-    GetNewestSchemaArtifactName = ""
-    If Dir(prepPath, vbDirectory) = "" Then Exit Function
-
-    fName = Dir(prepPath & "\" & SCHEMA_ARTIFACT_MASK)
-    Do While fName <> ""
-        If Left(fName, 2) <> "~$" Then          ' пропускаем временные файлы Office
-            On Error Resume Next
-            curDate = FileDateTime(prepPath & "\" & fName)
-            If Err.Number <> 0 Then
-                Err.Clear
-                curDate = 0
-            End If
-            On Error GoTo 0
-            curStamp = ExtractDateStampFromName(fName)
-            If best = "" Then
-                best = fName
-                bestStamp = curStamp
-                bestDate = curDate
-            Else
-                ' приоритет - дата в имени файла; при её отсутствии/равенстве -
-                ' дата изменения на диске
-                If curStamp > bestStamp Or _
-                   (curStamp = bestStamp And curDate > bestDate) Then
-                    best = fName
-                    bestStamp = curStamp
-                    bestDate = curDate
-                End If
-            End If
-        End If
-        fName = Dir()
-    Loop
-    GetNewestSchemaArtifactName = best
-End Function
 
 ' W-PROMPT-00-SCHEMA-FIX: извлекает из имени файла подстроку вида
 ' yyyy-mm-dd_hhnnss (16 символов). Сравнивать такие подстроки как строки
@@ -2399,8 +2352,8 @@ End Sub
 
 ' Формирует Промт №0 (декомпозиция) при отсутствии Шаги.txt
 ' ВНИМАНИЕ (W7.1): Старое тело процедуры удалено и заменено на заглушку.
-' Актуальная логика формирования промта шага 0 теперь должна проходить 
-' через MakeNextStepPrompt (при пустом списке шагов) или использовать 
+' Актуальная логика формирования промта шага 0 теперь должна проходить
+' через MakeNextStepPrompt (при пустом списке шагов) или использовать
 ' архивный шаблон из prompts/archive/prompt_step_00_template.md
 Public Sub GenerateStepZeroPrompt()
     MsgBox "Процедура GenerateStepZeroPrompt заменена." & vbCrLf & _
@@ -2408,7 +2361,7 @@ Public Sub GenerateStepZeroPrompt()
            "обратитесь к актуальному шаблону в prompts/archive/.", _
            vbInformation, "GenerateStepZeroPrompt"
     
-    ' TODO: При необходимости восстановить логику чтения prompt_step_00_template.md 
+    ' TODO: При необходимости восстановить логику чтения prompt_step_00_template.md
     ' и подстановки {SCHEMA_FILENAME}, {DESCRIPTION_FILENAME}, {CONFIG_FILENAME}
 End Sub
 
@@ -2832,133 +2785,420 @@ ErrHandler:
 End Sub
 
 ' ============================================================================
-' W-ANALYTIC-06A: Каркас разбора ответа ИИ (кнопка 14)
+' W7.2: Команда разбора ответа ИИ (формат 00_2)
 ' ============================================================================
 Public Sub CommandParseAiResponse()
+    On Error GoTo ErrHandler
+    
     Dim root As String
+    root = NormPath(Mod_Util.GetProjectRoot())          ' БЕЗ Mod_Util. перед NormPath
+    If root = "" Then
+        Mod_Util.WriteError "P010", "CommandParseAiResponse: корень проекта не задан."
+        Exit Sub
+    End If
+    
     Dim fragmentsPath As String
-    Dim archivePath As String
+    fragmentsPath = root & "\02_Подготовка данных\05_Фрагменты шагов"
+    
+    ' 1. Найти последний файл ответа ИИ (без Dir-циклов)
+    Dim aiResponseFile As String
+    aiResponseFile = GetLatestAiResponseFile(fragmentsPath)
+    If aiResponseFile = "" Then
+        Mod_Util.WriteWarning "P010", "CommandParseAiResponse: файл ответа ИИ не найден в " & fragmentsPath
+        MsgBox "Файл ответа ИИ не найден в папке 05_Фрагменты шагов.", vbExclamation, "Разбор ответа ИИ"
+        Exit Sub
+    End If
+    
+    Dim aiResponse As String
+    aiResponse = ReadTextFile(fragmentsPath & "\" & aiResponseFile)   ' БЕЗ Mod_Util.
+    If aiResponse = "" Then
+        Mod_Util.WriteError "P010", "CommandParseAiResponse: не удалось прочитать " & aiResponseFile
+        Exit Sub
+    End If
+    
+    ' 2. Извлечение блоков через Split (строго в Variant)
+    Dim patternsCsv As String, referenceBooks As String, userAction As String, statistics As String
+    ExtractBlock aiResponse, "<!-- PATTERNS_CSV_START -->", "<!-- PATTERNS_CSV_END -->", patternsCsv
+    ExtractBlock aiResponse, "<!-- REFERENCEBOOKS_START -->", "<!-- REFERENCEBOOKS_END -->", referenceBooks
+    ExtractBlock aiResponse, "<!-- USER_ACTION_START -->", "<!-- USER_ACTION_END -->", userAction
+    ExtractBlock aiResponse, "<!-- STATISTICS_START -->", "<!-- STATISTICS_END -->", statistics
+    
+    ' 3. Обновление Адаптированной структуры
+    Dim schemaPath As String
+    schemaPath = root & "\02_Подготовка данных\01_Схема"
+    Dim schemaFile As String
+    schemaFile = GetNewestSchemaArtifactName(schemaPath)
+    
+    If schemaFile = "" Then
+        Mod_Util.WriteError "P010", "CommandParseAiResponse: не найдена Адаптированная_структура_*.xlsx"
+        Exit Sub
+    End If
+    
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim prevScreenUpdating As Boolean
+    prevScreenUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+    
+    On Error Resume Next
+    Set wb = Workbooks.Open(schemaPath & "\" & schemaFile, ReadOnly:=False)
+    On Error GoTo ErrHandler
+    
+    If wb Is Nothing Then
+        Mod_Util.WriteError "P010", "CommandParseAiResponse: не удалось открыть " & schemaFile
+        Application.ScreenUpdating = prevScreenUpdating
+        Exit Sub
+    End If
+    
+    On Error Resume Next
+    Set ws = wb.Worksheets(Mod_Structure.FLAT_SHEET_NAME)
+    On Error GoTo ErrHandler
+    
+    If ws Is Nothing Then
+        Mod_Util.WriteError "P010", "CommandParseAiResponse: лист '" & Mod_Structure.FLAT_SHEET_NAME & "' не найден в " & schemaFile
+        wb.Close SaveChanges:=False
+        Application.ScreenUpdating = prevScreenUpdating
+        Exit Sub
+    End If
+    
+    Dim colName As Long, colCat As Long, colPat As Long, colAnom As Long
+    colName = FindColumn(ws, "Отображаемое имя")
+    colCat = FindColumn(ws, "Категория")
+    colPat = FindColumn(ws, "Паттерн")
+    colAnom = FindColumn(ws, "Аномалия")
+    
+    If colName = 0 Or colCat = 0 Or colPat = 0 Or colAnom = 0 Then
+        Mod_Util.WriteError "P010", "CommandParseAiResponse: не найдены обязательные колонки в " & schemaFile
+        wb.Close SaveChanges:=False
+        Application.ScreenUpdating = prevScreenUpdating
+        Exit Sub
+    End If
+    
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, colName).End(xlUp).row
+    
+    ' 4. Обработка PATTERNS_CSV
+    Dim lines As Variant
+    lines = Split(patternsCsv, vbCrLf)
+    Dim i As Long, j As Long, r As Long
+    Dim line As String
+    Dim parts As Variant
+    Dim patternName As String, typesStr As String
+    Dim typesArr As Variant
+    Dim typeItem As String
+    
+    Dim decisionContent As String
+    decisionContent = ""
+    
+    For i = LBound(lines) To UBound(lines)
+        line = Trim(lines(i))
+        If line = "" Or InStr(line, "Паттерн|Типы|Количество") > 0 Then GoTo NextLine
+        
+        parts = Split(line, "|")
+        If UBound(parts) < 2 Then GoTo NextLine
+        
+        patternName = Trim(parts(0))
+        typesStr = Trim(parts(1))
+        typesArr = Split(typesStr, ";")
+        
+        ' Проверка гомогенности
+        Dim categories As Object
+        Set categories = CreateObject("Scripting.Dictionary")
+        
+        For j = LBound(typesArr) To UBound(typesArr)
+            typeItem = Trim(typesArr(j))
+            If typeItem = "" Then GoTo NextType
+            
+            For r = 2 To lastRow
+                On Error Resume Next
+                If Trim(CStr(ws.Cells(r, colName).value)) = typeItem Then
+                    Dim cat As String
+                    cat = Trim(CStr(ws.Cells(r, colCat).value))
+                    If cat <> "" Then categories(cat) = 1
+                End If
+                On Error GoTo ErrHandler
+            Next r
+NextType:
+        Next j
+        
+        If categories.Count > 1 Then
+            Mod_Util.WriteWarning "P010", "Гомогенность нарушена для паттерна '" & patternName & "': найдены разные категории (" & Join(categories.keys, ", ") & ")."
+            decisionContent = decisionContent & patternName & " | " & typesStr & " | Смешение категорий в одном паттерне" & vbCrLf
+            GoTo NextLine
+        End If
+        
+        ' Обновление строк (все совпавшие)
+        For j = LBound(typesArr) To UBound(typesArr)
+            typeItem = Trim(typesArr(j))
+            If typeItem = "" Then GoTo NextTypeUpdate
+            
+            For r = 2 To lastRow
+                On Error Resume Next
+                If Trim(CStr(ws.Cells(r, colName).value)) = typeItem Then
+                    Dim oldPat As String
+                    oldPat = Trim(CStr(ws.Cells(r, colPat).value))
+                    If oldPat <> patternName And patternName <> "" Then
+                        Mod_Util.WriteLog "Обновление Паттерн для '" & typeItem & "': '" & oldPat & "' -> '" & patternName & "'"
+                        ws.Cells(r, colPat).value = patternName
+                    End If
+                End If
+                On Error GoTo ErrHandler
+            Next r
+NextTypeUpdate:
+        Next j
+NextLine:
+    Next i
+    
+    ' 5. Обработка USER_ACTION
+    Dim userActionTrimmed As String
+    userActionTrimmed = Trim(userAction)
+    If userActionTrimmed <> "" And InStr(userActionTrimmed, "ТРЕБУЮТ РЕШЕНИЯ ПОЛЬЗОВАТЕЛЯ: нет") = 0 And LCase(Left(userActionTrimmed, 3)) <> "нет" Then
+        decisionContent = decisionContent & userActionTrimmed & vbCrLf
+        
+        Dim uaLines As Variant
+        uaLines = Split(userActionTrimmed, vbCrLf)
+        Dim uaType As String, reason As String
+        For i = LBound(uaLines) To UBound(uaLines)
+            line = Trim(uaLines(i))
+            If line = "" Or InStr(line, "ТРЕБУЮТ РЕШЕНИЯ") > 0 Then GoTo NextUaLine
+            parts = Split(line, "|")
+            If UBound(parts) >= 2 Then
+                uaType = Trim(parts(1))
+                reason = Trim(parts(2))
+                For r = 2 To lastRow
+                    On Error Resume Next
+                    If Trim(CStr(ws.Cells(r, colName).value)) = uaType Then
+                        Dim curAnom As String
+                        curAnom = Trim(CStr(ws.Cells(r, colAnom).value))
+                        Dim anomMark As String
+                        anomMark = "Требует решения: " & reason
+                        If InStr(curAnom, anomMark) = 0 Then
+                            If curAnom = "" Then
+                                ws.Cells(r, colAnom).value = anomMark
+                            Else
+                                ws.Cells(r, colAnom).value = curAnom & "; " & anomMark
+                            End If
+                        End If
+                    End If
+                    On Error GoTo ErrHandler
+                Next r
+            End If
+NextUaLine:
+        Next i
+    End If
+    
+    ' 6. Сохранение Требуют_решения.md
+    If decisionContent <> "" Then
+        AppendToDecisionFile fragmentsPath, decisionContent
+    End If
+    
+    ' 7. Обработка REFERENCEBOOKS
+    Dim refTrimmed As String
+    refTrimmed = Trim(referenceBooks)
+    If refTrimmed <> "" Then
+        If InStr(refTrimmed, "{{СПИСОК_БАЗОВЫХ_ТИПОВ}}") > 0 Then
+            Mod_Util.WriteWarning "P008", "CommandParseAiResponse: обнаружен формат 00_1 ({{СПИСОК_БАЗОВЫХ_ТИПОВ}}) в REFERENCEBOOKS. Пропуск."
+        Else
+            Mod_Util.WriteLog "REFERENCEBOOKS извлечены: " & Replace(refTrimmed, vbCrLf, " | ")
+        End If
+    End If
+    
+    ' 8. Обработка STATISTICS
+    Dim statTrimmed As String
+    statTrimmed = Trim(statistics)
+    If statTrimmed <> "" Then
+        If InStr(statTrimmed, "LOST_TYPE") > 0 Or InStr(statTrimmed, "MOVED_TYPE") > 0 Or InStr(statTrimmed, "DUPLICATE_TYPE") > 0 Or InStr(statTrimmed, "PATTERN_NOT_RETURNED") > 0 Then
+            Mod_Util.WriteLog "STATISTICS: " & Replace(statTrimmed, vbCrLf, " | ")
+        End If
+    End If
+    
+    ' 9. Сохранение и закрытие книги
+    wb.Close SaveChanges:=True
+    Application.ScreenUpdating = prevScreenUpdating
+    
+    Mod_Util.WriteLog "CommandParseAiResponse: разбор ответа ИИ завершён успешно."
+    MsgBox "Разбор ответа ИИ завершён успешно." & vbCrLf & "Обновлена Адаптированная_структура.", vbInformation, "Разбор ответа ИИ"
+    Exit Sub
+
+ErrHandler:
+    Application.ScreenUpdating = prevScreenUpdating
+    If Not wb Is Nothing Then wb.Close SaveChanges:=False
+    Mod_Util.WriteError "P010", "CommandParseAiResponse: " & Err.Description
+    MsgBox "Ошибка P010: " & Err.Description, vbCritical, "Разбор ответа ИИ"
+    Err.Clear
+End Sub
+
+' ---------------------------------------------------------------------------
+' Вспомогательные функции для CommandParseAiResponse
+' ---------------------------------------------------------------------------
+
+Private Function GetLatestAiResponseFile(ByVal folderPath As String) As String
+    Dim fileArr As Variant
+    Dim i As Long
+    Dim f As String
+    Dim bestFile As String
+    Dim bestDate As Date
+    Dim curDate As Date
+
+    GetLatestAiResponseFile = ""
+    If Not FolderExistsSafe(folderPath) Then Exit Function
+
+    fileArr = GetFileListArray(folderPath)
+    If Not IsArray(fileArr) Then Exit Function
+
+    For i = LBound(fileArr) To UBound(fileArr)
+        f = CStr(fileArr(i))
+        If Right(LCase$(f), 3) = ".md" Then
+            ' пропуск: ~$*, Prompt_*, Требуют_решения.md (накопительный, не архивируется)
+            If Left$(f, 2) <> "~$" _
+               And LCase$(Left$(f, 7)) <> "prompt_" _
+               And StrComp(f, "Требуют_решения.md", vbTextCompare) <> 0 Then
+                On Error Resume Next
+                curDate = FileDateTime(folderPath & "\" & f)
+                If Err.Number <> 0 Then
+                    Err.Clear
+                    curDate = 0
+                End If
+                On Error GoTo 0
+                If bestFile = "" Or curDate > bestDate Then
+                    bestFile = f
+                    bestDate = curDate
+                End If
+            End If
+        End If
+    Next i
+    GetLatestAiResponseFile = bestFile
+End Function
+
+Private Sub ExtractBlock(ByVal text As String, ByVal startMarker As String, ByVal endMarker As String, ByRef outBlock As String)
+    Dim splitStart As Variant
+    Dim splitEnd As Variant
+    
+    outBlock = ""
+    splitStart = Split(text, startMarker)
+    If UBound(splitStart) >= 1 Then
+        splitEnd = Split(splitStart(1), endMarker)
+        If UBound(splitEnd) >= 0 Then
+            outBlock = splitEnd(0)
+        End If
+    End If
+End Sub
+
+Private Function FindColumn(ByVal ws As Worksheet, ByVal headerName As String) As Long
+    Dim rng As Range
+    Set rng = ws.Rows(1).Find(What:=headerName, LookIn:=xlValues, LookAt:=xlWhole, MatchCase:=False)
+    If Not rng Is Nothing Then
+        FindColumn = rng.Column
+    Else
+        FindColumn = 0
+    End If
+End Function
+
+Private Sub AppendToDecisionFile(ByVal folderPath As String, ByVal content As String)
+    Dim filePath As String
+    filePath = folderPath & "\Требуют_решения.md"
+    Dim existing As String
+    existing = ReadTextFile(filePath)                   ' БЕЗ Mod_Util.
+    Dim newContent As String
+
+    content = Trim(content)
+    If content = "" Then Exit Sub
+
+    If existing = "" Or InStr(existing, "# Требуют решения") = 0 Then
+        newContent = "# Требуют решения" & vbCrLf & vbCrLf & content & vbCrLf
+    Else
+        Dim lines As Variant                            ' Split строго в Variant
+        lines = Split(existing, vbCrLf)
+        Dim i As Long
+        Dim line As String
+        Dim dict As Object
+        Set dict = CreateObject("Scripting.Dictionary")
+
+        For i = LBound(lines) To UBound(lines)
+            line = Trim(lines(i))
+            If line <> "" And line <> "# Требуют решения" Then
+                dict(line) = 1
+            End If
+        Next i
+
+        Dim newLines As Variant                         ' Split строго в Variant
+        newLines = Split(content, vbCrLf)
+        For i = LBound(newLines) To UBound(newLines)
+            line = Trim(newLines(i))
+            If line <> "" Then
+                dict(line) = 1
+            End If
+        Next i
+
+        newContent = "# Требуют решения" & vbCrLf & vbCrLf
+        Dim key As Variant
+        For Each key In dict.keys
+            newContent = newContent & CStr(key) & vbCrLf
+        Next key
+    End If
+
+    SaveTextFileUtf8 filePath, newContent               ' БЕЗ Mod_Util.
+End Sub
+
+' W-ANALYTIC-06B: Dir-цикл заменён на GetFileListArray + For; фильтр по
+' маске SCHEMA_ARTIFACT_MASK сохранён; видимость Private (используется
+' только внутри Mod_Prompt).
+Private Function GetNewestSchemaArtifactName(ByVal prepPath As String) As String
     Dim fileArr As Variant
     Dim i As Long
     Dim fName As String
-    Dim filePath As String
-    Dim fileContent As String
-    Dim formatDetected As String
-    Dim processedCount As Long
-    Dim errorCount As Long
-    Dim unrecognizedCount As Long
-    Dim summaryMsg As String
-    
-    ' Примечание: если в будущем потребуется Split, результат присваивается строго в Variant.
-    ' Dim parts As Variant: parts = Split(...)
-    
-    On Error GoTo ErrHandler
-    
-    ' 1. Инициализация путей от GetProjectRoot
-    root = NormPath(Mod_Util.GetProjectRoot())
-    If root = "" Then
-        MsgBox "Корневая папка проекта не задана.", vbExclamation, "Ошибка"
-        Exit Sub
-    End If
-    
-    fragmentsPath = root & "\02_Подготовка данных\" & FRAGMENTS_FOLDER_NAME
-    archivePath = root & "\02_Подготовка данных\" & ARCHIVE_FOLDER_NAME
-    
-    If Not FolderExistsSafe(fragmentsPath) Then
-        Mod_Util.WriteWarning "P008", "CommandParseAiResponse: папка фрагментов шагов не найдена."
-        MsgBox "Папка '" & FRAGMENTS_FOLDER_NAME & "' не найдена.", vbInformation, "Разбор ответа ИИ"
-        Exit Sub
-    End If
-    
-    ' 2. Сбор списка файлов (строго GetFileListArray + For, без Dir-циклов)
-    fileArr = GetFileListArray(fragmentsPath)
-    
-    If Not IsArray(fileArr) Or UBound(fileArr) < LBound(fileArr) Then
-        Mod_Util.WriteLog "CommandParseAiResponse: файлы для разбора не найдены."
-        MsgBox "Файлы для разбора не найдены в папке '" & FRAGMENTS_FOLDER_NAME & "'.", vbInformation, "Разбор ответа ИИ"
-        Exit Sub
-    End If
-    
-    Mod_Util.WriteLog "CommandParseAiResponse: начало сканирования папки фрагментов шагов."
-    
-    ' 3. Обход файлов с изоляцией ошибок на уровне файла
+    Dim best As String
+    Dim bestStamp As String
+    Dim curStamp As String
+    Dim bestDate As Date
+    Dim curDate As Date
+
+    GetNewestSchemaArtifactName = ""
+    If Not FolderExistsSafe(prepPath) Then Exit Function
+
+    fileArr = GetFileListArray(prepPath)
+    If Not IsArray(fileArr) Then Exit Function          ' пустая папка -> Array()
+
     For i = LBound(fileArr) To UBound(fileArr)
         fName = CStr(fileArr(i))
-        
-        ' Пропуск системных и служебных файлов
-        ' W-ANALYTIC-06A-FIX: проверка "Требуют_решения" по префиксу имени
-        ' (без расширения) - защита от двойных расширений Windows
-        ' (.md.md, .md.txt и т.п.).
-        If Left$(fName, 2) = SKIP_FILE_PREFIX_1 Or _
-           LCase$(Left$(fName, 7)) = SKIP_FILE_PREFIX_2 Or _
-           LCase$(Left$(fName, Len("Требуют_решения"))) = LCase$("Требуют_решения") Then
-            GoTo NextFile
+        If Left$(fName, 2) <> "~$" Then                 ' временные файлы Office
+            ' ИСПРАВЛЕНИЕ: убран LCase$() — оператор Like регистрозависимый,
+            ' маска SCHEMA_ARTIFACT_MASK уже содержит правильный регистр.
+            If fName Like SCHEMA_ARTIFACT_MASK Then
+                On Error Resume Next
+                curDate = FileDateTime(prepPath & "\" & fName)
+                If Err.Number <> 0 Then
+                    Err.Clear
+                    curDate = 0
+                End If
+                On Error GoTo 0
+                curStamp = ExtractDateStampFromName(fName)
+                If best = "" Then
+                    best = fName
+                    bestStamp = curStamp
+                    bestDate = curDate
+                Else
+                    If curStamp > bestStamp Or _
+                       (curStamp = bestStamp And curDate > bestDate) Then
+                        best = fName
+                        bestStamp = curStamp
+                        bestDate = curDate
+                    End If
+                End If
+            End If
         End If
-        
-        filePath = fragmentsPath & "\" & fName
-        formatDetected = "нераспознан"
-        
-        ' Изоляция ошибок: сбой в одном файле не прерывает цикл
-        On Error GoTo FileError
-        
-        ' Чтение содержимого файла (ReadTextFile с автоопределением UTF-8/CP1251)
-        fileContent = ReadTextFile(filePath)
-        
-        If fileContent = "" Then
-            Mod_Util.WriteWarning "P006", "CommandParseAiResponse: файл пуст или не прочитан: " & fName
-            GoTo NextFile
-        End If
-        
-        ' Детект формата строго по маркерам
-        If InStr(1, fileContent, MARKER_PATTERNS, vbTextCompare) > 0 Then
-            formatDetected = "00_2 (PATTERNS_CSV)"
-        ElseIf InStr(1, fileContent, MARKER_STEPS, vbTextCompare) > 0 Then
-            formatDetected = "00_3 (STEPS_CSV)"
-        ElseIf InStr(1, fileContent, MARKER_STOP, vbTextCompare) > 0 Then
-            formatDetected = "СТОП"
-        ElseIf InStr(1, fileContent, MARKER_LEGACY, vbTextCompare) > 0 Then
-            formatDetected = "legacy"
-        Else
-            formatDetected = "нераспознан"
-            unrecognizedCount = unrecognizedCount + 1
-            Mod_Util.WriteWarning "P008", "CommandParseAiResponse: нераспознанный формат ответа ИИ в файле: " & fName
-        End If
-        
-        ' Двухфазность: Фаза 1 - парсинг в память (заглушка)
-        ' Call ParseToMemory(fileContent, formatDetected)
-        
-        ' Двухфазность: Фаза 2 - применение (заглушка, данные в Excel пока НЕ обновляются)
-        ' Call ApplyToExcel()
-        
-        processedCount = processedCount + 1
-        Mod_Util.WriteLog "CommandParseAiResponse: обработан файл '" & fName & "' (формат: " & formatDetected & ")"
-        
-NextFile:
-        ' Сброс обработчика ошибок для следующей итерации цикла
-        On Error GoTo ErrHandler
     Next i
     
-    ' 4. Формирование и вывод сводки
-    summaryMsg = "Разбор ответа ИИ завершён." & vbCrLf & _
-                 "Обработано файлов: " & processedCount & vbCrLf & _
-                 "Ошибок обработки: " & errorCount & vbCrLf & _
-                 "Нераспознанных форматов: " & unrecognizedCount
+    ' Отладочное логирование: что нашли (или не нашли)
+    If best = "" Then
+        Mod_Util.WriteWarning "P010", "GetNewestSchemaArtifactName: в папке " & _
+            prepPath & " не найдено файлов по маске '" & SCHEMA_ARTIFACT_MASK & "'"
+    Else
+        Mod_Util.WriteLog "GetNewestSchemaArtifactName: выбран файл " & best
+    End If
     
-    Mod_Util.WriteLog "CommandParseAiResponse: " & summaryMsg
-    MsgBox summaryMsg, vbInformation, "Разбор ответа ИИ"
-    
-    Exit Sub
-    
-FileError:
-    errorCount = errorCount + 1
-    Mod_Util.WriteError "P009", "CommandParseAiResponse: ошибка обработки файла '" & fName & "'. " & Err.Description
-    Resume NextFile
-    
-ErrHandler:
-    Mod_Util.WriteError "P010", "CommandParseAiResponse: критическая ошибка. " & Err.Description
-    MsgBox "Критическая ошибка при разборе ответа ИИ: " & Err.Description, vbCritical, "Ошибка"
-    Err.Clear
-End Sub
+    GetNewestSchemaArtifactName = best
+End Function
 
 ' ============================================================================
 ' W-ANALYTIC-05: Итеративная генерация промтов 00_2 / 00_3 (кнопка 13).
@@ -3253,9 +3493,9 @@ Public Sub GenerateAnalyticalPrompts_Click()
     If Not ws Is Nothing Then
         found = False
         For r = 2 To 100
-            If StrComp(Trim(CStr(ws.Cells(r, 1).Value)), "Выжимки и анализ конфигурации", vbTextCompare) = 0 Then
+            If StrComp(Trim(CStr(ws.Cells(r, 1).value)), "Выжимки и анализ конфигурации", vbTextCompare) = 0 Then
                 ws.Unprotect Password:="pilot"
-                ws.Cells(r, 2).Value = "Да"
+                ws.Cells(r, 2).value = "Да"
                 ws.Protect Password:="pilot"
                 found = True
                 Exit For
@@ -3282,3 +3522,4 @@ ErrHandler:
     MsgBox "Ошибка: " & Err.Description, vbCritical, "Генерация аналитических промтов"
     Err.Clear
 End Sub
+
