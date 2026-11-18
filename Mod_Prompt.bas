@@ -112,6 +112,16 @@ Private Const DECOMPOSITION_RULES_V713 As String = _
     "- ШАГ N+1 - ФИНАЛЬНЫЙ АУДИТ." & vbCrLf & _
     "Шаг 4 - Формат вывода Шаги.txt: ""NN|Имя_папки"", разделитель - pipe (|), НЕ ""=""! Без пояснений. (NN - номер шага, Имя_папки - имя папки вида Шаг_NN_Название в 03_Результаты генерации\01_По шагам)."
 
+Private Const FRAGMENTS_FOLDER_NAME As String = "05_Фрагменты шагов"
+Private Const ARCHIVE_FOLDER_NAME As String = "Архив"
+Private Const MARKER_PATTERNS As String = "PATTERNS_CSV"
+Private Const MARKER_STEPS As String = "STEPS_CSV"
+Private Const MARKER_STOP As String = "СТОП"
+Private Const MARKER_LEGACY As String = "legacy"
+Private Const SKIP_FILE_PREFIX_1 As String = "~$"
+Private Const SKIP_FILE_PREFIX_2 As String = "prompt_"
+Private Const SKIP_FILE_EXACT As String = "Требуют_решения"
+
 ' ---------------------------------------------------------------------------
 ' ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Private)
 ' ---------------------------------------------------------------------------
@@ -2822,15 +2832,132 @@ ErrHandler:
 End Sub
 
 ' ============================================================================
-' W7.2: Команда разбора ответа ИИ (заглушка с контролем скоупа)
+' W-ANALYTIC-06A: Каркас разбора ответа ИИ (кнопка 14)
 ' ============================================================================
 Public Sub CommandParseAiResponse()
-    ' W7.2-NOTE-4: Реальный разбор ответа ИИ с записью в Адаптированную_структуру 
-    ' и контролем LOST_TYPE/MOVED_TYPE. Запись в лист «Паттерны» отклонена 
-    ' для текущего объёма и вынесена в отдельную строку бэклога (W7.3-PATTERNS-UPDATE).
-    Mod_Util.WriteLog "CommandParseAiResponse: запуск разбора ответа ИИ (W7.2, базовый контроль)"
-    MsgBox "CommandParseAiResponse: функция разбора ответа ИИ выполнена (запись в Адаптированную_структуру + контроль LOST_TYPE/MOVED_TYPE)." & vbCrLf & _
-           "Примечание: запись в лист «Паттерны» отложена до задачи W7.3-PATTERNS-UPDATE.", vbInformation, "Разбор ответа ИИ"
+    Dim root As String
+    Dim fragmentsPath As String
+    Dim archivePath As String
+    Dim fileArr As Variant
+    Dim i As Long
+    Dim fName As String
+    Dim filePath As String
+    Dim fileContent As String
+    Dim formatDetected As String
+    Dim processedCount As Long
+    Dim errorCount As Long
+    Dim unrecognizedCount As Long
+    Dim summaryMsg As String
+    
+    ' Примечание: если в будущем потребуется Split, результат присваивается строго в Variant.
+    ' Dim parts As Variant: parts = Split(...)
+    
+    On Error GoTo ErrHandler
+    
+    ' 1. Инициализация путей от GetProjectRoot
+    root = NormPath(Mod_Util.GetProjectRoot())
+    If root = "" Then
+        MsgBox "Корневая папка проекта не задана.", vbExclamation, "Ошибка"
+        Exit Sub
+    End If
+    
+    fragmentsPath = root & "\02_Подготовка данных\" & FRAGMENTS_FOLDER_NAME
+    archivePath = root & "\02_Подготовка данных\" & ARCHIVE_FOLDER_NAME
+    
+    If Not FolderExistsSafe(fragmentsPath) Then
+        Mod_Util.WriteWarning "P008", "CommandParseAiResponse: папка фрагментов шагов не найдена."
+        MsgBox "Папка '" & FRAGMENTS_FOLDER_NAME & "' не найдена.", vbInformation, "Разбор ответа ИИ"
+        Exit Sub
+    End If
+    
+    ' 2. Сбор списка файлов (строго GetFileListArray + For, без Dir-циклов)
+    fileArr = GetFileListArray(fragmentsPath)
+    
+    If Not IsArray(fileArr) Or UBound(fileArr) < LBound(fileArr) Then
+        Mod_Util.WriteLog "CommandParseAiResponse: файлы для разбора не найдены."
+        MsgBox "Файлы для разбора не найдены в папке '" & FRAGMENTS_FOLDER_NAME & "'.", vbInformation, "Разбор ответа ИИ"
+        Exit Sub
+    End If
+    
+    Mod_Util.WriteLog "CommandParseAiResponse: начало сканирования папки фрагментов шагов."
+    
+    ' 3. Обход файлов с изоляцией ошибок на уровне файла
+    For i = LBound(fileArr) To UBound(fileArr)
+        fName = CStr(fileArr(i))
+        
+        ' Пропуск системных и служебных файлов
+        ' W-ANALYTIC-06A-FIX: проверка "Требуют_решения" по префиксу имени
+        ' (без расширения) - защита от двойных расширений Windows
+        ' (.md.md, .md.txt и т.п.).
+        If Left$(fName, 2) = SKIP_FILE_PREFIX_1 Or _
+           LCase$(Left$(fName, 7)) = SKIP_FILE_PREFIX_2 Or _
+           LCase$(Left$(fName, Len("Требуют_решения"))) = LCase$("Требуют_решения") Then
+            GoTo NextFile
+        End If
+        
+        filePath = fragmentsPath & "\" & fName
+        formatDetected = "нераспознан"
+        
+        ' Изоляция ошибок: сбой в одном файле не прерывает цикл
+        On Error GoTo FileError
+        
+        ' Чтение содержимого файла (ReadTextFile с автоопределением UTF-8/CP1251)
+        fileContent = ReadTextFile(filePath)
+        
+        If fileContent = "" Then
+            Mod_Util.WriteWarning "P006", "CommandParseAiResponse: файл пуст или не прочитан: " & fName
+            GoTo NextFile
+        End If
+        
+        ' Детект формата строго по маркерам
+        If InStr(1, fileContent, MARKER_PATTERNS, vbTextCompare) > 0 Then
+            formatDetected = "00_2 (PATTERNS_CSV)"
+        ElseIf InStr(1, fileContent, MARKER_STEPS, vbTextCompare) > 0 Then
+            formatDetected = "00_3 (STEPS_CSV)"
+        ElseIf InStr(1, fileContent, MARKER_STOP, vbTextCompare) > 0 Then
+            formatDetected = "СТОП"
+        ElseIf InStr(1, fileContent, MARKER_LEGACY, vbTextCompare) > 0 Then
+            formatDetected = "legacy"
+        Else
+            formatDetected = "нераспознан"
+            unrecognizedCount = unrecognizedCount + 1
+            Mod_Util.WriteWarning "P008", "CommandParseAiResponse: нераспознанный формат ответа ИИ в файле: " & fName
+        End If
+        
+        ' Двухфазность: Фаза 1 - парсинг в память (заглушка)
+        ' Call ParseToMemory(fileContent, formatDetected)
+        
+        ' Двухфазность: Фаза 2 - применение (заглушка, данные в Excel пока НЕ обновляются)
+        ' Call ApplyToExcel()
+        
+        processedCount = processedCount + 1
+        Mod_Util.WriteLog "CommandParseAiResponse: обработан файл '" & fName & "' (формат: " & formatDetected & ")"
+        
+NextFile:
+        ' Сброс обработчика ошибок для следующей итерации цикла
+        On Error GoTo ErrHandler
+    Next i
+    
+    ' 4. Формирование и вывод сводки
+    summaryMsg = "Разбор ответа ИИ завершён." & vbCrLf & _
+                 "Обработано файлов: " & processedCount & vbCrLf & _
+                 "Ошибок обработки: " & errorCount & vbCrLf & _
+                 "Нераспознанных форматов: " & unrecognizedCount
+    
+    Mod_Util.WriteLog "CommandParseAiResponse: " & summaryMsg
+    MsgBox summaryMsg, vbInformation, "Разбор ответа ИИ"
+    
+    Exit Sub
+    
+FileError:
+    errorCount = errorCount + 1
+    Mod_Util.WriteError "P009", "CommandParseAiResponse: ошибка обработки файла '" & fName & "'. " & Err.Description
+    Resume NextFile
+    
+ErrHandler:
+    Mod_Util.WriteError "P010", "CommandParseAiResponse: критическая ошибка. " & Err.Description
+    MsgBox "Критическая ошибка при разборе ответа ИИ: " & Err.Description, vbCritical, "Ошибка"
+    Err.Clear
 End Sub
 
 ' ============================================================================
