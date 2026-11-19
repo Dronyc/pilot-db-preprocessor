@@ -2562,35 +2562,50 @@ End Sub
 ' ---------------------------------------------------------------------------
 Public Function GetPromptProfile(ByVal lastStep As String) As String
     Dim s As String
+    Dim parts As Variant
+    Dim nParts As Long
+    Dim head As String
+
+    GetPromptProfile = ""
     s = Trim$(lastStep)
-    
-    If s = "" Or LCase$(s) = "нет" Then
+    If s = "" Then Exit Function                       ' пусто -> невалидно (W7.2-NOTE-2)
+
+    If StrComp(s, "нет", vbTextCompare) = 0 Then
         GetPromptProfile = "Папки"
         Exit Function
     End If
-    
-    ' W-ANALYTIC-06D-FIX-1: Нормализация ввода для обратной совместимости ("3" и "03" -> Документы)
-    If IsNumeric(s) Then
-        If CLng(s) >= 1 Then
-            GetPromptProfile = "Документы"
-            Exit Function
-        End If
-    End If
-    
-    ' 0, 00, 01.i, 01.i.k -> Паттерны
-    If s = "0" Or s = "00" Or s Like "#.#" Or s Like "#.#.#" Then
-        GetPromptProfile = "Паттерны"
-        Exit Function
-    End If
-    
-    ' Явное покрытие строковых форматов "02", "03" и т.д.
-    If s Like "##" Or s Like "###" Then
-        GetPromptProfile = "Документы"
-        Exit Function
-    End If
-    
-    ' Невалидное значение
-    GetPromptProfile = ""
+
+    If StrComp(s, "{LAST_STEP_NUMBER}", vbTextCompare) = 0 Then Exit Function
+
+    parts = Split(s, ".")
+    nParts = UBound(parts) + 1
+    If nParts < 1 Or nParts > 3 Then Exit Function     ' 4+ сегмента — невалидно
+
+    head = parts(0)
+    Select Case head
+        Case "0", "00"
+            If nParts = 1 Then
+                GetPromptProfile = "Паттерны"          ' 0 / 00
+            ElseIf head = "00" And IsPositiveIntPart(parts(1)) Then
+                GetPromptProfile = "Папки"             ' 00.i
+            End If
+        Case "01"
+            If nParts = 1 Then
+                GetPromptProfile = "Документы"         ' 01 завершён
+            ElseIf IsPositiveIntPart(parts(1)) And _
+                   (nParts = 2 Or IsPositiveIntPart(parts(2))) Then
+                GetPromptProfile = "Паттерны"          ' 01.i / 01.i.k
+            End If
+        Case Else
+            If nParts = 1 Then
+                If IsPlainStepNumber(head) Then
+                    GetPromptProfile = "Документы"     ' NN >= 02 (канон)
+                ElseIf IsPositiveIntPart(head) And CLng(head) >= 2 Then
+                    ' W-ANALYTIC-06F: нормализация Excel-формы "3".."9" (утерян ведущий ноль)
+                    GetPromptProfile = "Документы"
+                End If
+            End If
+    End Select
 End Function
 
 ' Вспомогательная для GetPromptProfile (W7.1-A): строка — положительное
@@ -3248,7 +3263,7 @@ NextUaLine2:
         Next k
     End If
     If maxStep <> "" Then UpdateLastStepNumber maxStep
-    UpdateStepsState wb, Mod_Structure.FLAT_SHEET_NAME
+
     ' =============================================================
     
     Mod_Util.WriteLog "CommandParseAiResponse: разбор ответа ИИ завершён успешно." & _
@@ -3821,6 +3836,11 @@ Private Function IsStepGreater(ByVal step1 As String, ByVal step2 As String) As 
     End If
     ' Если step2 пуст, а step1 нет — step1 считается больше (инициализация максимума)
     If Trim(step2) = "" Then
+        IsStepGreater = True
+        Exit Function
+    End If
+    
+    If StrComp(Trim$(step2), "нет", vbTextCompare) = 0 Then
         IsStepGreater = True
         Exit Function
     End If
