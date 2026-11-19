@@ -2562,64 +2562,35 @@ End Sub
 ' ---------------------------------------------------------------------------
 Public Function GetPromptProfile(ByVal lastStep As String) As String
     Dim s As String
-    Dim parts() As String
-    Dim nParts As Long
-    Dim head As String
-
-    GetPromptProfile = ""
     s = Trim$(lastStep)
-    If s = "" Then Exit Function          ' пусто -> ""
-
-    ' "нет" -> Папки (регистронезависимо)
-    If StrComp(s, "нет", vbTextCompare) = 0 Then
+    
+    If s = "" Or LCase$(s) = "нет" Then
         GetPromptProfile = "Папки"
         Exit Function
     End If
-
-    ' Литерал плейсхолдера -> невалидно
-    If StrComp(s, "{LAST_STEP_NUMBER}", vbTextCompare) = 0 Then
-        GetPromptProfile = ""
+    
+    ' W-ANALYTIC-06D-FIX-1: Нормализация ввода для обратной совместимости ("3" и "03" -> Документы)
+    If IsNumeric(s) Then
+        If CLng(s) >= 1 Then
+            GetPromptProfile = "Документы"
+            Exit Function
+        End If
+    End If
+    
+    ' 0, 00, 01.i, 01.i.k -> Паттерны
+    If s = "0" Or s = "00" Or s Like "#.#" Or s Like "#.#.#" Then
+        GetPromptProfile = "Паттерны"
         Exit Function
     End If
-
-    ' Разбор по точкам: "NN" / "NN.i" / "NN.i.k" (более — невалидно)
-    parts = Split(s, ".")
-    nParts = UBound(parts) + 1
-    If nParts < 1 Or nParts > 3 Then
-        GetPromptProfile = ""             ' напр. "01.15.2.1" (4 сегмента)
+    
+    ' Явное покрытие строковых форматов "02", "03" и т.д.
+    If s Like "##" Or s Like "###" Then
+        GetPromptProfile = "Документы"
         Exit Function
     End If
-
-    head = parts(0)
-    Select Case head
-        Case "0", "00"
-            ' "0" -> Паттерны; "00" -> Паттерны; "00.i" (i >= 1) -> Папки
-            If nParts = 1 Then
-                GetPromptProfile = "Паттерны"
-            ElseIf head = "00" And IsPositiveIntPart(parts(1)) Then
-                GetPromptProfile = "Папки"
-            Else
-                GetPromptProfile = ""     ' "0.i" невалидно
-            End If
-        Case "01"
-            ' "01" -> Документы; "01.i" / "01.i.k" (i,k >= 1) -> Паттерны
-            If nParts = 1 Then
-                GetPromptProfile = "Документы"
-            ElseIf IsPositiveIntPart(parts(1)) And _
-                   (nParts = 2 Or IsPositiveIntPart(parts(2))) Then
-                GetPromptProfile = "Паттерны"
-            Else
-                GetPromptProfile = ""     ' "01.x", "01.i.x" невалидны
-            End If
-        Case Else
-            ' "NN" (>= 2): только цифры, 2 и более разрядов, без ведущих
-            ' нулей, без подшагов ("02.i" невалиден)
-            If nParts = 1 And IsPlainStepNumber(head) Then
-                GetPromptProfile = "Документы"
-            Else
-                GetPromptProfile = ""
-            End If
-    End Select
+    
+    ' Невалидное значение
+    GetPromptProfile = ""
 End Function
 
 ' Вспомогательная для GetPromptProfile (W7.1-A): строка — положительное

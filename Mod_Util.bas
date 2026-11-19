@@ -291,8 +291,8 @@ End Function
 
 ' Возвращает стандартное сообщение об отсутствующем обязательном файле
 ' (W-CORRECTION-PACK-1, п.1.1): "[!] Отсутствует обязательный файл: <FileName>".
-Public Function FormatMissingFile(ByVal FileName As String) As String
-    FormatMissingFile = "[!] Отсутствует обязательный файл: " & FileName
+Public Function FormatMissingFile(ByVal fileName As String) As String
+    FormatMissingFile = "[!] Отсутствует обязательный файл: " & fileName
 End Function
 
 ' Записывает сообщение в журнал <корень>\05_Логи\Препроцессор_YYYY-MM-DD.log.
@@ -456,7 +456,7 @@ End Function
 '   * иначе (файлов конфигурации нет вовсе) - вернуть "".
 ' Временные файлы Office (~$) пропускаются. Если папка не существует - "".
 ' ---------------------------------------------------------------------------
-Public Function FindConfigFile(ByVal FolderPath As String) As String
+Public Function FindConfigFile(ByVal folderPath As String) As String
     Dim fName As String
     Dim xmlFound As String
     Dim txtFound As String
@@ -464,18 +464,18 @@ Public Function FindConfigFile(ByVal FolderPath As String) As String
 
     FindConfigFile = ""
 
-    If Dir(FolderPath, vbDirectory) = "" Then Exit Function
+    If Dir(folderPath, vbDirectory) = "" Then Exit Function
 
     ' проход по всем файлам папки: фиксируем первый .xml, первый .txt
     ' и наличие хотя бы одного .pilotcfx. Dir без атрибутов возвращает
     ' только файлы (не подпапки).
-    fName = Dir(FolderPath & "\*")
+    fName = Dir(folderPath & "\*")
     Do While fName <> ""
         If Left$(fName, 2) <> "~$" Then           ' пропускаем временные файлы Office
             If Right$(LCase$(fName), 4) = ".xml" Then
-                If xmlFound = "" Then xmlFound = FolderPath & "\" & fName
+                If xmlFound = "" Then xmlFound = folderPath & "\" & fName
             ElseIf Right$(LCase$(fName), 4) = ".txt" Then
-                If txtFound = "" Then txtFound = FolderPath & "\" & fName
+                If txtFound = "" Then txtFound = folderPath & "\" & fName
             ElseIf Right$(LCase$(fName), 8) = ".pilotcfx" Then
                 pilotcfxFound = True
             End If
@@ -495,7 +495,7 @@ Public Function FindConfigFile(ByVal FolderPath As String) As String
 
     ' только .pilotcfx без .xml/.txt - предупреждение, пустой результат
     If pilotcfxFound Then
-        WriteWarning "U006", "Найден только .pilotcfx, требуется .xml или .txt (" & FolderPath & ")"
+        WriteWarning "U006", "Найден только .pilotcfx, требуется .xml или .txt (" & folderPath & ")"
         FindConfigFile = ""
         Exit Function
     End If
@@ -559,7 +559,7 @@ Public Sub EnsureSettingsSheet()
     Dim lastRow As Long
     Dim targetRow As Long
     Dim foundCell As Range
-    Dim nmChk As Name
+    Dim nmChk As name
     Dim patErr As Boolean
     Dim r As Long
     
@@ -602,7 +602,7 @@ Public Sub EnsureSettingsSheet()
         Err.Clear
         On Error GoTo ErrHandler
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
-        ws.Name = "Настройки"
+        ws.name = "Настройки"
     Else
         On Error GoTo ErrHandler
         ws.Unprotect Password:="pilot"
@@ -611,7 +611,7 @@ Public Sub EnsureSettingsSheet()
     ' 2. Определение последней заполненной строки в столбце A для корректного добавления новых
     lastRow = 1
     For r = 2 To 100
-        If Trim$(CStr(ws.Cells(r, 1).Value)) <> "" Then
+        If Trim$(CStr(ws.Cells(r, 1).value)) <> "" Then
             lastRow = r
         End If
     Next r
@@ -622,12 +622,12 @@ Public Sub EnsureSettingsSheet()
         Set foundCell = ws.Columns(1).Find(What:=CStr(config(i)(0)), LookIn:=xlValues, LookAt:=xlWhole, MatchCase:=False)
         
         If Not foundCell Is Nothing Then
-            targetRow = foundCell.Row
+            targetRow = foundCell.row
         Else
             ' Если не найдено, добавляем в первую свободную строку после lastRow
             targetRow = lastRow + 1
             ' Дополнительная защита от наложения на случайно заполненные строки ниже
-            Do While Trim$(CStr(ws.Cells(targetRow, 1).Value)) <> ""
+            Do While Trim$(CStr(ws.Cells(targetRow, 1).value)) <> ""
                 targetRow = targetRow + 1
             Loop
             lastRow = targetRow
@@ -635,17 +635,24 @@ Public Sub EnsureSettingsSheet()
         
         ' Запись названия (если строка была создана новой)
         If foundCell Is Nothing Then
-            ws.Cells(targetRow, 1).Value = CStr(config(i)(0))
+            ws.Cells(targetRow, 1).value = CStr(config(i)(0))
         End If
         
         ' Запись значения по умолчанию ТОЛЬКО если ячейка B пуста (идемпотентность)
-        If Trim$(CStr(ws.Cells(targetRow, 2).Value)) = "" Then
-            ws.Cells(targetRow, 2).Value = CStr(config(i)(1))
+        If Trim$(CStr(ws.Cells(targetRow, 2).value)) = "" Then
+            ws.Cells(targetRow, 2).value = CStr(config(i)(1))
+        End If
+        
+        ' W-ANALYTIC-06D-FIX-1: Принудительный текстовый формат для полей с номерами шагов и версиями
+        Dim settingName As String
+        settingName = CStr(config(i)(0))
+        If settingName = "Номер последнего шага" Or settingName = "Версия промта-генератора" Or settingName = "Версия промта-исправления" Then
+            ws.Cells(targetRow, 2).NumberFormat = "@"
         End If
         
         ' Запись подсказки в столбец C, если он пуст
-        If Trim$(CStr(ws.Cells(targetRow, 3).Value)) = "" Then
-            ws.Cells(targetRow, 3).Value = CStr(config(i)(2))
+        If Trim$(CStr(ws.Cells(targetRow, 3).value)) = "" Then
+            ws.Cells(targetRow, 3).value = CStr(config(i)(2))
         End If
         
         ' Применение Data Validation
@@ -663,18 +670,18 @@ Public Sub EnsureSettingsSheet()
         
         ' Создание именованного диапазона (если не существует)
         On Error Resume Next
-        Set nmChk = wb.Names(CStr(namesArr(i)))
+        Set nmChk = wb.names(CStr(namesArr(i)))
         If Err.Number <> 0 Then
             Err.Clear
             On Error GoTo ErrHandler
-            wb.Names.Add Name:=CStr(namesArr(i)), RefersTo:="=" & ws.Name & "!$B$" & targetRow
+            wb.names.Add name:=CStr(namesArr(i)), RefersTo:="=" & ws.name & "!$B$" & targetRow
         End If
         On Error GoTo ErrHandler
         Set nmChk = Nothing
     Next i
 
     ' 4. Форматирование и защита листа
-    ws.Range("A1").Value = "Настройки Препроцессора"
+    ws.Range("A1").value = "Настройки Препроцессора"
     ws.Columns("A:C").AutoFit
 
     ' Разблокируем все ячейки, затем блокируем только столбец B от 2-й до последней строки настроек

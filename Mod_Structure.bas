@@ -48,7 +48,7 @@ Private Const SHEET_NAME As String = "Паттерны"
 Private Const PATTERNS_PASSWORD As String = "pilot"
 
 Private Type NodeRec
-    Name       As String
+    name       As String
     NodeType   As String
     Level      As Long
     RowIdx     As Long
@@ -181,7 +181,7 @@ Public Sub BuildFlatStructure()
     Dim rngStart As Range
     Set rngStart = wsData.Range(startCellStr)
     If Not rngStart Is Nothing Then
-        startRow = rngStart.Row
+        startRow = rngStart.row
         startCol = rngStart.Column
     Else
         ' Если ячейка некорректна, логируем предупреждение и используем дефолт
@@ -194,7 +194,7 @@ Public Sub BuildFlatStructure()
 
     ' ИЗМЕНЕНИЕ 2: путь сохранения результатов
     resultsPath = Mod_Util.GetProjectRoot & "\02_Подготовка данных\01_Схема"
-    'Примечание: ArchiveOldSchemaArtifacts использует prepPath, поэтому архивация 
+    'Примечание: ArchiveOldSchemaArtifacts использует prepPath, поэтому архивация
     'автоматически пойдёт в 02_Подготовка данных\01_Схема\Архив
 
     ' новая книга для результатов (не засоряем книгу инструмента листами)
@@ -216,7 +216,7 @@ Public Sub BuildFlatStructure()
     ' основной сборки оно остаётся в прежнем состоянии пользователя.
 
     '---------- 1. Легенда: цвет -> тип ----------
-    ' W-FLEX-STRUCTURE: диапазон легенды читается из настроек. 
+    ' W-FLEX-STRUCTURE: диапазон легенды читается из настроек.
     ' Лист легенды (wsLegend) определен выше с учетом правила "одного листа".
     Dim sLeg As String          ' W-FLEX-STRUCTURE: строка диапазона легенды
     Dim rngLeg As Range
@@ -264,7 +264,7 @@ Public Sub BuildFlatStructure()
     If Not rngLeg Is Nothing Then
         For Each legCell In rngLeg.Cells   ' обход по строкам: B1, C1, B2, C2, ...
             i = i + 1
-            legNames(i) = Trim$(CStr(legCell.Value))
+            legNames(i) = Trim$(CStr(legCell.value))
             legColors(i) = legCell.Interior.Color
         Next legCell
     End If
@@ -313,7 +313,7 @@ Public Sub BuildFlatStructure()
                         origName = Trim(CStr(v))
                         cleanName = CleanNodeName(origName)
                         With Nodes(NodeCount)
-                            .Name = cleanName
+                            .name = cleanName
                             .RawName = origName
                             .NameCleaned = (origName <> cleanName)
                             .NodeType = tName
@@ -329,7 +329,7 @@ Public Sub BuildFlatStructure()
                             End If
                         End With
                         ' спец-правило: корень
-                        If Nodes(NodeCount).Name = "Объект" Then
+                        If Nodes(NodeCount).name = "Объект" Then
                             Nodes(NodeCount).NodeType = "Папка"
                             Nodes(NodeCount).parentIdx = 0
                         End If
@@ -371,9 +371,9 @@ Public Sub BuildFlatStructure()
             Dim p As Long
             p = Nodes(i).parentIdx
             If Len(Nodes(p).Children) = 0 Then
-                Nodes(p).Children = Nodes(i).Name
+                Nodes(p).Children = Nodes(i).name
             Else
-                Nodes(p).Children = Nodes(p).Children & "; " & Nodes(i).Name
+                Nodes(p).Children = Nodes(p).Children & "; " & Nodes(i).name
             End If
         End If
     Next i
@@ -616,8 +616,8 @@ ManyFiles:                                  ' в папке больше одн�
 
 OpenErr:                                    ' в книге нет первого листа (или он недоступен)
     Mod_Util.WriteError "S004", "BuildFlatStructure: не удалось получить первый лист из книги """ & _
-        wbSrc.Name & """."
-    MsgBox "Ошибка S004: не удалось получить лист из книги """ & wbSrc.Name & """.", _
+        wbSrc.name & """."
+    MsgBox "Ошибка S004: не удалось получить лист из книги """ & wbSrc.name & """.", _
            vbExclamation, "Схема"
     ' W-FIX-AUTOFIT-WRITELOG: при открытии источника на запись закрываем его
     ' без сохранения; если книга была открыта пользователем — только вернуть
@@ -778,7 +778,7 @@ Private Function ParentName(ByVal idx As Long) As String
     If idx = 0 Then
         ParentName = ""
     Else
-        ParentName = Nodes(idx).Name
+        ParentName = Nodes(idx).name
     End If
 End Function
 
@@ -807,7 +807,7 @@ Private Sub ProcessShortcuts()
             targetIdx = 0
             For j = 1 To NodeCount
                 If j <> i Then
-                    If Nodes(j).Name = Nodes(i).Name And Nodes(j).NodeType <> "Ярлык" Then
+                    If Nodes(j).name = Nodes(i).name And Nodes(j).NodeType <> "Ярлык" Then
                         targetIdx = j
                         Exit For
                     End If
@@ -818,8 +818,8 @@ Private Sub ProcessShortcuts()
             If targetIdx = 0 Then
                 Nodes(i).NodeType = "ОШИБКА_ЯРЛЫКА"
                 ' Зафиксировать в словаре проблем
-                If Not problemsDict.Exists(Nodes(i).Name) Then
-                    problemsDict.Add Nodes(i).Name, "E"   ' E = ошибка
+                If Not problemsDict.Exists(Nodes(i).name) Then
+                    problemsDict.Add Nodes(i).name, "E"   ' E = ошибка
                 End If
             Else
                 '--- цель найдена: переносим связи ---
@@ -839,11 +839,11 @@ Private Sub ProcessShortcuts()
                     End If
                     
                     ' 2. Дописать имя ярлыка в Children родителя ярлыка
-                    If InStr(1, ";" & Nodes(parentIdx).Children & ";", ";" & Nodes(i).Name & ";") = 0 Then
+                    If InStr(1, ";" & Nodes(parentIdx).Children & ";", ";" & Nodes(i).name & ";") = 0 Then
                         If Len(Nodes(parentIdx).Children) = 0 Then
-                            Nodes(parentIdx).Children = Nodes(i).Name
+                            Nodes(parentIdx).Children = Nodes(i).name
                         Else
-                            Nodes(parentIdx).Children = Nodes(parentIdx).Children & "; " & Nodes(i).Name
+                            Nodes(parentIdx).Children = Nodes(parentIdx).Children & "; " & Nodes(i).name
                         End If
                     End If
                 End If
@@ -872,7 +872,7 @@ Private Sub GetSheet(ByVal wb As Workbook, ByVal nm As String, ByRef out As Work
         Err.Clear
         On Error GoTo 0
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
-        ws.Name = nm
+        ws.name = nm
     Else
         On Error GoTo 0
         ws.Cells.Clear              ' очистка вместо удаления листа
@@ -900,7 +900,7 @@ Private Sub CreateSmartTable(ByVal ws As Worksheet, _
 
     ' Удалить старую таблицу с таким же именем (при повторном запуске)
     For Each lo In ws.ListObjects
-        If lo.Name = tableName Then
+        If lo.name = tableName Then
             lo.Delete
             Exit For
         End If
@@ -915,7 +915,7 @@ Private Sub CreateSmartTable(ByVal ws As Worksheet, _
     Mod_Util.DebugLog "CreateSmartTable: таблица создана"
 
     If Not newLo Is Nothing Then
-        newLo.Name = tableName
+        newLo.name = tableName
         newLo.TableStyle = styleName
     End If
     Mod_Util.DebugLog "CreateSmartTable: имя и стиль назначены"
@@ -974,7 +974,7 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         ' Проверяем словарь проблем (добавлено в WriteLog и ProcessShortcuts;
         ' W-T-SCHEMA-FIX: узлы с очищенными именами помечены "W" на этапе
         ' сканирования — они тоже попадают сюда)
-        If problemsDict.Exists(Nodes(i).Name) Then
+        If problemsDict.Exists(Nodes(i).name) Then
             hasError = True
         End If
         
@@ -983,14 +983,14 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         ' вызывается из главной процедуры ДО WriteFlatTable).
         ' Пустой номер (LeadCode = "") в расчёт не берётся.
         If Not dupCountDict Is Nothing Then
-            dupKey = Nodes(i).NodeType & "|" & LeadCode(Nodes(i).Name)
+            dupKey = Nodes(i).NodeType & "|" & LeadCode(Nodes(i).name)
             If Right$(dupKey, 1) <> "|" Then
                 If dupCountDict.Exists(dupKey) Then isDup = True
             End If
         End If
         
         Dim parentCell As String
-        If Nodes(i).Name = "Объект" Then
+        If Nodes(i).name = "Объект" Then
             parentCell = "projectfolder"
         Else
             parentCell = ParentName(Nodes(i).parentIdx)
@@ -1002,7 +1002,7 @@ Private Sub WriteFlatTable(ByVal wbOut As Workbook)
         ' как в прежней колонке B - подсветка и фильтры не ломаются),
         ' D "" (Паттерн - пусто при первичной сборке), E "Входит в"
         ' (родитель), F "Состоит из" (дети), G "Аномалия".
-        ws.Cells(r, 2).value = Nodes(i).Name
+        ws.Cells(r, 2).value = Nodes(i).name
         ws.Cells(r, 3).value = IIf(isShortcut, "ОШИБКА_ЯРЛЫКА", Nodes(i).NodeType)
         ws.Cells(r, 5).value = parentCell
         ws.Cells(r, 6).value = Nodes(i).Children
@@ -1048,6 +1048,13 @@ NextNode:
         Mod_Util.DebugLog "WriteFlatTable: CreateSmartTable завершён"
     End If
     
+    ' =========================================================================
+    ' W-ANALYTIC-06D-FIX-1: Принудительный текстовый формат для колонки A
+    ' Устанавливается ПОСЛЕ создания умной таблицы, чтобы Excel не удалял
+    ' ведущие нули (например, "03" -> 3) при последующих операциях или вводе.
+    ' =========================================================================
+    ws.Columns("A").NumberFormat = "@"
+    
     ' W-FIX-AUTOFIT-WRITELOG: AutoFit через SafeAutoFit — на скрытом/неотрисованном
     ' листе прямой вызов мог падать с "Object doesn't support this property or
     ' method" и ронять всю сборку через Fail главной процедуры.
@@ -1069,7 +1076,7 @@ Private Sub WriteTraceability(ByVal wbOut As Workbook)
         ws.Cells(i + 1, 2).value = Nodes(i).RowIdx
         ws.Cells(i + 1, 3).value = Nodes(i).ColIdx
         ws.Cells(i + 1, 4).value = Nodes(i).Level
-        ws.Cells(i + 1, 5).value = Nodes(i).Name
+        ws.Cells(i + 1, 5).value = Nodes(i).name
         ws.Cells(i + 1, 6).value = Nodes(i).NodeType
         ws.Cells(i + 1, 7).value = HexRGB(Nodes(i).ColorCode)
         ws.Cells(i + 1, 8).value = ParentName(Nodes(i).parentIdx)
@@ -1139,7 +1146,7 @@ End Sub
 ' Вызывается ОДИН раз ДО любой записки данных на лист (в BuildFlatStructure).
 Private Sub PrepareAnomaliesSheet(ByVal wbOut As Workbook, ByRef out As Worksheet)
     GetSheet wbOut, "Аномалии схемы", out
-    out.Range("A1:H1").Value = Array("Код проблемы", "Строка", "Столбец", _
+    out.Range("A1:H1").value = Array("Код проблемы", "Строка", "Столбец", _
                                      "Уровень", "Тип", "Элемент", "Родитель", "Описание")
 End Sub
 
@@ -1175,7 +1182,7 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
 
     Dim r As Long
     ' первая свободная строка: после заголовков (2) и после строк дублей
-    r = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row + 1
+    r = ws.Cells(ws.Rows.Count, 1).End(xlUp).row + 1
     If r < 2 Then r = 2
     Dim i As Long
     For i = 1 To NodeCount
@@ -1183,7 +1190,7 @@ Private Sub WriteLog(ByVal wbOut As Workbook, ByRef ws As Worksheet)
         If Nodes(i).NodeType = "УДАЛЕН" Then GoTo NextNodeLog
         
         Dim nm As String, pn As String
-        nm = Nodes(i).Name
+        nm = Nodes(i).name
         pn = ParentName(Nodes(i).parentIdx)
 
         ' Ошибка: ярлык без цели
@@ -1296,7 +1303,7 @@ NextNodeLog:
     ' Существующая таблица (создана ОДИН раз в BuildFlatStructure после записи
     ' дублей) только РАСШИРЯЕТСЯ методом Resize до фактических данных журнала.
     Dim lastRowLog As Long
-    lastRowLog = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastRowLog = ws.Cells(ws.Rows.Count, 1).End(xlUp).row
 
     ' W-DEBUG-ANOMALIES-EMPTY: логирование состояния ListObject tblAnomalies
     ' ДО Resize. Если данных на листе нет (последняя непустая строка —
@@ -1355,10 +1362,10 @@ NextNodeLog:
         End If
         Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): до Resize, заголовки A1:H1 = """ & _
-                          CStr(ws.Range("A1").Value) & "|" & CStr(ws.Range("B1").Value) & _
-                          "|" & CStr(ws.Range("C1").Value) & "|" & CStr(ws.Range("D1").Value) & _
-                          "|" & CStr(ws.Range("E1").Value) & "|" & CStr(ws.Range("F1").Value) & _
-                          "|" & CStr(ws.Range("G1").Value) & "|" & CStr(ws.Range("H1").Value) & """"
+                          CStr(ws.Range("A1").value) & "|" & CStr(ws.Range("B1").value) & _
+                          "|" & CStr(ws.Range("C1").value) & "|" & CStr(ws.Range("D1").value) & _
+                          "|" & CStr(ws.Range("E1").value) & "|" & CStr(ws.Range("F1").value) & _
+                          "|" & CStr(ws.Range("G1").value) & "|" & CStr(ws.Range("H1").value) & """"
         If Err.Number <> 0 Then
             Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
@@ -1402,10 +1409,10 @@ NextNodeLog:
         End If
         Err.Clear
         Mod_Util.DebugLog "WriteLog(лист): после Resize, заголовки A1:H1 = """ & _
-                          CStr(ws.Range("A1").Value) & "|" & CStr(ws.Range("B1").Value) & _
-                          "|" & CStr(ws.Range("C1").Value) & "|" & CStr(ws.Range("D1").Value) & _
-                          "|" & CStr(ws.Range("E1").Value) & "|" & CStr(ws.Range("F1").Value) & _
-                          "|" & CStr(ws.Range("G1").Value) & "|" & CStr(ws.Range("H1").Value) & """"
+                          CStr(ws.Range("A1").value) & "|" & CStr(ws.Range("B1").value) & _
+                          "|" & CStr(ws.Range("C1").value) & "|" & CStr(ws.Range("D1").value) & _
+                          "|" & CStr(ws.Range("E1").value) & "|" & CStr(ws.Range("F1").value) & _
+                          "|" & CStr(ws.Range("G1").value) & "|" & CStr(ws.Range("H1").value) & """"
         If Err.Number <> 0 Then
             Mod_Util.DebugLog "WriteLog: ошибка чтения заголовков ListObject: " & Err.Description
             Err.Clear
@@ -1464,13 +1471,13 @@ Private Function BuildDupKeyDict() As Object
     ' Проход 1: группировка узлов по ключу "Тип|Номер"
     For i = 1 To NodeCount
         If Nodes(i).NodeType <> "УДАЛЕН" And Nodes(i).NodeType <> "ОШИБКА_ЯРЛЫКА" Then
-            nm = Nodes(i).Name
+            nm = Nodes(i).name
             code = LeadCode(nm)
             If code <> "" Then
                 nodesWithCode = nodesWithCode + 1
                 ' ИСПРАВЛЕНО (Вариант Б): Ключ включает полное очищенное имя, а не только код.
                 ' Это гарантирует, что дублем считается только полное совпадение (Категория + Код + Имя).
-                key = Nodes(i).NodeType & "|" & Nodes(i).Name
+                key = Nodes(i).NodeType & "|" & Nodes(i).name
                 If Not dictKey.Exists(key) Then
                     Set col = New Collection
                     col.Add i
@@ -1496,20 +1503,20 @@ Private Function BuildDupKeyDict() As Object
 
     ' Есть ли хотя бы одна группа из 2+ узлов?
     hasDup = False
-    For Each kCheck In dictKey.Keys
+    For Each kCheck In dictKey.keys
         If dictKey(kCheck).Count > 1 Then hasDup = True: Exit For
     Next kCheck
 
     ' W-FIX-ANOMALIES-EMPTY (блокер A): число групп с дублями и примеры ключей
     ' (до 5 любых), чтобы видеть, что именно собрал словарь. Логику поиска
     ' дублей это не меняет — только диагностика.
-    For Each kCheck In dictKey.Keys
+    For Each kCheck In dictKey.keys
         If dictKey(kCheck).Count > 1 Then dupGroupsDbg = dupGroupsDbg + 1
     Next kCheck
     Mod_Util.DebugLog "BuildDupKeyDict: групп с дублями = " & dupGroupsDbg
 
     If dictKey.Count > 0 Then
-        keysArr = dictKey.Keys
+        keysArr = dictKey.keys
         dbgExamples = 0
         For i = 0 To UBound(keysArr)
             If dbgExamples >= 5 Then Exit For
@@ -1529,12 +1536,12 @@ Private Function BuildDupKeyDict() As Object
     Dim idx As Long
     Dim k As Variant
     If dupCountDict Is Nothing Then Set dupCountDict = CreateObject("Scripting.Dictionary")
-    For Each k In dictKey.Keys
+    For Each k In dictKey.keys
         If dictKey(k).Count > 1 Then
             For j = 1 To dictKey(k).Count
                 idx = CLng(dictKey(k)(j))
                 ' ИСПРАВЛЕНО: ключ в dupCountDict должен строго соответствовать новому формату ключа выше
-                dupCountDict(Nodes(idx).NodeType & "|" & Nodes(idx).Name) = True
+                dupCountDict(Nodes(idx).NodeType & "|" & Nodes(idx).name) = True
             Next j
         End If
     Next k
@@ -1582,7 +1589,7 @@ Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As 
     ' Подсчёт найденных дублей ДО записи (только логирование, логику не меняем):
     ' dupGroups — группы из 2+ узлов, dupPairs — строки, которые будут записаны
     ' (по одной на каждую пару "первый элемент + следующий").
-    For Each k In dictKey.Keys
+    For Each k In dictKey.keys
         If dictKey(k).Count > 1 Then
             dupGroups = dupGroups + 1
             dupPairs = dupPairs + (dictKey(k).Count - 1)
@@ -1601,28 +1608,28 @@ Private Function WriteSchemaDuplicates(ByVal ws As Worksheet, ByVal startRow As 
 
     Dim firstIdx As Long        ' W-FLEX-STRUCTURE: индекс первого узла группы дублей
     r = startRow
-    For Each k In dictKey.Keys
+    For Each k In dictKey.keys
         If dictKey(k).Count > 1 Then
             ' ИСПРАВЛЕНО (Вариант Б): так как ключ теперь содержит полное имя, а не только код,
             ' надежнее извлекать Тип и Код напрямую из первого узла группы, а не парсить строку ключа.
             firstIdx = CLng(dictKey(k)(1))
             
             typePart = Nodes(firstIdx).NodeType
-            numPart = LeadCode(Nodes(firstIdx).Name)
+            numPart = LeadCode(Nodes(firstIdx).name)
             
             ' каждое следующее наименование — в пару к первому
             For j = 2 To dictKey(k).Count
                 idxA = firstIdx
                 idxB = CLng(dictKey(k)(j))
-                ws.Cells(r, 1).Value = "DUP_IN_TYPE"                            ' Код проблемы
-                ws.Cells(r, 2).Value = Nodes(idxA).RowIdx                       ' Строка
-                ws.Cells(r, 3).Value = Nodes(idxA).ColIdx                       ' Столбец
-                ws.Cells(r, 4).Value = Nodes(idxA).Level                        ' Уровень
-                ws.Cells(r, 5).Value = typePart                                 ' Тип
-                ws.Cells(r, 6).Value = NodeCaption(Nodes(idxA).Name) & " | " & _
-                                       NodeCaption(Nodes(idxB).Name)           ' Элемент: Наименование 1 | Наименование 2
-                ws.Cells(r, 7).Value = ParentName(Nodes(idxA).parentIdx)        ' Родитель
-                ws.Cells(r, 8).Value = "[!] Дубль: тип """ & typePart & _
+                ws.Cells(r, 1).value = "DUP_IN_TYPE"                            ' Код проблемы
+                ws.Cells(r, 2).value = Nodes(idxA).RowIdx                       ' Строка
+                ws.Cells(r, 3).value = Nodes(idxA).ColIdx                       ' Столбец
+                ws.Cells(r, 4).value = Nodes(idxA).Level                        ' Уровень
+                ws.Cells(r, 5).value = typePart                                 ' Тип
+                ws.Cells(r, 6).value = NodeCaption(Nodes(idxA).name) & " | " & _
+                                       NodeCaption(Nodes(idxB).name)           ' Элемент: Наименование 1 | Наименование 2
+                ws.Cells(r, 7).value = ParentName(Nodes(idxA).parentIdx)        ' Родитель
+                ws.Cells(r, 8).value = "[!] Дубль: тип """ & typePart & _
                                        """, номер " & numPart                   ' Описание / Тип аномалии
                 r = r + 1
             Next j
@@ -1676,7 +1683,7 @@ Private Sub CheckNumberDuplicates(ByVal wbOut As Workbook)
     If Not ws Is Nothing Then
         If Application.CountIf(ws.Columns(1), "DUP_IN_TYPE") = 0 Then
             Dim lastRowBackup As Long
-            lastRowBackup = WriteSchemaDuplicates(ws, ws.Cells(ws.Rows.Count, 1).End(xlUp).Row + 1, dictKey)
+            lastRowBackup = WriteSchemaDuplicates(ws, ws.Cells(ws.Rows.Count, 1).End(xlUp).row + 1, dictKey)
             ' ListObject создаётся/расширяется ПОСЛЕ дозаписанных данных
             If lastRowBackup >= 2 Then
                 Call CreateSmartTable(ws, ws.Range("A1:H" & lastRowBackup), _
@@ -1731,15 +1738,15 @@ Private Sub HighlightDuplicateRows(ByVal wbOut As Workbook)
         If Nodes(i).NodeType <> "УДАЛЕН" Then
             isDup = False
             ' ИСПРАВЛЕНО (Вариант Б): ключ для проверки должен строго совпадать с ключом в BuildDupKeyDict
-            dupKey = Nodes(i).NodeType & "|" & Nodes(i).Name
+            dupKey = Nodes(i).NodeType & "|" & Nodes(i).name
             If dupCountDict.Exists(dupKey) Then isDup = True
             If isDup Then
                 ' не перекрашиваем строки ошибок (розовая подсветка WriteFlatTable)
-                If Not problemsDict.Exists(Nodes(i).Name) And _
+                If Not problemsDict.Exists(Nodes(i).name) And _
                    Nodes(i).NodeType <> "ОШИБКА_ЯРЛЫКА" Then
                     ' PRE-04: колонка "Аномалия" - G (FLAT_COLS), подсветка - A:G
-                    If Len(CStr(ws.Cells(r, FLAT_COLS).Value)) = 0 Then
-                        ws.Cells(r, FLAT_COLS).Value = "[!] Дубль"      ' колонка "Аномалия"
+                    If Len(CStr(ws.Cells(r, FLAT_COLS).value)) = 0 Then
+                        ws.Cells(r, FLAT_COLS).value = "[!] Дубль"      ' колонка "Аномалия"
                     End If
                     ws.Range(ws.Cells(r, 1), ws.Cells(r, FLAT_COLS)).Interior.Color = RGB(255, 255, 0)
                 End If
@@ -1811,7 +1818,7 @@ Private Sub BackupFlatTableSheet()
 
     Application.DisplayAlerts = False
     wsSrc.Copy After:=wbTool.Sheets(wbTool.Sheets.Count)
-    ActiveSheet.Name = bakName
+    ActiveSheet.name = bakName
     Application.DisplayAlerts = True
 
     Mod_Util.DebugLog "BackupFlatTableSheet: бэкап создан"
@@ -1822,10 +1829,10 @@ Private Sub BackupFlatTableSheet()
     ReDim namesArr(1 To wbTool.Sheets.Count)
     cnt = 0
     For Each ws In wbTool.Worksheets
-        If Left$(ws.Name, Len(FLAT_SHEET_NAME & "_bak_")) = FLAT_SHEET_NAME & "_bak_" Or _
-           Left$(ws.Name, Len(FLAT_SHEET_NAME_OLD & "_bak_")) = FLAT_SHEET_NAME_OLD & "_bak_" Then
+        If Left$(ws.name, Len(FLAT_SHEET_NAME & "_bak_")) = FLAT_SHEET_NAME & "_bak_" Or _
+           Left$(ws.name, Len(FLAT_SHEET_NAME_OLD & "_bak_")) = FLAT_SHEET_NAME_OLD & "_bak_" Then
             cnt = cnt + 1
-            namesArr(cnt) = ws.Name
+            namesArr(cnt) = ws.name
         End If
     Next ws
 
@@ -1901,6 +1908,3 @@ ErrHandler:
                                   fName & "'. Ошибка: " & Err.Description
     Err.Clear
 End Sub
-
-
-
