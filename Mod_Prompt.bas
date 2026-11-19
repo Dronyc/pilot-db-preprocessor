@@ -2821,6 +2821,8 @@ End Sub
 Public Sub CommandParseAiResponse()
     On Error GoTo ErrHandler
 
+    Dim maxStep As String              ' W-ANALYTIC-06D: максимум NN
+
     Dim root As String
     root = NormPath(Mod_Util.GetProjectRoot())
     If root = "" Then
@@ -2830,6 +2832,8 @@ Public Sub CommandParseAiResponse()
 
     Dim fragmentsPath As String
     fragmentsPath = root & "\02_Подготовка данных\05_Фрагменты шагов"
+    Dim archivePath As String          ' W-ANALYTIC-06D: путь к Архиву
+    
 
     ' 1. Найти последний файл ответа ИИ
     Dim aiResponseFile As String
@@ -2851,6 +2855,11 @@ Public Sub CommandParseAiResponse()
     If InStr(1, aiResponse, "СТОП", vbTextCompare) > 0 Then
         Mod_Util.WriteError "P010", "CommandParseAiResponse: обнаружен маркер СТОП в ответе ИИ. Обработка прервана."
         MsgBox "Обнаружен маркер СТОП. Обработка прервана.", vbExclamation, "Разбор ответа ИИ"
+        
+        ' W-ANALYTIC-06D: архивация даже при СТОП
+        archivePath = root & "\02_Подготовка данных\Архив"
+        EnsureFolder archivePath
+        ArchiveFile fragmentsPath & "\" & aiResponseFile, archivePath, aiResponseFile
         Exit Sub
     End If
 
@@ -2871,6 +2880,12 @@ Public Sub CommandParseAiResponse()
     If Not is002 And Not is003 Then
         Mod_Util.WriteWarning "P010", "CommandParseAiResponse: не найдены блоки PATTERNS_CSV или STEPS_CSV."
         MsgBox "Не найдены блоки PATTERNS_CSV или STEPS_CSV в ответе ИИ.", vbExclamation, "Разбор ответа ИИ"
+
+        ' W-ANALYTIC-06D: архивация даже при СТОП
+        archivePath = root & "\02_Подготовка данных\Архив"
+        EnsureFolder archivePath
+        ArchiveFile fragmentsPath & "\" & aiResponseFile, archivePath, aiResponseFile
+
         Exit Sub
     End If
 
@@ -2944,7 +2959,7 @@ Public Sub CommandParseAiResponse()
 
     Dim lastRow As Long
     lastRow = ws.Cells(ws.Rows.Count, colName).End(xlUp).row
-
+     
     Dim decisionContent As String
     decisionContent = ""
 
@@ -3058,6 +3073,8 @@ NextLinePat:
 
                 parsedNNs(nn) = 1
 
+                If IsStepGreater(nn, maxStep) Then maxStep = nn   ' W-ANALYTIC-06D
+
                 typesArrStep = Split(typesStrStep, ";")
                 For jStep = LBound(typesArrStep) To UBound(typesArrStep)
                     typeItemStep = Trim(typesArrStep(jStep))
@@ -3071,6 +3088,7 @@ NextLinePat:
                             oldStep = Trim(CStr(ws.Cells(rStep, colStep).value))
                             If oldStep <> nn And nn <> "" Then
                                 Mod_Util.WriteLog "Обновление №шага/подшага для '" & typeItemStep & "': '" & oldStep & "' -> '" & nn & "'"
+                                ws.Cells(rStep, colStep).NumberFormat = "@"   ' текстовый формат
                                 ws.Cells(rStep, colStep).value = nn
                             End If
 
@@ -3225,7 +3243,7 @@ NextUaLine2:
         End If
     End If
 
-    ' 9. Сохранение и закрытие книги
+    ' 9. Сохранение книги
     If Not wb.Saved Then
         On Error Resume Next
         wb.Save
@@ -3235,11 +3253,39 @@ NextUaLine2:
         End If
         On Error GoTo 0
     End If
+    
+    ' W-ANALYTIC-06D: StepsState проверяем ДО закрытия wb (лист в wb)
+    UpdateStepsState wb, Mod_Structure.FLAT_SHEET_NAME
+    
     wb.Close SaveChanges:=False
     Application.ScreenUpdating = prevScreenUpdating
-
-    Mod_Util.WriteLog "CommandParseAiResponse: разбор ответа ИИ завершён успешно."
-    MsgBox "Разбор ответа ИИ завершён успешно." & vbCrLf & "Обновлена Адаптированная_структура.", vbInformation, "Разбор ответа ИИ"
+    
+    ' ===== W-ANALYTIC-06D: архивация и обновление настроек =====
+    archivePath = root & "\02_Подготовка данных\Архив"
+    EnsureFolder archivePath
+    ArchiveFile fragmentsPath & "\" & aiResponseFile, archivePath, aiResponseFile
+    ' Архивация сопутствующих промтов 00_2 / 00_3
+    Dim archArr As Variant, k As Long, pf As String
+    archArr = GetFileListArray(fragmentsPath)
+    If IsArray(archArr) Then
+        For k = LBound(archArr) To UBound(archArr)
+            pf = CStr(archArr(k))
+            If (Left$(pf, 12) = "Prompt_00_2_" Or Left$(pf, 12) = "Prompt_00_3_") _
+               And Right$(pf, 3) = ".md" Then
+                ArchiveFile fragmentsPath & "\" & pf, archivePath, pf
+            End If
+        Next k
+    End If
+    If maxStep <> "" Then UpdateLastStepNumber maxStep
+    UpdateStepsState wb, Mod_Structure.FLAT_SHEET_NAME
+    ' =============================================================
+    
+    Mod_Util.WriteLog "CommandParseAiResponse: разбор ответа ИИ завершён успешно." & _
+        IIf(maxStep <> "", " Макс. шаг: " & maxStep, "")
+    MsgBox "Разбор ответа ИИ завершён успешно." & vbCrLf & _
+        "Обновлена Адаптированная_структура." & _
+        IIf(maxStep <> "", vbCrLf & "Номер последнего шага: " & maxStep, ""), _
+        vbInformation, "Разбор ответа ИИ"
     Exit Sub
 
 ErrHandler:
@@ -3437,7 +3483,6 @@ Public Sub CommandGenerateTables()
     Dim root As String
     Dim promptsPath As String
     Dim fragmentsPath As String
-    Dim archivePath As String
     Dim templatePath As String
     Dim template As String
     Dim result As String
@@ -3455,6 +3500,7 @@ Public Sub CommandGenerateTables()
     Dim lastStep As String
     Dim profile As String
     Dim limitTypes As Long
+    Dim archivePath As String
 
     On Error GoTo ErrHandler
 
@@ -3743,4 +3789,159 @@ ErrHandler:
     Mod_Util.WriteError "P007", "GenerateAnalyticalPrompts_Click: " & Err.Description
     MsgBox "Ошибка: " & Err.Description, vbCritical, "Генерация аналитических промтов"
     Err.Clear
+End Sub
+
+' ============================================================================
+' W-ANALYTIC-06D: Архивация и обновление настроек
+' ============================================================================
+
+' Перемещает файл из srcPath в destFolder с именем fileName.
+' При коллизии добавляет суффикс _yyyy-mm-dd_hhnnss и пишет предупреждение P011.
+Private Sub ArchiveFile(ByVal srcPath As String, ByVal destFolder As String, ByVal fileName As String)
+    Dim destPath As String
+    Dim ext As String
+    Dim nameWithoutExt As String
+    Dim timestamp As String
+    Dim dotPos As Long
+
+    ' W-ANALYTIC-06D-FIX: идемпотентность. Если исходник уже перемещён
+    ' (повторный вызов / артефакт предыдущего прогона) - молча пропускаем.
+    If Not FileExistsSafe(srcPath) Then
+        Mod_Util.WriteLog "ArchiveFile: исходный файл уже перемещён, пропуск: " & srcPath
+        Exit Sub
+    End If
+
+    destPath = destFolder & "\" & fileName
+    If FileExistsSafe(destPath) Then
+        dotPos = InStrRev(fileName, ".")
+        If dotPos > 0 Then
+            ext = Mid$(fileName, dotPos)
+            nameWithoutExt = Left$(fileName, dotPos - 1)
+        Else
+            ext = "": nameWithoutExt = fileName
+        End If
+        timestamp = "_" & Format(Now, "yyyy-mm-dd_hhnnss")
+        destPath = destFolder & "\" & nameWithoutExt & timestamp & ext
+        Mod_Util.WriteWarning "P011", "Коллизия при архивации: файл " & fileName & _
+            " переименован в " & nameWithoutExt & timestamp & ext
+    End If
+
+    On Error Resume Next
+    Name srcPath As destPath
+    If Err.Number <> 0 Then
+        Mod_Util.WriteError "P012", "Ошибка перемещения файла " & srcPath & _
+            " в " & destPath & ". " & Err.Description
+        Err.Clear
+    End If
+    On Error GoTo 0
+End Sub
+
+' Посегментное сравнение номеров шагов (возвращает True, если step1 > step2).
+' Корректно обрабатывает форматы вида "01.10" > "01.2".
+Private Function IsStepGreater(ByVal step1 As String, ByVal step2 As String) As Boolean
+    Dim parts1 As Variant, parts2 As Variant
+    Dim i As Long, maxParts As Long
+    Dim val1 As Long, val2 As Long
+
+    ' Если step1 пуст — точно не больше
+    If Trim(step1) = "" Then
+        IsStepGreater = False
+        Exit Function
+    End If
+    ' Если step2 пуст, а step1 нет — step1 считается больше (инициализация максимума)
+    If Trim(step2) = "" Then
+        IsStepGreater = True
+        Exit Function
+    End If
+
+    parts1 = Split(step1, ".")
+    parts2 = Split(step2, ".")
+    maxParts = IIf(UBound(parts1) > UBound(parts2), UBound(parts1), UBound(parts2))
+    For i = 0 To maxParts
+        val1 = 0: val2 = 0
+        If i <= UBound(parts1) Then
+            If IsNumeric(Trim(CStr(parts1(i)))) Then val1 = CLng(Trim(CStr(parts1(i))))
+        End If
+        If i <= UBound(parts2) Then
+            If IsNumeric(Trim(CStr(parts2(i)))) Then val2 = CLng(Trim(CStr(parts2(i))))
+        End If
+        If val1 > val2 Then
+            IsStepGreater = True
+            Exit Function
+        ElseIf val1 < val2 Then
+            IsStepGreater = False
+            Exit Function
+        End If
+    Next i
+    IsStepGreater = False
+End Function
+
+' Обновляет настройку LastStepNumber, только если newStep строго больше текущего.
+Private Sub UpdateLastStepNumber(ByVal newStep As String)
+    Dim currentStep As String
+    currentStep = Mod_Util.GetSettingText("LastStepNumber", "нет")
+    
+    If IsStepGreater(newStep, currentStep) Then
+        UpdateSetting "Номер последнего шага", newStep
+        Mod_Util.WriteLog "UpdateLastStepNumber: обновлён на " & newStep
+    End If
+End Sub
+
+' Проверяет заполненность «№шага/подшага» для всех строк с «Отображаемое имя».
+' При полном покрытии устанавливает «Разбивка на шаги» = «Да» (автоматически не снимается).
+Private Sub UpdateStepsState(ByVal wb As Workbook, ByVal sheetName As String)
+    Dim ws As Worksheet
+    Dim lastRow As Long, r As Long
+    Dim colVisName As Long, colStepNum As Long
+    Dim allFilled As Boolean
+    Dim hasData As Boolean
+    
+    On Error Resume Next
+    Set ws = wb.Worksheets(sheetName)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+    
+    colVisName = FindColumn(ws, COL_VIS_NAME)
+    colStepNum = FindColumn(ws, COL_STEP_NUM)
+    
+    If colVisName = 0 Or colStepNum = 0 Then Exit Sub
+    
+    lastRow = ws.Cells(ws.Rows.Count, colVisName).End(xlUp).row
+    allFilled = True
+    hasData = False
+    
+    For r = 2 To lastRow
+        If Trim(CStr(ws.Cells(r, colVisName).value)) <> "" Then
+            hasData = True
+            If Trim(CStr(ws.Cells(r, colStepNum).value)) = "" Then
+                allFilled = False
+                Exit For
+            End If
+        End If
+    Next r
+    
+    If hasData And allFilled Then
+        UpdateSetting "Разбивка на шаги", "Да"
+        Mod_Util.WriteLog "UpdateStepsState: установлено значение «Да»"
+    End If
+End Sub
+
+' Обновляет значение настройки на листе «Настройки» (снимает/возвращает защиту).
+Private Sub UpdateSetting(ByVal settingName As String, ByVal newValue As String)
+    Dim ws As Worksheet
+    Dim r As Long
+    
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("Настройки")
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+    
+    ws.Unprotect Password:="pilot"
+    For r = 2 To 100
+        If StrComp(Trim(CStr(ws.Cells(r, 1).value)), settingName, vbTextCompare) = 0 Then
+            ws.Cells(r, 2).value = newValue
+            Exit For
+        End If
+    Next r
+    ws.Protect Password:="pilot"
 End Sub
