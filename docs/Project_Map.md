@@ -166,6 +166,7 @@
 | W7.2 | Mod_Prompt, Mod_UI (VBA): BuildPrompt02Patterns, BuildPrompt03Profile, CommandParseAiResponse (реальный разбор) | Частично: генерация 00_2/00_3 с итерациями закрыта W-ANALYTIC-05 (CommandGenerateTables); BuildPrompt02Patterns/BuildPrompt03Profile и реальный разбор (CommandParseAiResponse) — не начато |
 | W-FIX-PROMPT | prompts/prompt_fix_v1.0.md, Mod_Prompt (VBA): плейсхолдеры промта исправления + формирование промта по сводной таблице и листу отчёта по проверкам | Не начато (после W7.2; зависимость — сводная таблица + лист отчёта по проверкам) |
 | W-DOCS-MAP | docs/Project_Map.md, docs/Spec_Optimization.md, docs/Journal.md, docs/Handoff.md, prompts/archive/README.md: привести документацию к состоянию dc288ac | Выполнено |
+| W-ANALYTIC-06F | `CommandParseAiResponse` переведена на пакетную обработку всех файлов с сортировкой, строгой типизацией архивации и изоляцией ошибок на уровне файла | Выполнено. |
 
 *Примечание: ветка Script не используется.*
 Объём правки W7.2-GAPS-6: актуализированы строки Mod_Prompt / Mod_UI / Mod_Patterns, статус prompt_step_00_template.md, бэклог W7.1 и W7.1a → «Выполнено». Архитектура (состав модулей, поток данных) не менялась.

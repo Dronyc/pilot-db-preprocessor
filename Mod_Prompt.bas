@@ -2805,478 +2805,524 @@ End Sub
 ' W7.2 / W-ANALYTIC-06C: Команда разбора ответа ИИ (форматы 00_2 и 00_3)
 ' ============================================================================
 Public Sub CommandParseAiResponse()
+    Dim root As String, fragmentsPath As String, archivePath As String
+    Dim fileArr As Variant, i As Long, f As String, fPath As String, fText As String
+    Dim coll002 As New Collection, coll003 As New Collection
+    Dim arr002() As String, arr003() As String
+    Dim n002 As Long, n003 As Long, j As Long, temp As String
+    Dim processFiles() As String, totalFiles As Long
+    Dim successCount As Long, errorCount As Long, warnCount As Long
+    Dim prevScreenUpdating As Boolean
+    Dim maxStep As String ' F4: объявление переменной для отслеживания макс. шага
+    
     On Error GoTo ErrHandler
-
-    Dim maxStep As String              ' W-ANALYTIC-06D: максимум NN
-
-    Dim root As String
+    
     root = NormPath(Mod_Util.GetProjectRoot())
     If root = "" Then
-        Mod_Util.WriteError "P010", "CommandParseAiResponse: корень проекта не задан."
+        MsgBox "Корневая папка проекта не задана.", vbExclamation, "Ошибка"
         Exit Sub
     End If
-
-    Dim fragmentsPath As String
+    
     fragmentsPath = root & "\02_Подготовка данных\05_Фрагменты шагов"
-    Dim archivePath As String          ' W-ANALYTIC-06D: путь к Архиву
+    archivePath = root & "\02_Подготовка данных\Архив"
     
-
-    ' 1. Найти последний файл ответа ИИ
-    Dim aiResponseFile As String
-    aiResponseFile = GetLatestAiResponseFile(fragmentsPath)
-    If aiResponseFile = "" Then
-        Mod_Util.WriteWarning "P010", "CommandParseAiResponse: файл ответа ИИ не найден в " & fragmentsPath
-        MsgBox "Файл ответа ИИ не найден в папке 05_Фрагменты шагов.", vbExclamation, "Разбор ответа ИИ"
+    If Not FolderExistsSafe(fragmentsPath) Then
+        MsgBox "Папка фрагментов не найдена: " & fragmentsPath, vbExclamation, "Ошибка"
         Exit Sub
     End If
-
-    Dim aiResponse As String
-    aiResponse = ReadTextFile(fragmentsPath & "\" & aiResponseFile)
-    If aiResponse = "" Then
-        Mod_Util.WriteError "P010", "CommandParseAiResponse: не удалось прочитать " & aiResponseFile
-        Exit Sub
-    End If
-
-    ' 7. СТОП: если обнаружен маркер СТОП > P010, без обновления и архивации
-    If InStr(1, aiResponse, "СТОП", vbTextCompare) > 0 Then
-        Mod_Util.WriteError "P010", "CommandParseAiResponse: обнаружен маркер СТОП в ответе ИИ. Обработка прервана."
-        MsgBox "Обнаружен маркер СТОП. Обработка прервана.", vbExclamation, "Разбор ответа ИИ"
-        
-        ' W-ANALYTIC-06D: архивация даже при СТОП
-        archivePath = root & "\02_Подготовка данных\Архив"
-        EnsureFolder archivePath
-        ArchiveFile fragmentsPath & "\" & aiResponseFile, archivePath, aiResponseFile
-        Exit Sub
-    End If
-
-    ' 2. Извлечение блоков через Split (строго в Variant)
-    Dim patternsCsv As String, stepsCsv As String
-    Dim referenceBooks As String, userAction As String, statistics As String
     
-    ExtractBlock aiResponse, "<!-- PATTERNS_CSV_START -->", "<!-- PATTERNS_CSV_END -->", patternsCsv
-    ExtractBlock aiResponse, "<!-- STEPS_CSV_START -->", "<!-- STEPS_CSV_END -->", stepsCsv
-    ExtractBlock aiResponse, "<!-- REFERENCEBOOKS_START -->", "<!-- REFERENCEBOOKS_END -->", referenceBooks
-    ExtractBlock aiResponse, "<!-- USER_ACTION_START -->", "<!-- USER_ACTION_END -->", userAction
-    ExtractBlock aiResponse, "<!-- STATISTICS_START -->", "<!-- STATISTICS_END -->", statistics
-
-    Dim is002 As Boolean, is003 As Boolean
-    is002 = (Trim(patternsCsv) <> "")
-    is003 = (Trim(stepsCsv) <> "")
-
-    If Not is002 And Not is003 Then
-        Mod_Util.WriteWarning "P010", "CommandParseAiResponse: не найдены блоки PATTERNS_CSV или STEPS_CSV."
-        MsgBox "Не найдены блоки PATTERNS_CSV или STEPS_CSV в ответе ИИ.", vbExclamation, "Разбор ответа ИИ"
-
-        ' W-ANALYTIC-06D: архивация даже при СТОП
-        archivePath = root & "\02_Подготовка данных\Архив"
-        EnsureFolder archivePath
-        ArchiveFile fragmentsPath & "\" & aiResponseFile, archivePath, aiResponseFile
-
+    ' F4: Сбор и классификация всех файлов ответов
+    fileArr = GetFileListArray(fragmentsPath)
+    If IsArray(fileArr) Then
+        For i = LBound(fileArr) To UBound(fileArr)
+            f = CStr(fileArr(i))
+            If Right(LCase$(f), 3) = ".md" And Left$(f, 2) <> "~$" And LCase$(Left$(f, 7)) <> "prompt_" And StrComp(f, "Требуют_решения.md", vbTextCompare) <> 0 Then
+                fPath = fragmentsPath & "\" & f
+                fText = ReadTextFile(fPath)
+                If InStr(fText, MK_STP_START) > 0 Then
+                    coll003.Add f
+                Else
+                    coll002.Add f
+                End If
+            End If
+        Next i
+    End If
+    
+    ' Сортировка по имени (пузырьком)
+    n002 = coll002.Count
+    If n002 > 0 Then
+        ReDim arr002(1 To n002)
+        For i = 1 To n002: arr002(i) = coll002(i): Next i
+        For i = 1 To n002 - 1
+            For j = i + 1 To n002
+                If StrComp(arr002(i), arr002(j), vbTextCompare) > 0 Then
+                    temp = arr002(i): arr002(i) = arr002(j): arr002(j) = temp
+                End If
+            Next j
+        Next i
+    End If
+    
+    n003 = coll003.Count
+    If n003 > 0 Then
+        ReDim arr003(1 To n003)
+        For i = 1 To n003: arr003(i) = coll003(i): Next i
+        For i = 1 To n003 - 1
+            For j = i + 1 To n003
+                If StrComp(arr003(i), arr003(j), vbTextCompare) > 0 Then
+                    temp = arr003(i): arr003(i) = arr003(j): arr003(j) = temp
+                End If
+            Next j
+        Next i
+    End If
+    
+    totalFiles = n002 + n003
+    If totalFiles = 0 Then
+        MsgBox "Файлы ответов ИИ не найдены в папке: " & fragmentsPath, vbInformation, "Разбор ответов ИИ"
         Exit Sub
     End If
-
-    ' 3. Открытие Адаптированной структуры
-    Dim schemaPath As String
-    schemaPath = root & "\02_Подготовка данных\01_Схема"
-    Dim schemaFile As String
-    schemaFile = GetNewestSchemaArtifactName(schemaPath)
-
-    If schemaFile = "" Then
-        Mod_Util.WriteError "P010", "CommandParseAiResponse: не найдена Адаптированная_структура_*.xlsx"
-        Exit Sub
-    End If
-
-    Dim wb As Workbook
-    Dim ws As Worksheet
-    Dim prevScreenUpdating As Boolean
+    
+    ReDim processFiles(1 To totalFiles)
+    For i = 1 To n002: processFiles(i) = arr002(i): Next i
+    For i = 1 To n003: processFiles(n002 + i) = arr003(i): Next i
+    
     prevScreenUpdating = Application.ScreenUpdating
     Application.ScreenUpdating = False
-
-    On Error Resume Next
-    Set wb = Workbooks.Open(schemaPath & "\" & schemaFile, ReadOnly:=False)
-    On Error GoTo ErrHandler
-
-    If wb Is Nothing Then
-        Mod_Util.WriteError "P010", "CommandParseAiResponse: не удалось открыть " & schemaFile
-        Application.ScreenUpdating = prevScreenUpdating
-        Exit Sub
-    End If
-
-    On Error Resume Next
-    Set ws = wb.Worksheets(Mod_Structure.FLAT_SHEET_NAME)
-    On Error GoTo ErrHandler
-
-    If ws Is Nothing Then
-        Mod_Util.WriteError "P010", "CommandParseAiResponse: лист '" & Mod_Structure.FLAT_SHEET_NAME & "' не найден в " & schemaFile
-        wb.Close SaveChanges:=False
-        Application.ScreenUpdating = prevScreenUpdating
-        Exit Sub
-    End If
-
-    ' Проверка защиты листа
-    If ws.ProtectContents Then
-        Mod_Util.WriteWarning "P010", "CommandParseAiResponse: лист защищён. Снимаем защиту."
-        On Error Resume Next
-        ws.Unprotect Password:="pilot"
-        If Err.Number <> 0 Then
-            Mod_Util.WriteError "P010", "CommandParseAiResponse: не удалось снять защиту с листа. Ошибка: " & Err.Description
-            Err.Clear
-            wb.Close SaveChanges:=False
-            Application.ScreenUpdating = prevScreenUpdating
-            Exit Sub
+    successCount = 0: errorCount = 0: warnCount = 0
+    maxStep = ""
+    
+    ' === ЦИКЛ ОБРАБОТКИ ВСЕХ ФАЙЛОВ (F4) ===
+    For i = 1 To totalFiles
+        Dim aiResponseFile As String
+        aiResponseFile = processFiles(i)
+        Dim aiResponseText As String
+        aiResponseText = ReadTextFile(fragmentsPath & "\" & aiResponseFile)
+        
+        If aiResponseText = "" Then
+            Mod_Util.WriteWarning "P006", "CommandParseAiResponse: файл пуст или не прочитан: " & aiResponseFile
+            errorCount = errorCount + 1
+            GoTo NextFile
         End If
-        On Error GoTo 0
-    End If
+        
+        Dim isFormat002 As Boolean, isFormat003 As Boolean
+        isFormat002 = (InStr(aiResponseText, MK_PAT_START) > 0)
+        isFormat003 = (InStr(aiResponseText, MK_STP_START) > 0)
+        
+        If Not isFormat002 And Not isFormat003 Then
+            Mod_Util.WriteWarning "P008", "CommandParseAiResponse: нераспознанный формат файла " & aiResponseFile
+            errorCount = errorCount + 1
+            GoTo NextFile
+        End If
 
-    Dim colName As Long, colCat As Long, colPat As Long, colAnom As Long, colStep As Long
-    colName = FindColumn(ws, "Отображаемое имя")
-    colCat = FindColumn(ws, "Категория")
-    colPat = FindColumn(ws, "Паттерн")
-    colAnom = FindColumn(ws, "Аномалия")
-    colStep = FindColumn(ws, "№шага/подшага")
-    If colStep = 0 Then colStep = FindColumn(ws, "Шаг") ' обратная совместимость
-
-    If colName = 0 Or colAnom = 0 Then
-        Mod_Util.WriteError "P010", "CommandParseAiResponse: не найдены обязательные колонки в " & schemaFile
-        wb.Close SaveChanges:=False
-        Application.ScreenUpdating = prevScreenUpdating
-        Exit Sub
-    End If
-
-    Dim lastRow As Long
-    lastRow = ws.Cells(ws.Rows.Count, colName).End(xlUp).row
-     
-    Dim decisionContent As String
-    decisionContent = ""
-
-    ' =========================================================================
-    ' ЛОГИКА 00_2 (PATTERNS_CSV)
-    ' =========================================================================
-    If is002 Then
-        Dim linesPat As Variant
-        linesPat = Split(patternsCsv, vbCrLf)
-        Dim iPat As Long, jPat As Long, rPat As Long
-        Dim linePat As String, partsPat As Variant
-        Dim patternName As String, typesStrPat As String
-        Dim typesArrPat As Variant, typeItemPat As String
-
-        For iPat = LBound(linesPat) To UBound(linesPat)
-            linePat = Trim(linesPat(iPat))
-            If linePat = "" Or InStr(linePat, "Паттерн|Типы|Количество") > 0 Then GoTo NextLinePat
-
-            partsPat = Split(linePat, "|")
-            If UBound(partsPat) < 2 Then GoTo NextLinePat
-
-            patternName = Trim(partsPat(0))
-            typesStrPat = Trim(partsPat(1))
-            typesArrPat = Split(typesStrPat, ";")
-
-            ' Проверка гомогенности
-            Dim categories As Object
-            Set categories = CreateObject("Scripting.Dictionary")
-
-            For jPat = LBound(typesArrPat) To UBound(typesArrPat)
-                typeItemPat = Trim(typesArrPat(jPat))
-                If typeItemPat = "" Then GoTo NextTypePat
-
-                For rPat = 2 To lastRow
-                    On Error Resume Next
-                    If Trim(CStr(ws.Cells(rPat, colName).value)) = typeItemPat Then
-                        Dim cat As String
-                        cat = Trim(CStr(ws.Cells(rPat, colCat).value))
-                        If cat <> "" Then categories(cat) = 1
-                    End If
-                    On Error GoTo ErrHandler
-                Next rPat
-NextTypePat:
-            Next jPat
-
-            If categories.Count > 1 Then
-                Mod_Util.WriteWarning "P010", "Гомогенность нарушена для паттерна '" & patternName & "': найдены разные категории (" & Join(categories.keys, ", ") & ")."
-                decisionContent = decisionContent & patternName & " | " & typesStrPat & " | Смешение категорий в одном паттерне" & vbCrLf
-                GoTo NextLinePat
-            End If
-
-            ' Обновление строк (все совпавшие)
-            For jPat = LBound(typesArrPat) To UBound(typesArrPat)
-                typeItemPat = Trim(typesArrPat(jPat))
-                If typeItemPat = "" Then GoTo NextTypeUpdatePat
-
-                For rPat = 2 To lastRow
-                    On Error Resume Next
-                    If Trim(CStr(ws.Cells(rPat, colName).value)) = typeItemPat Then
-                        Dim oldPat As String
-                        oldPat = Trim(CStr(ws.Cells(rPat, colPat).value))
-                        If oldPat <> patternName And patternName <> "" Then
-                            Mod_Util.WriteLog "Обновление Паттерн для '" & typeItemPat & "': '" & oldPat & "' -> '" & patternName & "'"
-                            ws.Cells(rPat, colPat).value = patternName
-                        End If
-                    End If
-                    On Error GoTo ErrHandler
-                Next rPat
-NextTypeUpdatePat:
-            Next jPat
-NextLinePat:
-        Next iPat
-    End If
-
-    ' =========================================================================
-    ' ЛОГИКА 00_3 (STEPS_CSV)
-    ' =========================================================================
-    If is003 Then
-        If colStep = 0 Then
-            Mod_Util.WriteWarning "P010", "CommandParseAiResponse: не найдена колонка '№шага/подшага' или 'Шаг'. Обновление шагов пропущено."
-        Else
-            Dim linesStep As Variant
-            linesStep = Split(stepsCsv, vbCrLf)
-            Dim iStep As Long, jStep As Long, rStep As Long
-            Dim lineStep As String, partsStep As Variant
-            Dim nn As String, typesStrStep As String, kStr As String, patternStep As String, warning As String
-            Dim typesArrStep As Variant, typeItemStep As String
-
-            Dim parsedNNs As Object
-            Set parsedNNs = CreateObject("Scripting.Dictionary")
-
-            For iStep = LBound(linesStep) To UBound(linesStep)
-                lineStep = Trim(linesStep(iStep))
-                If lineStep = "" Then GoTo NextLineStep
-
-                partsStep = Split(lineStep, "|")
-                If UBound(partsStep) < 3 Then GoTo NextLineStep ' минимум 4 поля
-
-                nn = Trim(partsStep(0))
-                typesStrStep = Trim(partsStep(1))
-                kStr = Trim(partsStep(2))
-                patternStep = Trim(partsStep(3))
-                warning = ""
-                If UBound(partsStep) >= 4 Then warning = Trim(partsStep(4))
-
-                ' 5. Валидация NN: через GetPromptProfile (не пустой и не "нет")
-                If nn = "" Or nn = "нет" Or GetPromptProfile(nn) = "" Then
-                    Mod_Util.WriteWarning "P010", "Неверный формат NN в STEPS_CSV: '" & nn & "'"
-                    GoTo NextLineStep
-                End If
-
-                parsedNNs(nn) = 1
-
-                If IsStepGreater(nn, maxStep) Then maxStep = nn   ' W-ANALYTIC-06D
-
-                typesArrStep = Split(typesStrStep, ";")
-                For jStep = LBound(typesArrStep) To UBound(typesArrStep)
-                    typeItemStep = Trim(typesArrStep(jStep))
-                    If typeItemStep = "" Then GoTo NextTypeStep
-
-                    For rStep = 2 To lastRow
+        ' --- ЛОКАЛЬНАЯ ОБРАБОТКА ОДНОГО ФАЙЛА С ИЗОЛЯЦИЕЙ ОШИБОК ---
+        On Error GoTo FileError
+        
+        Dim patternsCsv As String, stepsCsv As String
+        Dim referenceBooks As String, userAction As String, statistics As String
+        ExtractBlock aiResponseText, "<!-- PATTERNS_CSV_START -->", "<!-- PATTERNS_CSV_END -->", patternsCsv
+        ExtractBlock aiResponseText, "<!-- STEPS_CSV_START -->", "<!-- STEPS_CSV_END -->", stepsCsv
+        ExtractBlock aiResponseText, "<!-- REFERENCEBOOKS_START -->", "<!-- REFERENCEBOOKS_END -->", referenceBooks
+        ExtractBlock aiResponseText, "<!-- USER_ACTION_START -->", "<!-- USER_ACTION_END -->", userAction
+        ExtractBlock aiResponseText, "<!-- STATISTICS_START -->", "<!-- STATISTICS_END -->", statistics
+        
+        Dim schemaPath As String, schemaFile As String
+        schemaPath = root & "\02_Подготовка данных\01_Схема"
+        schemaFile = GetNewestSchemaArtifactName(schemaPath)
+        If schemaFile = "" Then
+            Mod_Util.WriteError "P010", "CommandParseAiResponse: не найдена Адаптированная_структура_*.xlsx"
+            errorCount = errorCount + 1
+            GoTo NextFile
+        End If
+        
+        Dim wb As Workbook, ws As Worksheet
+        Set wb = Workbooks.Open(schemaPath & "\" & schemaFile, ReadOnly:=False)
+        Set ws = wb.Worksheets(Mod_Structure.FLAT_SHEET_NAME)
+        
+        If ws Is Nothing Then
+            Mod_Util.WriteError "P010", "CommandParseAiResponse: лист '" & Mod_Structure.FLAT_SHEET_NAME & "' не найден"
+            wb.Close SaveChanges:=False
+            Set wb = Nothing
+            errorCount = errorCount + 1
+            GoTo NextFile
+        End If
+        
+        If ws.ProtectContents Then
+            On Error Resume Next
+            ws.Unprotect Password:="pilot"
+            On Error GoTo FileError
+        End If
+        
+        Dim colName As Long, colCat As Long, colPat As Long, colAnom As Long, colStep As Long
+        colName = FindColumn(ws, "Отображаемое имя")
+        colCat = FindColumn(ws, "Категория")
+        colPat = FindColumn(ws, "Паттерн")
+        colAnom = FindColumn(ws, "Аномалия")
+        colStep = FindColumn(ws, "№шага/подшага")
+        If colStep = 0 Then colStep = FindColumn(ws, "Шаг")
+        
+        If colName = 0 Or colAnom = 0 Then
+            Mod_Util.WriteError "P010", "CommandParseAiResponse: не найдены обязательные колонки"
+            wb.Close SaveChanges:=False
+            Set wb = Nothing
+            errorCount = errorCount + 1
+            GoTo NextFile
+        End If
+        
+        Dim lastRow As Long, decisionContent As String
+        lastRow = ws.Cells(ws.Rows.Count, colName).End(xlUp).row
+        decisionContent = ""
+        
+        ' =========================================================================
+        ' ЛОГИКА 00_2 (PATTERNS_CSV)
+        ' =========================================================================
+        If isFormat002 Then
+            Dim linesPat As Variant, iPat As Long, jPat As Long, rPat As Long
+            Dim linePat As String, partsPat As Variant
+            Dim patternName As String, typesStrPat As String, typesArrPat As Variant, typeItemPat As String
+            linesPat = Split(patternsCsv, vbCrLf)
+            For iPat = LBound(linesPat) To UBound(linesPat)
+                linePat = Trim(linesPat(iPat))
+                If linePat = "" Or InStr(linePat, "Паттерн|Типы|Количество") > 0 Then GoTo NextLinePat
+                partsPat = Split(linePat, "|")
+                If UBound(partsPat) < 2 Then GoTo NextLinePat
+                patternName = Trim(partsPat(0))
+                typesStrPat = Trim(partsPat(1))
+                typesArrPat = Split(typesStrPat, ";")
+                
+                Dim categories As Object
+                Set categories = CreateObject("Scripting.Dictionary")
+                For jPat = LBound(typesArrPat) To UBound(typesArrPat)
+                    typeItemPat = Trim(typesArrPat(jPat))
+                    If typeItemPat = "" Then GoTo NextTypePat
+                    For rPat = 2 To lastRow
                         On Error Resume Next
-                        If Trim(CStr(ws.Cells(rStep, colName).value)) = typeItemStep Then
-                            ' 3. Обновление №шага/подшага
-                            Dim oldStep As String
-                            oldStep = Trim(CStr(ws.Cells(rStep, colStep).value))
-                            If oldStep <> nn And nn <> "" Then
-                                Mod_Util.WriteLog "Обновление №шага/подшага для '" & typeItemStep & "': '" & oldStep & "' -> '" & nn & "'"
-                                ws.Cells(rStep, colStep).NumberFormat = "@"   ' текстовый формат
-                                ws.Cells(rStep, colStep).value = nn
+                        If Trim(CStr(ws.Cells(rPat, colName).value)) = typeItemPat Then
+                            Dim cat As String: cat = Trim(CStr(ws.Cells(rPat, colCat).value))
+                            If cat <> "" Then categories(cat) = 1
+                        End If
+                        On Error GoTo FileError
+                    Next rPat
+NextTypePat:
+                Next jPat
+                
+                If categories.Count > 1 Then
+                    Mod_Util.WriteWarning "P010", "Гомогенность нарушена для паттерна '" & patternName & "': " & Join(categories.keys, ", ")
+                    decisionContent = decisionContent & patternName & " | " & typesStrPat & " | Смешение категорий" & vbCrLf
+                    warnCount = warnCount + 1
+                    GoTo NextLinePat
+                End If
+                
+                For jPat = LBound(typesArrPat) To UBound(typesArrPat)
+                    typeItemPat = Trim(typesArrPat(jPat))
+                    If typeItemPat = "" Then GoTo NextTypeUpdatePat
+                    For rPat = 2 To lastRow
+                        On Error Resume Next
+                        If Trim(CStr(ws.Cells(rPat, colName).value)) = typeItemPat Then
+                            Dim oldPat As String: oldPat = Trim(CStr(ws.Cells(rPat, colPat).value))
+                            If oldPat <> patternName And patternName <> "" Then
+                                ws.Cells(rPat, colPat).value = patternName
                             End If
-
-                            ' Обновление Аномалии (если есть предупреждение)
-                            If warning <> "" Then
-                                Dim curAnomStep As String
-                                curAnomStep = Trim(CStr(ws.Cells(rStep, colAnom).value))
-                                If InStr(curAnomStep, warning) = 0 Then
-                                    If curAnomStep = "" Then
-                                        ws.Cells(rStep, colAnom).value = warning
-                                    Else
-                                        ws.Cells(rStep, colAnom).value = curAnomStep & "; " & warning
+                        End If
+                        On Error GoTo FileError
+                    Next rPat
+NextTypeUpdatePat:
+                Next jPat
+NextLinePat:
+            Next iPat
+        End If
+        
+        ' =========================================================================
+        ' ЛОГИКА 00_3 (STEPS_CSV)
+        ' =========================================================================
+        If isFormat003 Then
+            If colStep > 0 Then
+                Dim linesStep As Variant, iStep As Long, jStep As Long, rStep As Long
+                Dim lineStep As String, partsStep As Variant
+                Dim nn As String, typesStrStep As String, kStr As String, patternStep As String, warning As String
+                Dim typesArrStep As Variant, typeItemStep As String
+                Dim parsedNNs As Object
+                Set parsedNNs = CreateObject("Scripting.Dictionary")
+                
+                linesStep = Split(stepsCsv, vbCrLf)
+                For iStep = LBound(linesStep) To UBound(linesStep)
+                    lineStep = Trim(linesStep(iStep))
+                    If lineStep = "" Then GoTo NextLineStep
+                    partsStep = Split(lineStep, "|")
+                    If UBound(partsStep) < 3 Then GoTo NextLineStep
+                    
+                    nn = Trim(partsStep(0))
+                    typesStrStep = Trim(partsStep(1))
+                    kStr = Trim(partsStep(2))
+                    patternStep = Trim(partsStep(3))
+                    warning = ""
+                    If UBound(partsStep) >= 4 Then warning = Trim(partsStep(4))
+                    
+                    If nn = "" Or nn = "нет" Or GetPromptProfile(nn) = "" Then
+                        Mod_Util.WriteWarning "P010", "Неверный формат NN в STEPS_CSV: '" & nn & "'"
+                        warnCount = warnCount + 1
+                        GoTo NextLineStep
+                    End If
+                    
+                    parsedNNs(nn) = 1
+                    If IsStepGreater(nn, maxStep) Then maxStep = nn
+                    
+                    typesArrStep = Split(typesStrStep, ";")
+                    For jStep = LBound(typesArrStep) To UBound(typesArrStep)
+                        typeItemStep = Trim(typesArrStep(jStep))
+                        If typeItemStep = "" Then GoTo NextTypeStep
+                        For rStep = 2 To lastRow
+                            On Error Resume Next
+                            If Trim(CStr(ws.Cells(rStep, colName).value)) = typeItemStep Then
+                                Dim oldStep As String: oldStep = Trim(CStr(ws.Cells(rStep, colStep).value))
+                                If oldStep <> nn And nn <> "" Then
+                                    ws.Cells(rStep, colStep).NumberFormat = "@"
+                                    ws.Cells(rStep, colStep).value = nn
+                                End If
+                                If warning <> "" Then
+                                    Dim curAnomStep As String: curAnomStep = Trim(CStr(ws.Cells(rStep, colAnom).value))
+                                    If InStr(curAnomStep, warning) = 0 Then
+                                        If curAnomStep = "" Then
+                                            ws.Cells(rStep, colAnom).value = warning
+                                        Else
+                                            ws.Cells(rStep, colAnom).value = curAnomStep & "; " & warning
+                                        End If
                                     End If
                                 End If
                             End If
-                        End If
-                        On Error GoTo ErrHandler
-                    Next rStep
+                            On Error GoTo FileError
+                        Next rStep
 NextTypeStep:
-                Next jStep
+                    Next jStep
 NextLineStep:
-            Next iStep
-
-            ' 8. Сверка "Сгенерированные шаги"
-            Dim statLines As Variant
-            statLines = Split(statistics, vbCrLf)
-            Dim genStepsStr As String
-            genStepsStr = ""
-            For iStep = LBound(statLines) To UBound(statLines)
-                lineStep = Trim(statLines(iStep))
-                If InStr(1, lineStep, "Сгенерированные шаги:", vbTextCompare) > 0 Then
-                    genStepsStr = Trim(Mid(lineStep, InStr(lineStep, ":") + 1))
-                    Exit For
-                End If
-            Next iStep
-
-            If genStepsStr <> "" And InStr(1, genStepsStr, "СТОП", vbTextCompare) = 0 And InStr(1, genStepsStr, "не применимо", vbTextCompare) = 0 Then
-                Dim statNNs As Object
-                Set statNNs = CreateObject("Scripting.Dictionary")
-                Dim statParts As Variant
-                genStepsStr = Replace(genStepsStr, ";", ",")
-                statParts = Split(genStepsStr, ",")
-                For iStep = LBound(statParts) To UBound(statParts)
-                    Dim sNN As String
-                    sNN = Trim(statParts(iStep))
-                    If sNN <> "" And sNN <> "—" Then
-                        statNNs(sNN) = 1
-                    End If
                 Next iStep
-
-                Dim mismatch As Boolean
-                mismatch = False
-                If parsedNNs.Count <> statNNs.Count Then
-                    mismatch = True
-                Else
-                    Dim key As Variant
-                    For Each key In parsedNNs.keys
-                        If Not statNNs.Exists(CStr(key)) Then
-                            mismatch = True
-                            Exit For
-                        End If
-                    Next key
-                End If
-
-                If mismatch Then
-                    Mod_Util.WriteError "P010", "Несоответствие сгенерированных шагов. Разобранные: " & Join(parsedNNs.keys, ", ") & ". В статистике: " & genStepsStr
+                
+                ' F5: Несоответствие шагов -> WriteWarning P010 (не WriteError)
+                Dim statLines As Variant, genStepsStr As String, statIdx As Long
+                statLines = Split(statistics, vbCrLf)
+                genStepsStr = ""
+                For statIdx = LBound(statLines) To UBound(statLines)
+                    lineStep = Trim(statLines(statIdx))
+                    If InStr(1, lineStep, "Сгенерированные шаги:", vbTextCompare) > 0 Then
+                        genStepsStr = Trim(Mid(lineStep, InStr(lineStep, ":") + 1))
+                        Exit For
+                    End If
+                Next statIdx
+                
+                If genStepsStr <> "" And InStr(1, genStepsStr, "СТОП", vbTextCompare) = 0 And InStr(1, genStepsStr, "не применимо", vbTextCompare) = 0 Then
+                    Dim statNNs As Object, statParts As Variant, sNN As String, key As Variant, mismatch As Boolean
+                    Set statNNs = CreateObject("Scripting.Dictionary")
+                    genStepsStr = Replace(genStepsStr, ";", ",")
+                    statParts = Split(genStepsStr, ",")
+                    For statIdx = LBound(statParts) To UBound(statParts)
+                        sNN = Trim(statParts(statIdx))
+                        If sNN <> "" And sNN <> "—" Then statNNs(sNN) = 1
+                    Next statIdx
+                    
+                    mismatch = False
+                    If parsedNNs.Count <> statNNs.Count Then
+                        mismatch = True
+                    Else
+                        For Each key In parsedNNs.keys
+                            If Not statNNs.Exists(CStr(key)) Then
+                                mismatch = True
+                                Exit For
+                            End If
+                        Next key
+                    End If
+                    
+                    If mismatch Then
+                        Mod_Util.WriteWarning "P010", "Несоответствие сгенерированных шагов. Разобранные: " & Join(parsedNNs.keys, ", ") & ". В статистике: " & genStepsStr
+                        warnCount = warnCount + 1
+                    End If
                 End If
             End If
         End If
-    End If
-
-    ' =========================================================================
-    ' ОБЩАЯ ЛОГИКА: USER_ACTION
-    ' =========================================================================
-    ' 6. USER_ACTION: фильтр заголовка, только данные
-    Dim userActionTrimmed As String
-    userActionTrimmed = Trim(userAction)
-    If userActionTrimmed <> "" _
-       And InStr(userActionTrimmed, UA_NO_HEADER) = 0 _
-       And Left(LCase(userActionTrimmed), 3) <> "нет" Then
-        ' Вырезаем заголовочную строку (она начинается с "ТРЕБУЮТ РЕШЕНИЯ")
-        Dim uaClean As String
-        uaClean = ""
-        Dim uaLines As Variant
-        uaLines = Split(userActionTrimmed, vbCrLf)
-        Dim uaIdx As Long
-        For uaIdx = LBound(uaLines) To UBound(uaLines)
-            Dim uaLine As String
-            uaLine = Trim(uaLines(uaIdx))
-            If uaLine <> "" And Left(uaLine, Len(UA_HEADER_PREFIX)) <> UA_HEADER_PREFIX Then
-                If uaClean <> "" Then uaClean = uaClean & vbCrLf
-                uaClean = uaClean & uaLine
-            End If
-        Next uaIdx
-
-        If uaClean <> "" Then
-            decisionContent = decisionContent & uaClean & vbCrLf
-
-            ' Пометки в «Аномалию» для типов из USER_ACTION
-            Dim uaType As String, reason As String
-            Dim curAnomUA As String, anomMarkUA As String
+        
+        ' =========================================================================
+        ' ОБЩАЯ ЛОГИКА: USER_ACTION (F1)
+        ' =========================================================================
+        Dim userActionTrimmed As String, uaClean As String, uaLines As Variant, uaIdx As Long, uaLine As String
+        userActionTrimmed = Trim(userAction)
+        If userActionTrimmed <> "" And InStr(userActionTrimmed, UA_NO_HEADER) = 0 And Left(LCase(userActionTrimmed), 3) <> "нет" Then
+            uaClean = ""
+            uaLines = Split(userActionTrimmed, vbCrLf)
             For uaIdx = LBound(uaLines) To UBound(uaLines)
                 uaLine = Trim(uaLines(uaIdx))
-                If uaLine = "" Or Left(uaLine, Len(UA_HEADER_PREFIX)) = UA_HEADER_PREFIX Then GoTo NextUaLine2
-                partsStep = Split(uaLine, "|")
-                If UBound(partsStep) >= 2 Then
-                    uaType = Trim(partsStep(1))
-                    reason = Trim(partsStep(2))
-                    For rStep = 2 To lastRow
-                        On Error Resume Next
-                        If Trim(CStr(ws.Cells(rStep, colName).value)) = uaType Then
-                            curAnomUA = Trim(CStr(ws.Cells(rStep, colAnom).value))
-                            anomMarkUA = "Требует решения: " & reason
-                            If InStr(curAnomUA, anomMarkUA) = 0 Then
-                                If curAnomUA = "" Then
-                                    ws.Cells(rStep, colAnom).value = anomMarkUA
-                                Else
-                                    ws.Cells(rStep, colAnom).value = curAnomUA & "; " & anomMarkUA
+                If uaLine <> "" And Left(uaLine, Len(UA_HEADER_PREFIX)) <> UA_HEADER_PREFIX Then
+                    If uaClean <> "" Then uaClean = uaClean & vbCrLf
+                    uaClean = uaClean & uaLine
+                End If
+            Next uaIdx
+            
+            If uaClean <> "" Then
+                decisionContent = decisionContent & uaClean & vbCrLf
+                Dim uaType As String, reason As String, curAnomUA As String, anomMarkUA As String, partsStepUA As Variant
+                For uaIdx = LBound(uaLines) To UBound(uaLines)
+                    uaLine = Trim(uaLines(uaIdx))
+                    If uaLine = "" Or Left(uaLine, Len(UA_HEADER_PREFIX)) = UA_HEADER_PREFIX Then GoTo NextUaLine2
+                    partsStepUA = Split(uaLine, "|")
+                    
+                    ' F1: Ветка UBound=1 для формата 00_3
+                    If UBound(partsStepUA) = 1 Then
+                        uaType = Trim(partsStepUA(1))
+                        For rStep = 2 To lastRow
+                            On Error Resume Next
+                            If Trim(CStr(ws.Cells(rStep, colName).value)) = uaType Then
+                                curAnomUA = Trim(CStr(ws.Cells(rStep, colAnom).value))
+                                anomMarkUA = "требует решения (см. Требуют_решения.md)"
+                                If InStr(curAnomUA, anomMarkUA) = 0 Then
+                                    If curAnomUA = "" Then ws.Cells(rStep, colAnom).value = anomMarkUA _
+                                    Else ws.Cells(rStep, colAnom).value = curAnomUA & "; " & anomMarkUA
                                 End If
                             End If
-                        End If
-                        On Error GoTo ErrHandler
-                    Next rStep
-                End If
+                            On Error GoTo FileError
+                        Next rStep
+                        
+                    ' F1: Ветка UBound>=2 для формата 00_2
+                    ElseIf UBound(partsStepUA) >= 2 Then
+                        uaType = Trim(partsStepUA(1))
+                        reason = Trim(partsStepUA(2))
+                        For rStep = 2 To lastRow
+                            On Error Resume Next
+                            If Trim(CStr(ws.Cells(rStep, colName).value)) = uaType Then
+                                curAnomUA = Trim(CStr(ws.Cells(rStep, colAnom).value))
+                                anomMarkUA = "Требует решения: " & reason
+                                If InStr(curAnomUA, anomMarkUA) = 0 Then
+                                    If curAnomUA = "" Then ws.Cells(rStep, colAnom).value = anomMarkUA _
+                                    Else ws.Cells(rStep, colAnom).value = curAnomUA & "; " & anomMarkUA
+                                End If
+                            End If
+                            On Error GoTo FileError
+                        Next rStep
+                    End If
 NextUaLine2:
-            Next uaIdx
-        End If
-    End If
-
-    ' 6. Сохранение Требуют_решения.md
-    If decisionContent <> "" Then
-        AppendToDecisionFile fragmentsPath, decisionContent
-    End If
-
-    ' Обработка REFERENCEBOOKS
-    Dim refTrimmed As String
-    refTrimmed = Trim(referenceBooks)
-    If refTrimmed <> "" Then
-        If InStr(refTrimmed, "{{СПИСОК_БАЗОВЫХ_ТИПОВ}}") > 0 Then
-            Mod_Util.WriteWarning "P008", "CommandParseAiResponse: обнаружен формат 00_1 ({{СПИСОК_БАЗОВЫХ_ТИПОВ}}) в REFERENCEBOOKS. Пропуск."
-        Else
-            Mod_Util.WriteLog "REFERENCEBOOKS извлечены: " & Replace(refTrimmed, vbCrLf, " | ")
-        End If
-    End If
-
-    ' Обработка STATISTICS
-    Dim statTrimmed As String
-    statTrimmed = Trim(statistics)
-    If statTrimmed <> "" Then
-        If InStr(statTrimmed, "LOST_TYPE") > 0 Or InStr(statTrimmed, "MOVED_TYPE") > 0 Or InStr(statTrimmed, "DUPLICATE_TYPE") > 0 Or InStr(statTrimmed, "PATTERN_NOT_RETURNED") > 0 Then
-            Mod_Util.WriteLog "STATISTICS: " & Replace(statTrimmed, vbCrLf, " | ")
-        End If
-    End If
-
-    ' 9. Сохранение книги
-    If Not wb.Saved Then
-        On Error Resume Next
-        wb.Save
-        If Err.Number <> 0 Then
-            Mod_Util.WriteError "P010", "CommandParseAiResponse: не удалось сохранить " & schemaFile & ". Ошибка: " & Err.Description
-            Err.Clear
-        End If
-        On Error GoTo 0
-    End If
-    
-    ' W-ANALYTIC-06D: StepsState проверяем ДО закрытия wb (лист в wb)
-    UpdateStepsState wb, Mod_Structure.FLAT_SHEET_NAME
-    
-    wb.Close SaveChanges:=False
-    Application.ScreenUpdating = prevScreenUpdating
-    
-    ' ===== W-ANALYTIC-06D: архивация и обновление настроек =====
-    archivePath = root & "\02_Подготовка данных\Архив"
-    EnsureFolder archivePath
-    ArchiveFile fragmentsPath & "\" & aiResponseFile, archivePath, aiResponseFile
-    ' Архивация сопутствующих промтов 00_2 / 00_3
-    Dim archArr As Variant, k As Long, pf As String
-    archArr = GetFileListArray(fragmentsPath)
-    If IsArray(archArr) Then
-        For k = LBound(archArr) To UBound(archArr)
-            pf = CStr(archArr(k))
-            If (Left$(pf, 12) = "Prompt_00_2_" Or Left$(pf, 12) = "Prompt_00_3_") _
-               And Right$(pf, 3) = ".md" Then
-                ArchiveFile fragmentsPath & "\" & pf, archivePath, pf
+                Next uaIdx
             End If
-        Next k
-    End If
-    If maxStep <> "" Then UpdateLastStepNumber maxStep
-
-    ' =============================================================
+        End If
+        
+        If decisionContent <> "" Then AppendToDecisionFile fragmentsPath, decisionContent
+        
+        ' Обработка REFERENCEBOOKS
+        Dim refTrimmed As String
+        refTrimmed = Trim(referenceBooks)
+        If refTrimmed <> "" Then
+            If InStr(refTrimmed, "{{СПИСОК_БАЗОВЫХ_ТИПОВ}}") > 0 Then
+                Mod_Util.WriteWarning "P008", "CommandParseAiResponse: обнаружен формат 00_1 в REFERENCEBOOKS."
+            Else
+                Mod_Util.WriteLog "REFERENCEBOOKS извлечены: " & Replace(refTrimmed, vbCrLf, " | ")
+            End If
+        End If
+        
+        ' F2: Обработка STATISTICS
+        Dim statTrimmed As String, statLine As String, statKey As String, statVal As String
+        statTrimmed = Trim(statistics)
+        If statTrimmed <> "" Then
+            statLines = Split(statTrimmed, vbCrLf)
+            For statIdx = LBound(statLines) To UBound(statLines)
+                statLine = Trim(statLines(statIdx))
+                If statLine = "" Then GoTo NextStatLine
+                
+                If InStr(statLine, "~") > 0 Or InStr(LCase(statLine), "около") > 0 Or InStr(LCase(statLine), "примерно") > 0 Then
+                    Mod_Util.WriteWarning "P010", "STATISTICS: неопределённость: " & statLine
+                    warnCount = warnCount + 1
+                End If
+                
+                statParts = Split(statLine, ":")
+                If UBound(statParts) >= 1 Then
+                    statKey = Trim(statParts(0))
+                    statVal = Trim(statParts(1))
+                    If statKey = "PATTERN_NOT_RETURNED" Or statKey = "MOVED_TYPE" Or statKey = "LOST_TYPE" Or statKey = "DUPLICATE_TYPE" Then
+                        If LCase(statVal) <> "нет" And statVal <> "" Then
+                            Mod_Util.WriteWarning "P010", "STATISTICS: " & statKey & " = " & statVal
+                            warnCount = warnCount + 1
+                        End If
+                    End If
+                End If
+NextStatLine:
+            Next statIdx
+        End If
+        
+        ' F5: Ошибка сохранения книги -> P009 (не P010)
+        If Not wb.Saved Then
+            On Error Resume Next
+            wb.Save
+            If Err.Number <> 0 Then
+                Mod_Util.WriteError "P009", "CommandParseAiResponse: не удалось сохранить " & schemaFile & ". Ошибка: " & Err.Description
+                Err.Clear
+            End If
+            On Error GoTo FileError
+        End If
+        
+        UpdateStepsState wb, Mod_Structure.FLAT_SHEET_NAME
+        wb.Close SaveChanges:=False
+        Set wb = Nothing
+        
+        ' ===== АРХИВАЦИЯ И ОБНОВЛЕНИЕ =====
+        EnsureFolder archivePath
+        ArchiveFile fragmentsPath & "\" & aiResponseFile, archivePath, aiResponseFile
+        
+        ' F3: Архивация промтов ТОЛЬКО распознанного типа
+        Dim targetPromptPrefix As String, archArr As Variant, k As Long, pf As String
+        If isFormat002 Then
+            targetPromptPrefix = "Prompt_00_2_"
+        ElseIf isFormat003 Then
+            targetPromptPrefix = "Prompt_00_3_"
+        Else
+            targetPromptPrefix = ""
+        End If
+        
+        If targetPromptPrefix <> "" Then
+            archArr = GetFileListArray(fragmentsPath)
+            If IsArray(archArr) Then
+                For k = LBound(archArr) To UBound(archArr)
+                    pf = CStr(archArr(k))
+                    If Left$(pf, Len(targetPromptPrefix)) = targetPromptPrefix And Right$(pf, 3) = ".md" Then
+                        ArchiveFile fragmentsPath & "\" & pf, archivePath, pf
+                    End If
+                Next k
+            End If
+        End If
+        
+        If maxStep <> "" Then UpdateLastStepNumber maxStep
+        successCount = successCount + 1
+        On Error GoTo ErrHandler ' Возврат глобального обработчика перед следующей итерацией
+        
+NextFile:
+        ' Очистка объектов текущего файла перед следующей итерацией (изоляция)
+        On Error Resume Next
+        If Not wb Is Nothing Then
+            wb.Close SaveChanges:=False
+            Set wb = Nothing
+        End If
+        On Error GoTo ErrHandler
+    Next i
     
-    Mod_Util.WriteLog "CommandParseAiResponse: разбор ответа ИИ завершён успешно." & _
-        IIf(maxStep <> "", " Макс. шаг: " & maxStep, "")
-    MsgBox "Разбор ответа ИИ завершён успешно." & vbCrLf & _
-        "Обновлена Адаптированная_структура." & _
-        IIf(maxStep <> "", vbCrLf & "Номер последнего шага: " & maxStep, ""), _
-        vbInformation, "Разбор ответа ИИ"
+    Application.ScreenUpdating = prevScreenUpdating
+    Mod_Util.WriteLog "CommandParseAiResponse: разбор завершён. Успешно: " & successCount & ", Ошибок: " & errorCount & ", Предупреждений P010: " & warnCount
+    MsgBox "Разбор ответов ИИ завершён." & vbCrLf & _
+           "Обработано файлов: " & totalFiles & vbCrLf & _
+           "Успешно: " & successCount & vbCrLf & _
+           "С ошибками: " & errorCount & vbCrLf & _
+           "Предупреждений P010: " & warnCount, vbInformation, "Разбор ответов ИИ"
     Exit Sub
+
+FileError:
+    ' F4: Изоляция ошибок по файлам
+    Mod_Util.WriteError "P010", "CommandParseAiResponse: ошибка в файле " & aiResponseFile & ". " & Err.Description
+    Err.Clear
+    errorCount = errorCount + 1
+    On Error Resume Next
+    If Not wb Is Nothing Then
+        wb.Close SaveChanges:=False
+        Set wb = Nothing
+    End If
+    On Error GoTo ErrHandler
+    Resume NextFile
 
 ErrHandler:
     Application.ScreenUpdating = prevScreenUpdating
+    On Error Resume Next
     If Not wb Is Nothing Then wb.Close SaveChanges:=False
+    On Error GoTo 0
     Mod_Util.WriteError "P010", "CommandParseAiResponse: " & Err.Description
     MsgBox "Ошибка P010: " & Err.Description, vbCritical, "Разбор ответа ИИ"
     Err.Clear
