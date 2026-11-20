@@ -60,6 +60,7 @@ Private Const NAME_STEPS_STATE As String = "StepsState"
 
 ' W-ANALYTIC-09: имя именованного диапазона для номера последнего шага
 Private Const NAME_LAST_STEP_NUMBER As String = "LastStepNumber"
+Private Const NAME_LAST_GENERATED_STEP_NUMBER As String = "LastGeneratedStepNumber"
 
 ' Значение по умолчанию для MaxTypesPerTable (T3.1): используется
 ' Mod_Prompt при подстановке {ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ} и как default
@@ -579,7 +580,8 @@ Public Sub EnsureSettingsSheet()
         Array("Выжимки и анализ конфигурации", "Нет", "Фиксирует генерацию промтов выдержек (00_4) и анализа конфигурации (00_1). Ставится автоматически при нажатии кнопки «Сгенерировать аналитические промты».", 1), _
         Array("Разбивка на паттерны", "Нет", "Фиксирует завершение итераций по промту 00_2. Ставится вручную пользователем.", 1), _
         Array("Разбивка на шаги", "Нет", "Фиксирует завершение распределения типов по шагам. Ставится автоматически после успешного парсинга промта 00_3 при полном покрытии.", 1), _
-        Array("Номер последнего шага", "нет", "Номер последнего обработанного шага (нет, 00, 01, 01.1, 02 и т.д.). Обновляется автоматически при разборе ответа ИИ.", 0) _
+        Array("Номер последнего шага", "нет", "Номер последнего обработанного шага (нет, 00, 01, 01.1, 02 и т.д.). Обновляется автоматически при разборе ответа ИИ.", 0), _
+        Array("Номер последнего сгенерированного шага", "нет", "Автоматически обновляется при генерации промта. Если равен ""Номеру последнего шага"", все шаги обработаны.", 0) _
     )
     
     ' Массив имён для именованных диапазонов (должен строго соответствовать порядку в config)
@@ -588,7 +590,7 @@ Public Sub EnsureSettingsSheet()
         "ProjectRoot", "CheckMode", "AutoOpenResults", _
         "PromptGenVersion", "PromptFixVersion", "MaxTypesPerTable", _
         "LegendSheetName", "LegendRange", "StructureSheet", "StartCell", _
-        "AnalyticsState", "PatternsState", "StepsState", "LastStepNumber" _
+        "AnalyticsState", "PatternsState", "StepsState", "LastStepNumber", "LastGeneratedStepNumber" _
     )
 
     On Error GoTo ErrHandler
@@ -643,10 +645,10 @@ Public Sub EnsureSettingsSheet()
             ws.Cells(targetRow, 2).value = CStr(config(i)(1))
         End If
         
-        ' W-ANALYTIC-06D-FIX-1: Принудительный текстовый формат для полей с номерами шагов и версиями
+        ' W-ANALYTIC-06E / W-ANALYTIC-09: Принудительный текстовый формат для полей с номерами шагов и версиями (сохранение ведущих нулей)
         Dim settingName As String
         settingName = CStr(config(i)(0))
-        If settingName = "Номер последнего шага" Or settingName = "Версия промта-генератора" Or settingName = "Версия промта-исправления" Then
+        If settingName = "Номер последнего шага" Or settingName = "Номер последнего сгенерированного шага" Or settingName = "Версия промта-генератора" Or settingName = "Версия промта-исправления" Then
             ws.Cells(targetRow, 2).NumberFormat = "@"
         End If
         
