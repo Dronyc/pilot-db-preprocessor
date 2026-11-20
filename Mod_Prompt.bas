@@ -259,17 +259,17 @@ Private Function SafeReadText(ByVal filePath As String) As String
 
     ' --- Fallback 2: стандартное чтение Open ... For Input (ANSI) ----------
     If res = "" Then
-        Dim fnum As Integer
+        Dim fNum As Integer
         Dim s As String
-        fnum = FreeFile
-        Open filePath For Input Access Read As #fnum
-        Do While Not EOF(fnum)
-            Line Input #fnum, s
+        fNum = FreeFile
+        Open filePath For Input Access Read As #fNum
+        Do While Not EOF(fNum)
+            Line Input #fNum, s
             res = res & s & vbCrLf
         Loop
-        Close #fnum
+        Close #fNum
         If Err.Number <> 0 Then
-            If fnum <> 0 Then Close #fnum
+            If fNum <> 0 Then Close #fNum
             res = ""
         End If
         ' убрать финальный перевод строки
@@ -314,14 +314,12 @@ Private Function ListFolderFiles(ByVal folderPath As String) As String
     ListFolderFiles = res
 End Function
 
-' W-ANALYTIC-04-FIX: собирает имена файлов папки folderPath в массив
+' W-ANALYTIC-04-FIX: собирает имена элементов папки folderPath в массив
 ' (1 To N) одноразовым итератором Dir() БЕЗ вложенных вызовов Dir() с
-' аргументом внутри цикла. Внутренний итератор Dir() в VBA глобален и
-' stateful: любой вызов Dir(<путь>) в цикле (в т.ч. вложенно, напр.
-' SaveTextFileUtf8 -> StripUtf8Bom -> Dir(filePath, vbNormal)) сбрасывает
-' его, и следующий Dir() без аргумента возвращает "" - Do While обрывается
-' после первой итерации (симптом W-ANALYTIC-04: 1 промт за запуск).
-' Сбор списка в массив ДО обработки устраняет проблему полностью.
+' аргументом внутри цикла.
+' W-ANALYTIC-07.1-FIX: добавлен атрибут vbDirectory и маска "\*" вместо
+' "\*.*" - теперь в массив попадают и ПОДПАПКИ ( Шаг_01, Шаг_01.1 ),
+' а не только файлы. Служебные элементы "." и ".." отбрасываются.
 ' Папка отсутствует или пуста -> возвращается пустой массив Array().
 Private Function GetFileListArray(ByVal folderPath As String) As Variant
     Dim col As Collection
@@ -333,9 +331,9 @@ Private Function GetFileListArray(ByVal folderPath As String) As Variant
     If Not FolderExistsSafe(folderPath) Then Exit Function
 
     Set col = New Collection
-    fName = Dir(folderPath & "\*.*")
+    fName = Dir(folderPath & "\*", vbDirectory)
     Do While fName <> ""
-        col.Add fName
+        If fName <> "." And fName <> ".." Then col.Add fName
         fName = Dir()
     Loop
     If col.Count = 0 Then Exit Function
@@ -2184,145 +2182,105 @@ End Sub
 Private Sub MakeNextStepPrompt_FromSheet()
     On Error GoTo ErrHandler
 
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: === НАЧАЛО ==="
+
     Dim root As String
-    Dim stepsState As String
-    Dim lastStep As String
-    Dim lastGen As String
-    Dim nextStep As String
-    Dim ws As Worksheet
-    Dim colStepNum As Long
-    Dim lastRow As Long
-    Dim r As Long
-    Dim cellVal As String
-
-    Dim pathDesc As String
-    Dim pathCfg As String
-    Dim pathAdd As String
-    Dim pathSteps As String
-    Dim promptsPath As String
-    Dim readyPath As String
-    Dim promptFile As String
-    Dim result As String
-    Dim hasTypes As Boolean
-
     root = NormPath(Mod_Util.GetProjectRoot())
     If root = "" Then
         Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: корень не задан."
-        Err.Raise vbObjectError + 2, , "P002: корень не задан."
+        MsgBox "Ошибка P002: корень проекта не задан.", vbCritical, "Следующий шаг"
+        Exit Sub
     End If
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: корень = " & root
 
-    pathDesc = root & "\02_Подготовка данных\02_Описание"
-    pathCfg = root & "\02_Подготовка данных\01_Схема"
-    pathAdd = root & "\02_Подготовка данных\04_Дополнительные данные"
-    pathSteps = Mod_Util.GetStepsFolder()
-    promptsPath = root & "\04_Промты"
-    readyPath = root & "\03_Результаты генерации\04_Промты_готовые"
+    Dim pathCfg As String: pathCfg = root & "\02_Подготовка данных\01_Схема"
+    Dim pathDesc As String: pathDesc = root & "\02_Подготовка данных\02_Описание"
+    Dim pathConfig As String: pathConfig = root & "\02_Подготовка данных\03_Конфигурация"
+    Dim pathAdd As String: pathAdd = root & "\02_Подготовка данных\04_Дополнительные данные"
+    Dim pathSteps As String: pathSteps = Mod_Util.GetStepsFolder()
+    
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: pathSteps (GetStepsFolder) = [" & pathSteps & "]"
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: FolderExistsSafe(pathSteps) = " & CStr(FolderExistsSafe(pathSteps))
 
-    ' --- 1. Проверка настройки ---
-    stepsState = Mod_Util.GetSettingText("StepsState", "Нет")
+    ' --- 1. Проверка состояния ---
+    Dim stepsState As String: stepsState = Mod_Util.GetSettingText("StepsState", "Нет")
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: StepsState = " & stepsState
+    
     If StrComp(Trim$(stepsState), "Да", vbTextCompare) <> 0 Then
         Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: Разбивка на шаги <> Да."
-        Err.Raise vbObjectError + 2, , "P002: настройка Разбивка на шаги не включена."
-    End If
-
-    ' --- 2. Проверка папок ---
-    ' 01_Схема — содержит Адаптированную_структуру, без неё работать нельзя
-    If Not FolderExistsSafe(pathCfg) Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 01_Схема не существует."
-        Err.Raise vbObjectError + 2, , "P002: папка 01_Схема не существует."
-    End If
-    
-    Dim cfgFiles As Variant
-    cfgFiles = GetFileListArray(pathCfg)
-    If Not IsArray(cfgFiles) Or UBound(cfgFiles) < LBound(cfgFiles) Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 01_Схема пуста."
-        Err.Raise vbObjectError + 2, , "P002: папка 01_Схема пуста."
-    End If
-    
-    ' 02_Описание — обязательно для передачи ИИ
-    If Not FolderExistsSafe(pathDesc) Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 02_Описание не существует."
-        Err.Raise vbObjectError + 2, , "P002: папка 02_Описание не существует."
-    End If
-    
-    Dim descFiles As Variant
-    descFiles = GetFileListArray(pathDesc)
-    If Not IsArray(descFiles) Or UBound(descFiles) < LBound(descFiles) Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 02_Описание пуста."
-        Err.Raise vbObjectError + 2, , "P002: папка 02_Описание пуста."
-    End If
-    
-    ' 03_Конфигурация — обязательно для передачи ИИ
-    Dim pathConfig As String
-    pathConfig = root & "\02_Подготовка данных\03_Конфигурация"
-    
-    If Not FolderExistsSafe(pathConfig) Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 03_Конфигурация не существует."
-        Err.Raise vbObjectError + 2, , "P002: папка 03_Конфигурация не существует."
-    End If
-    
-    Dim configFiles As Variant
-    configFiles = GetFileListArray(pathConfig)
-    If Not IsArray(configFiles) Or UBound(configFiles) < LBound(configFiles) Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 03_Конфигурация пуста."
-        Err.Raise vbObjectError + 2, , "P002: папка 03_Конфигурация пуста."
-    End If
-    
-    ' 04_Дополнительные данные — предупреждение P006, не блокирует
-    Dim warnP006 As String
-    warnP006 = ""
-    
-    If Not FolderExistsSafe(pathAdd) Then
-        Mod_Util.WriteWarning "P006", "MakeNextStepPrompt_FromSheet: папка 04_Дополнительные данные не существует."
-        warnP006 = "Папка 04_Дополнительные данные не существует."
-    Else
-        Dim addFiles As Variant
-        addFiles = GetFileListArray(pathAdd)
-        If Not IsArray(addFiles) Or UBound(addFiles) < LBound(addFiles) Then
-            Mod_Util.WriteWarning "P006", "MakeNextStepPrompt_FromSheet: папка 04_Дополнительные данные пуста."
-            warnP006 = "Папка 04_Дополнительные данные пуста."
-        End If
-    End If
-    
-    ' --- 3. Счетчики ---
-    lastStep = Mod_Util.GetSettingText("LastStepNumber", "нет")
-    If Trim$(lastStep) = "" Then lastStep = "нет"
-
-    lastGen = Mod_Util.GetSettingText("LastGeneratedStepNumber", "нет")
-    If Trim$(lastGen) = "" Then lastGen = "нет"
-
-    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: lastStep=" & lastStep & ", lastGen=" & lastGen
-
-    ' --- 4. Конец пути ---
-    If lastStep = "нет" Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: Номер последнего шага не задан."
-        Err.Raise vbObjectError + 2, , "P002: Номер последнего шага не задан."
-    End If
-
-    If lastGen = lastStep Then
-        Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: все шаги обработаны."
-        MsgBox "Все шаги обработаны." & vbCrLf & "Номер последнего шага: " & lastStep, _
-               vbInformation, "Следующий шаг"
+        MsgBox "Ошибка P002: настройка 'Разбивка на шаги' не включена.", vbCritical, "Следующий шаг"
         Exit Sub
     End If
 
-    ' --- 5. Поиск nextStep (минимальный из > lastGen) ---
-    ' Открываем файл схемы (Адаптированная_структура_*.xlsx)
-    Dim schemaFolder As String
-    Dim schemaFile As String
-    Dim schemaWb As Workbook
-    Dim wasOpen As Boolean
-    
-    schemaFolder = root & "\02_Подготовка данных\01_Схема"
-    schemaFile = GetNewestSchemaArtifactName(schemaFolder)
+    ' --- 2. Проверка папок ---
+    Dim cfgFiles As Variant: cfgFiles = GetFileListArray(pathCfg)
+    If Not FolderExistsSafe(pathCfg) Or Not IsArray(cfgFiles) Or UBound(cfgFiles) < LBound(cfgFiles) Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 01_Схема отсутствует или пуста."
+        MsgBox "Ошибка P002: папка 01_Схема отсутствует или пуста.", vbCritical, "Следующий шаг"
+        Exit Sub
+    End If
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: папка 01_Схема OK, файлов: " & UBound(cfgFiles)
+
+    Dim descFiles As Variant: descFiles = GetFileListArray(pathDesc)
+    If Not FolderExistsSafe(pathDesc) Or Not IsArray(descFiles) Or UBound(descFiles) < LBound(descFiles) Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 02_Описание отсутствует или пуста."
+        MsgBox "Ошибка P002: папка 02_Описание отсутствует или пуста.", vbCritical, "Следующий шаг"
+        Exit Sub
+    End If
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: папка 02_Описание OK, файлов: " & UBound(descFiles)
+
+    Dim configFiles As Variant: configFiles = GetFileListArray(pathConfig)
+    If Not FolderExistsSafe(pathConfig) Or Not IsArray(configFiles) Or UBound(configFiles) < LBound(configFiles) Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 03_Конфигурация отсутствует или пуста."
+        MsgBox "Ошибка P002: папка 03_Конфигурация отсутствует или пуста.", vbCritical, "Следующий шаг"
+        Exit Sub
+    End If
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: папка 03_Конфигурация OK, файлов: " & UBound(configFiles)
+
+    ' --- 2.1. Проверка папки 04_Дополнительные данные (P006) ---
+    Dim warnP006 As String: warnP006 = ""
+    If Not FolderExistsSafe(pathAdd) Then
+        Mod_Util.WriteWarning "P006", "MakeNextStepPrompt_FromSheet: папка 04_Дополнительные данные отсутствует."
+        warnP006 = "Папка 04_Дополнительные данные отсутствует."
+    Else
+        Dim addFiles As Variant: addFiles = GetFileListArray(pathAdd)
+        If Not IsArray(addFiles) Or UBound(addFiles) < LBound(addFiles) Then
+            Mod_Util.WriteWarning "P006", "MakeNextStepPrompt_FromSheet: папка 04_Дополнительные данные пуста."
+            warnP006 = "Папка 04_Дополнительные данные пуста."
+        Else
+            Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: папка 04_Дополнительные данные OK, файлов: " & UBound(addFiles)
+        End If
+    End If
+
+    ' --- 3. Чтение курсоров ---
+    Dim lastGen As String: lastGen = Mod_Util.GetSettingText("LastGeneratedStepNumber", "нет")
+    If Trim$(lastGen) = "" Then lastGen = "нет"
+
+    Dim lastStep As String: lastStep = Mod_Util.GetSettingText("LastStepNumber", "нет")
+    If Trim$(lastStep) = "" Then lastStep = "нет"
+
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: lastStep=" & lastStep & ", lastGen=" & lastGen
+
+    ' --- 4. Завершение ---
+    If lastGen = lastStep Then
+        Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: все шаги обработаны (lastGen = lastStep)"
+        MsgBox "Все шаги обработаны.", vbInformation, "Следующий шаг"
+        Exit Sub
+    End If
+
+    ' --- 5. Поиск nextStep (минимальный из > lastGen, с учётом существующих папок) ---
+    Dim schemaFolder As String: schemaFolder = pathCfg
+    Dim schemaFile As String: schemaFile = GetNewestSchemaArtifactName(schemaFolder)
     
     If schemaFile = "" Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: файл схемы не найден в " & schemaFolder
-        Err.Raise vbObjectError + 2, , "P002: файл схемы не найден."
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: файл схемы не найден."
+        MsgBox "Ошибка P002: файл схемы не найден.", vbCritical, "Следующий шаг"
+        Exit Sub
     End If
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: файл схемы = " & schemaFile
     
-    ' Проверяем, открыт ли уже файл
-    wasOpen = False
+    Dim schemaWb As Workbook
+    Dim wasOpen As Boolean: wasOpen = False
     On Error Resume Next
     Set schemaWb = Workbooks(schemaFile)
     On Error GoTo ErrHandler
@@ -2335,33 +2293,45 @@ Private Sub MakeNextStepPrompt_FromSheet()
     
     If schemaWb Is Nothing Then
         Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: не удалось открыть файл схемы."
-        Err.Raise vbObjectError + 2, , "P002: не удалось открыть файл схемы."
+        MsgBox "Ошибка P002: не удалось открыть файл схемы.", vbCritical, "Следующий шаг"
+        Exit Sub
     End If
     
+    Dim ws As Worksheet
     Set ws = schemaWb.Worksheets(Mod_Structure.FLAT_SHEET_NAME)
     If ws Is Nothing Then
         If Not wasOpen Then schemaWb.Close SaveChanges:=False
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: лист Адаптированная_структура не найден в файле схемы."
-        Err.Raise vbObjectError + 2, , "P002: лист Адаптированная_структура не найден."
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: лист Адаптированная_структура не найден."
+        MsgBox "Ошибка P002: лист Адаптированная_структура не найден.", vbCritical, "Следующий шаг"
+        Exit Sub
     End If
     
-    colStepNum = FindColumn(ws, COL_STEP_NUM)
-    
+    Dim colStepNum As Long: colStepNum = FindColumn(ws, COL_STEP_NUM)
     If colStepNum = 0 Then
         If Not wasOpen Then schemaWb.Close SaveChanges:=False
         Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: колонка №шага/подшага не найдена."
-        Err.Raise vbObjectError + 2, , "P002: колонка №шага/подшага не найдена."
+        MsgBox "Ошибка P002: колонка №шага/подшага не найдена.", vbCritical, "Следующий шаг"
+        Exit Sub
     End If
     
-    lastRow = ws.Cells(ws.Rows.Count, colStepNum).End(xlUp).row
-    nextStep = ""
+    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, colStepNum).End(xlUp).row
+    Dim nextStep As String: nextStep = ""
+    Dim r As Long, cellVal As String
+    Dim candidateFolder As String
     
     For r = 2 To lastRow
         cellVal = Trim$(CStr(ws.Cells(r, colStepNum).value))
         If Len(cellVal) > 0 Then
             If IsStepGreater(cellVal, lastGen) Then
-                If nextStep = "" Or IsStepGreater(nextStep, cellVal) Then
-                    nextStep = cellVal
+                ' Проверка: папка для этого шага уже существует?
+                candidateFolder = pathSteps & "\Шаг_" & cellVal
+                If Not FolderExistsSafe(candidateFolder) Then
+                    ' Папка не существует — это кандидат на nextStep
+                    If nextStep = "" Or IsStepGreater(nextStep, cellVal) Then
+                        nextStep = cellVal
+                    End If
+                Else
+                    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: пропущен шаг " & cellVal & " (папка уже существует)"
                 End If
             End If
         End If
@@ -2371,88 +2341,78 @@ Private Sub MakeNextStepPrompt_FromSheet()
     
     If Len(nextStep) = 0 Then
         Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: следующий шаг не найден."
-        Err.Raise vbObjectError + 2, , "P002: следующий шаг не найден после " & lastGen
+        MsgBox "Ошибка P002: следующий шаг не найден после " & lastGen, vbCritical, "Следующий шаг"
+        Exit Sub
     End If
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: nextStep = " & nextStep
 
-    ' --- 5.1. Контроль целостности: папки Шаг_* vs счетчик lastGen ---
-    Dim maxFolderStep As String
-    maxFolderStep = "нет"
-
+    ' --- 6. Контроль целостности: папки Шаг_* vs счетчик lastGen ---
+    Dim maxFolderStep As String: maxFolderStep = "нет"
     If FolderExistsSafe(pathSteps) Then
-        Dim folderName As String
-        Dim folderNum As String
-        Dim posU As Long
-
-        folderName = Dir(pathSteps & "\Шаг_*", vbDirectory)
-        Do While folderName <> ""
-            If folderName <> "." And folderName <> ".." Then
-                If (GetAttr(pathSteps & "\" & folderName) And vbDirectory) = vbDirectory Then
-                    posU = InStr(folderName, "_")
+        Dim fArr As Variant: fArr = GetFileListArray(pathSteps)
+        If IsArray(fArr) Then
+            Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: элементов в 01_По шагам = " & (UBound(fArr) - LBound(fArr) + 1)
+            Dim i As Long, fName As String, posU As Long, fNum As String
+            For i = LBound(fArr) To UBound(fArr)
+                fName = CStr(fArr(i))
+                If Left$(fName, 4) = "Шаг_" And (GetAttr(pathSteps & "\" & fName) And vbDirectory) = vbDirectory Then
+                    posU = InStr(fName, "_")
                     If posU > 0 Then
-                        folderNum = Mid$(folderName, posU + 1)
-                        If maxFolderStep = "нет" Then
-                            maxFolderStep = folderNum
-                        Else
-                            If IsStepGreater(folderNum, maxFolderStep) Then
-                                maxFolderStep = folderNum
-                            End If
-                        End If
+                        fNum = Mid$(fName, posU + 1)
+                        If maxFolderStep = "нет" Or IsStepGreater(fNum, maxFolderStep) Then maxFolderStep = fNum
                     End If
                 End If
-            End If
-            folderName = Dir()
-        Loop
+            Next i
+        End If
     End If
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: maxFolderStep = " & maxFolderStep
 
-    ' Предупреждение пользователю о рассинхроне
+    ' Предупреждение о рассинхроне
     If maxFolderStep <> "нет" Then
         If lastGen = "нет" Or Not (lastGen = maxFolderStep) Then
-            Mod_Util.WriteWarning "P010", "MakeNextStepPrompt_FromSheet: рассинхрон lastGen=" & lastGen & _
-                                  " vs maxFolder=" & maxFolderStep
+            Mod_Util.WriteWarning "P010", "MakeNextStepPrompt_FromSheet: рассинхрон lastGen=" & lastGen & " vs maxFolder=" & maxFolderStep
             MsgBox "Предупреждение P010: рассинхрон счетчика и папок." & vbCrLf & _
                    "Номер последнего сгенерированного шага: " & lastGen & vbCrLf & _
                    "Максимальная папка в 01_По шагам: Шаг_" & maxFolderStep & vbCrLf & vbCrLf & _
                    "Продолжаем работу.", vbExclamation, "Следующий шаг"
+        Else
+            Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: синхронизация OK (lastGen = maxFolderStep)"
         End If
+    Else
+        Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: папки Шаг_* не найдены"
     End If
 
     ' Вывод накопленного предупреждения P006
     If warnP006 <> "" Then
-        MsgBox "Предупреждение P006: " & warnP006 & vbCrLf & "Продолжаем без дополнительных данных.", _
-               vbExclamation, "Следующий шаг"
+        MsgBox "Предупреждение P006: " & warnP006 & vbCrLf & "Продолжаем без дополнительных данных.", vbExclamation, "Следующий шаг"
     End If
 
-    ' --- 6. Действие ---
-    Dim stepFolder As String
-    stepFolder = pathSteps & "\Шаг_" & nextStep
+    ' --- 7. Действие ---
+    Dim stepFolder As String: stepFolder = pathSteps & "\Шаг_" & nextStep
     EnsureFolder stepFolder
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: создана папка " & stepFolder
 
-    ' Обновляем ТОЛЬКО «Номер последнего сгенерированного шага»
     UpdateSetting "Номер последнего сгенерированного шага", nextStep
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: обновлён счётчик LastGeneratedStepNumber = " & nextStep
 
-    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: шаг " & nextStep & " определён, папка создана."
-    
     Dim successMsg As String
-    successMsg = "Определён следующий шаг: " & nextStep & vbCrLf & _
-                 "Создана папка: " & stepFolder & vbCrLf & _
-                 "Обновлён счётчик: «Номер последнего сгенерированного шага» = " & nextStep
+    successMsg = "Определён следующий шаг: " & nextStep & vbCrLf
+    successMsg = successMsg & "Создана папка: " & stepFolder & vbCrLf
+    successMsg = successMsg & "Обновлён счётчик: «Номер последнего сгенерированного шага» = " & nextStep
     
-    ' Добавляем предупреждение P006 если было
     If warnP006 <> "" Then
         successMsg = successMsg & vbCrLf & vbCrLf & "Предупреждение: " & warnP006
+        MsgBox successMsg, vbExclamation, "Следующий шаг"
+    Else
+        MsgBox successMsg, vbInformation, "Следующий шаг"
     End If
-    
-    MsgBox successMsg, vbInformation, "Следующий шаг"
 
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: === ЗАВЕРШЕНО УСПЕШНО ==="
     Exit Sub
 
 ErrHandler:
-    If Err.Number = vbObjectError + 2 Then
-        MsgBox Err.Description, vbCritical, "Следующий шаг"
-    Else
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: " & Err.Description
-        MsgBox "Ошибка P002: " & Err.Description, vbCritical, "Следующий шаг"
-    End If
+    Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: " & Err.Description
+    MsgBox "Ошибка P002: " & Err.Description, vbCritical, "Следующий шаг"
     Err.Clear
 End Sub
 
@@ -4057,6 +4017,3 @@ Private Sub UpdateSetting(ByVal settingName As String, ByVal newValue As String)
     Next r
     ws.Protect Password:="pilot"
 End Sub
-
-
-

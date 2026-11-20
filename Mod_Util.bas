@@ -803,7 +803,7 @@ Private Sub EnsureAnalyticStateFields(ByVal wb As Workbook, ByVal ws As Workshee
         With cellValue.Validation
             .Delete
             .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-                 Operator:=xlBetween, Formula1:="Да; Нет"
+                 Operator:=xlBetween, Formula1:="Да, Нет"
             .IgnoreBlank = True
             .InCellDropdown = True
         End With
