@@ -6,8 +6,8 @@ Option Explicit
 ' чтение списка и текущей позиции шагов.
 ' Реализация W4 (разделы 2, 3, 8, 9, 13 спецификации Spec_Dispatcher.md).
 ' W7.1-A: добавлена чистая функция GetPromptProfile (маршрутизация профиля
-' промта №0.3 «Папки»/«Паттерны»/«Документы» по lastStep) — без кодов
-' ошибок (невалидное значение -> ""; MsgBox — ответственность вызывающего).
+' промта №0.3 "Папки"/"Паттерны"/"Документы" по lastStep) - без кодов
+' ошибок (невалидное значение -> ""; MsgBox - ответственность вызывающего).
 ' Коды ошибок: P001 - нет Шаги.txt, P002 - ошибка формирования промта шага,
 ' P003 - ошибка формирования промта исправления,
 ' P004 - формирование Промта №0 (декомпозиция) при отсутствии Шаги.txt
@@ -151,7 +151,7 @@ Private Const PAT_HDR_SUBSTR As String = "Паттерн|Типы|Количес
 Private Const REF_MARKER_001 As String = "{{СПИСОК_БАЗОВЫХ_ТИПОВ}}"
 Private Const STAT_GEN_STEPS_HDR As String = "Сгенерированные шаги:"
 Private Const STAT_NOT_APPLICABLE As String = "не применимо"
-Private Const STAT_EMPTY_MARK As String = "—"
+Private Const STAT_EMPTY_MARK As String = "-"
 
 ' ---------------------------------------------------------------------------
 ' ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Private)
@@ -2168,216 +2168,291 @@ End Function
 '    (как требует задание; копия в 04_Промты_готовые оставлена для
 '    обратной совместимости MakeFixPrompt/пользовательских ссылок).
 Public Sub MakeNextStepPrompt()
-    Dim root As String
-    Dim steps As Collection
-    Dim stepsPath As String
-    Dim promptsPath As String
-    Dim readyPath As String
-    Dim current As String
-    Dim nextNN As String
-    Dim nextName As String
-    Dim result As String
-    Dim stepFolder As String
-    Dim promptFile As String
-    Dim hasTypes As Boolean
-    Dim i As Long
-    Dim j As Long
+    On Error GoTo ErrHandler
+    Call MakeNextStepPrompt_FromSheet
+    Exit Sub
+ErrHandler:
+    Mod_Util.WriteError "P002", "MakeNextStepPrompt: " & Err.Description
+    MsgBox "Oshibka P002: " & Err.Description, vbCritical, "Promt sleduyushego shaga"
+    Err.Clear
+End Sub
 
+' ============================================================
+' W-ANALYTIC-07.1 - валидация и определение следующего шага
+' по листу "Адаптированная_структура" (без Шаги.txt).
+' ============================================================
+Private Sub MakeNextStepPrompt_FromSheet()
     On Error GoTo ErrHandler
 
-    ' W-CORRECTION-PACK-1, п.2.3: блокировка генерации при неготовых исходниках
-    If Not Mod_Folders.CheckSourceFolders() Then
-        Mod_Util.WriteError "F005", "MakeNextStepPrompt: Исходные данные не готовы. Генерация остановлена."
-        MsgBox "ERROR [F005]: Исходные данные не готовы. Генерация остановлена.", _
-               vbCritical, "Промт следующего шага"
-        Exit Sub
+    Dim root As String
+    Dim stepsState As String
+    Dim lastStep As String
+    Dim lastGen As String
+    Dim nextStep As String
+    Dim ws As Worksheet
+    Dim colStepNum As Long
+    Dim lastRow As Long
+    Dim r As Long
+    Dim cellVal As String
+
+    Dim pathDesc As String
+    Dim pathCfg As String
+    Dim pathAdd As String
+    Dim pathSteps As String
+    Dim promptsPath As String
+    Dim readyPath As String
+    Dim promptFile As String
+    Dim result As String
+    Dim hasTypes As Boolean
+
+    root = NormPath(Mod_Util.GetProjectRoot())
+    If root = "" Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: корень не задан."
+        Err.Raise vbObjectError + 2, , "P002: корень не задан."
     End If
 
-    root = NormPath(Mod_Util.GetProjectRoot)
-    stepsPath = root & "\03_Результаты генерации\01_По шагам"
+    pathDesc = root & "\02_Подготовка данных\02_Описание"
+    pathCfg = root & "\02_Подготовка данных\01_Схема"
+    pathAdd = root & "\02_Подготовка данных\04_Дополнительные данные"
+    pathSteps = Mod_Util.GetStepsFolder()
     promptsPath = root & "\04_Промты"
     readyPath = root & "\03_Результаты генерации\04_Промты_готовые"
 
-    ' 0. W-PROMPT-GEN-STEP-00: если Шаги.txt отсутствует - вместо промта
-    '    следующего шага формируем Промт №0 (декомпозиция) и выходим.
-    If Len(Dir(promptsPath & "\Шаги.txt", vbNormal)) = 0 Then
-        GenerateStepZeroPrompt
-        Exit Sub
+    ' --- 1. Проверка настройки ---
+    stepsState = Mod_Util.GetSettingText("StepsState", "Нет")
+    If StrComp(Trim$(stepsState), "Да", vbTextCompare) <> 0 Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: Разбивка на шаги <> Да."
+        Err.Raise vbObjectError + 2, , "P002: настройка Разбивка на шаги не включена."
     End If
 
-    ' 1. Список шагов (при отсутствии Шаги.txt ReadStepList сама
-    '    сообщит ошибку P001 и вернёт пустую коллекцию)
-    Set steps = ReadStepList()
-    If steps Is Nothing Then Exit Sub
-    If steps.Count = 0 Then Exit Sub
-
-    ' 2. Явное ветвление (W-PROMPT-NO-DUP-STEP-00): если папок Шаг_* в
-    '    01_По шагам ещё нет, ReadCurrentStep вернёт "" и следующий шаг
-    '    определяется неявно - проверяем наличие папок явно и берём ПЕРВЫЙ
-    '    шаг из Шаги.txt (ожидаемо "00").
-    Dim hasStepFolders As Boolean
-    hasStepFolders = (Dir(stepsPath & "\Шаг_*", vbDirectory) <> "")
-
-    If Not hasStepFolders Then
-        ' Ветка А: папок шагов НЕТ - промт для первого шага из Шаги.txt
-        nextNN = StepNumFromEntry(steps(1))
-        nextName = StepNameFromEntry(steps(1))
-
-        result = BuildPromptForStep(root, nextNN, nextName, hasTypes)
-        If result = "" Then
-            Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
-                " (проверен путь: " & promptsPath & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME & ")"
-            MsgBox "Ошибка P002: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
-                   " в папке 04_Промты\Шаблоны.", _
-                   vbCritical, "Промт следующего шага"
-            Exit Sub
+    ' --- 2. Проверка папок ---
+    ' 01_Схема — содержит Адаптированную_структуру, без неё работать нельзя
+    If Not FolderExistsSafe(pathCfg) Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 01_Схема не существует."
+        Err.Raise vbObjectError + 2, , "P002: папка 01_Схема не существует."
+    End If
+    
+    Dim cfgFiles As Variant
+    cfgFiles = GetFileListArray(pathCfg)
+    If Not IsArray(cfgFiles) Or UBound(cfgFiles) < LBound(cfgFiles) Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 01_Схема пуста."
+        Err.Raise vbObjectError + 2, , "P002: папка 01_Схема пуста."
+    End If
+    
+    ' 02_Описание — обязательно для передачи ИИ
+    If Not FolderExistsSafe(pathDesc) Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 02_Описание не существует."
+        Err.Raise vbObjectError + 2, , "P002: папка 02_Описание не существует."
+    End If
+    
+    Dim descFiles As Variant
+    descFiles = GetFileListArray(pathDesc)
+    If Not IsArray(descFiles) Or UBound(descFiles) < LBound(descFiles) Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 02_Описание пуста."
+        Err.Raise vbObjectError + 2, , "P002: папка 02_Описание пуста."
+    End If
+    
+    ' 03_Конфигурация — обязательно для передачи ИИ
+    Dim pathConfig As String
+    pathConfig = root & "\02_Подготовка данных\03_Конфигурация"
+    
+    If Not FolderExistsSafe(pathConfig) Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 03_Конфигурация не существует."
+        Err.Raise vbObjectError + 2, , "P002: папка 03_Конфигурация не существует."
+    End If
+    
+    Dim configFiles As Variant
+    configFiles = GetFileListArray(pathConfig)
+    If Not IsArray(configFiles) Or UBound(configFiles) < LBound(configFiles) Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: папка 03_Конфигурация пуста."
+        Err.Raise vbObjectError + 2, , "P002: папка 03_Конфигурация пуста."
+    End If
+    
+    ' 04_Дополнительные данные — предупреждение P006, не блокирует
+    Dim warnP006 As String
+    warnP006 = ""
+    
+    If Not FolderExistsSafe(pathAdd) Then
+        Mod_Util.WriteWarning "P006", "MakeNextStepPrompt_FromSheet: папка 04_Дополнительные данные не существует."
+        warnP006 = "Папка 04_Дополнительные данные не существует."
+    Else
+        Dim addFiles As Variant
+        addFiles = GetFileListArray(pathAdd)
+        If Not IsArray(addFiles) Or UBound(addFiles) < LBound(addFiles) Then
+            Mod_Util.WriteWarning "P006", "MakeNextStepPrompt_FromSheet: папка 04_Дополнительные данные пуста."
+            warnP006 = "Папка 04_Дополнительные данные пуста."
         End If
+    End If
+    
+    ' --- 3. Счетчики ---
+    lastStep = Mod_Util.GetSettingText("LastStepNumber", "нет")
+    If Trim$(lastStep) = "" Then lastStep = "нет"
 
-        ' Папка шага создаётся только по факту формирования промта (раздел 3)
-        stepFolder = stepsPath & "\" & nextName
-        EnsureFolder stepFolder
+    lastGen = Mod_Util.GetSettingText("LastGeneratedStepNumber", "нет")
+    If Trim$(lastGen) = "" Then lastGen = "нет"
 
-        ' Сохранение в 04_Промты\Промт_шаг_NN.md + копия в 04_Промты_готовые
-        ' (обратная совместимость: MakeFixPrompt/пользовательские ссылки)
-        EnsureFolder promptsPath
-        promptFile = promptsPath & "\Промт_шаг_" & nextNN & ".md"
-        SaveTextFileUtf8 promptFile, result
-        EnsureFolder readyPath
-        SaveTextFileUtf8 readyPath & "\Промт_шаг_" & nextNN & ".md", result
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: lastStep=" & lastStep & ", lastGen=" & lastGen
 
-        Mod_Util.WriteLog "MakeNextStepPrompt: папки Шаг_* отсутствуют - сформирован промт " & _
-            "первого шага " & nextNN & " из Шаги.txt" & _
-            IIf(hasTypes, "", " (ВНИМАНИЕ: блок 6 пуст - подставлен маркер-страховка)")
-        MsgBox "Сформирован промт первого шага " & nextNN & " (" & nextName & "):" & vbCrLf & _
-               promptFile & vbCrLf & vbCrLf & _
-               "Создана папка шага: " & stepFolder, vbInformation, "Промт следующего шага"
+    ' --- 4. Конец пути ---
+    If lastStep = "нет" Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: Номер последнего шага не задан."
+        Err.Raise vbObjectError + 2, , "P002: Номер последнего шага не задан."
+    End If
+
+    If lastGen = lastStep Then
+        Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: все шаги обработаны."
+        MsgBox "Все шаги обработаны." & vbCrLf & "Номер последнего шага: " & lastStep, _
+               vbInformation, "Следующий шаг"
         Exit Sub
     End If
 
-    ' Ветка Б: папки шагов ЕСТЬ - текущий и следующий шаги
-    current = ReadCurrentStep()
-    nextNN = ReadNextStep()
+    ' --- 5. Поиск nextStep (минимальный из > lastGen) ---
+    ' Открываем файл схемы (Адаптированная_структура_*.xlsx)
+    Dim schemaFolder As String
+    Dim schemaFile As String
+    Dim schemaWb As Workbook
+    Dim wasOpen As Boolean
+    
+    schemaFolder = root & "\02_Подготовка данных\01_Схема"
+    schemaFile = GetNewestSchemaArtifactName(schemaFolder)
+    
+    If schemaFile = "" Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: файл схемы не найден в " & schemaFolder
+        Err.Raise vbObjectError + 2, , "P002: файл схемы не найден."
+    End If
+    
+    ' Проверяем, открыт ли уже файл
+    wasOpen = False
+    On Error Resume Next
+    Set schemaWb = Workbooks(schemaFile)
+    On Error GoTo ErrHandler
+    
+    If schemaWb Is Nothing Then
+        Set schemaWb = Workbooks.Open(schemaFolder & "\" & schemaFile, ReadOnly:=True, UpdateLinks:=0, AddToMru:=False)
+    Else
+        wasOpen = True
+    End If
+    
+    If schemaWb Is Nothing Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: не удалось открыть файл схемы."
+        Err.Raise vbObjectError + 2, , "P002: не удалось открыть файл схемы."
+    End If
+    
+    Set ws = schemaWb.Worksheets(Mod_Structure.FLAT_SHEET_NAME)
+    If ws Is Nothing Then
+        If Not wasOpen Then schemaWb.Close SaveChanges:=False
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: лист Адаптированная_структура не найден в файле схемы."
+        Err.Raise vbObjectError + 2, , "P002: лист Адаптированная_структура не найден."
+    End If
+    
+    colStepNum = FindColumn(ws, COL_STEP_NUM)
+    
+    If colStepNum = 0 Then
+        If Not wasOpen Then schemaWb.Close SaveChanges:=False
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: колонка №шага/подшага не найдена."
+        Err.Raise vbObjectError + 2, , "P002: колонка №шага/подшага не найдена."
+    End If
+    
+    lastRow = ws.Cells(ws.Rows.Count, colStepNum).End(xlUp).row
+    nextStep = ""
+    
+    For r = 2 To lastRow
+        cellVal = Trim$(CStr(ws.Cells(r, colStepNum).value))
+        If Len(cellVal) > 0 Then
+            If IsStepGreater(cellVal, lastGen) Then
+                If nextStep = "" Or IsStepGreater(nextStep, cellVal) Then
+                    nextStep = cellVal
+                End If
+            End If
+        End If
+    Next r
+    
+    If Not wasOpen Then schemaWb.Close SaveChanges:=False
+    
+    If Len(nextStep) = 0 Then
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: следующий шаг не найден."
+        Err.Raise vbObjectError + 2, , "P002: следующий шаг не найден после " & lastGen
+    End If
 
-    ' 3. Следующего шага нет ? финальный аудит (раздел 9)
-    '    NB: старый путь сборки аудита по шаблону {NN}/{STEP_NAME}/... удалён
-    '    (устарело, заменено на BuildPromptForStep); аудит формируется той же
-    '    цепочкой по шаблону prompt_step_template_v1.md для шага 99.
-    If nextNN = "" Then
-        ' проверка: нет ли папки с номером больше текущего (неожиданная декомпозиция)
-        If current <> "" Then
-            Dim subName As String
-            Dim folderNN As String
-            subName = Dir(stepsPath & "\Шаг_*", vbDirectory)
-            Do While subName <> ""
-                If (GetAttr(stepsPath & "\" & subName) And vbDirectory) = vbDirectory Then
-                    folderNN = Mid(subName, 6)          ' "Шаг_NN..." -> "NN..."
-                    i = InStr(folderNN, "_")
-                    If i > 0 Then folderNN = Left(folderNN, i - 1)
-                    ' сверяем папку со списком Шаги.txt: если её там нет и
-                    ' номер больше текущего - unexpected step (раздел 9)
-                    Dim inList As Boolean
-                    inList = False
-                    For j = 1 To steps.Count
-                        If StepNameFromEntry(steps(j)) = subName Then inList = True
-                    Next j
-                    If Not inList And StepNumToLong(folderNN) > StepNumToLong(current) Then
-                        Mod_Util.WriteError "P002", "MakeNextStepPrompt: найдена папка '" & _
-                            subName & "' с номером больше текущего, но в Шаги.txt нет " & _
-                            "соответствующей строки. Обновите Шаги.txt."
-                        MsgBox "Ошибка P002: в 01_По шагам есть папка '" & subName & "', " & _
-                               "которой нет в Шаги.txt." & vbCrLf & _
-                               "Добавьте строку для этого шага в Шаги.txt.", _
-                               vbCritical, "Промт следующего шага"
-                        Exit Sub
+    ' --- 5.1. Контроль целостности: папки Шаг_* vs счетчик lastGen ---
+    Dim maxFolderStep As String
+    maxFolderStep = "нет"
+
+    If FolderExistsSafe(pathSteps) Then
+        Dim folderName As String
+        Dim folderNum As String
+        Dim posU As Long
+
+        folderName = Dir(pathSteps & "\Шаг_*", vbDirectory)
+        Do While folderName <> ""
+            If folderName <> "." And folderName <> ".." Then
+                If (GetAttr(pathSteps & "\" & folderName) And vbDirectory) = vbDirectory Then
+                    posU = InStr(folderName, "_")
+                    If posU > 0 Then
+                        folderNum = Mid$(folderName, posU + 1)
+                        If maxFolderStep = "нет" Then
+                            maxFolderStep = folderNum
+                        Else
+                            If IsStepGreater(folderNum, maxFolderStep) Then
+                                maxFolderStep = folderNum
+                            End If
+                        End If
                     End If
                 End If
-                subName = Dir()
-            Loop
-        End If
-
-        ' новая цепочка: ApplyCorrectionsBlock ? FillAllPlaceholders (шаг 99)
-        result = BuildPromptForStep(root, "99", "Шаг_99_Финал", hasTypes)
-        If result = "" Then
-            Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
-                " (проверен путь: " & promptsPath & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME & ")"
-            MsgBox "Ошибка P002: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
-                   " в папке 04_Промты\Шаблоны.", _
-                   vbCritical, "Промт следующего шага"
-            Exit Sub
-        End If
-
-        EnsureFolder stepsPath & "\Шаг_99_Финал"
-        EnsureFolder readyPath
-        SaveTextFileUtf8 readyPath & "\Промт_финального_аудита.md", result
-
-        Mod_Util.WriteLog "MakeNextStepPrompt: сформирован финальный аудит"
-        MsgBox "Все шаги из Шаги.txt выполнены." & vbCrLf & _
-               "Сформирован Промт_финального_аудита.md, создана папка Шаг_99_Финал.", _
-               vbInformation, "Финальный аудит"
-        Exit Sub
+            End If
+            folderName = Dir()
+        Loop
     End If
 
-    ' 4. Имя папки следующего шага из Шаги.txt
-    nextName = ""
-    For i = 1 To steps.Count
-        If StepNumFromEntry(steps(i)) = nextNN Then
-            nextName = StepNameFromEntry(steps(i))
-            Exit For
+    ' Предупреждение пользователю о рассинхроне
+    If maxFolderStep <> "нет" Then
+        If lastGen = "нет" Or Not (lastGen = maxFolderStep) Then
+            Mod_Util.WriteWarning "P010", "MakeNextStepPrompt_FromSheet: рассинхрон lastGen=" & lastGen & _
+                                  " vs maxFolder=" & maxFolderStep
+            MsgBox "Предупреждение P010: рассинхрон счетчика и папок." & vbCrLf & _
+                   "Номер последнего сгенерированного шага: " & lastGen & vbCrLf & _
+                   "Максимальная папка в 01_По шагам: Шаг_" & maxFolderStep & vbCrLf & vbCrLf & _
+                   "Продолжаем работу.", vbExclamation, "Следующий шаг"
         End If
-    Next i
-    If nextName = "" Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt: в Шаги.txt не найдено имя папки для шага " & nextNN
-        MsgBox "Ошибка P002: в Шаги.txt не найдено имя папки для шага " & nextNN & ".", _
-               vbCritical, "Промт следующего шага"
-        Exit Sub
     End If
 
-    ' 5. Сборка промта новой цепочкой (W-PROMPT-INVARIANTS-CODE-2):
-    '    шаблон prompt_step_template_v1.md ? ApplyCorrectionsBlock (блок 16,
-    '    сохранение корректировок предыдущей версии + corrections.md с
-    '    валидацией скоупа IsCorrectionLineValid/CollectValidCorrections) ?
-    '    FillAllPlaceholders (блоки 3.4 - BuildExtraDataListBlock,
-    '    4.1/4.2 - BuildRegistryBlock, 6 - BuildStepTypeList, константы -
-    '    project_settings.md, маркер-страховка "ЗАДАЧА НЕ ЗАДАНА" при пустом
-    '    блоке 6). Старые вызовы ReadTextFile реестров / GetSchemaFragment /
-    '    BuildExtraDataBlock / ReplaceIfPresent("{NN}"...) удалены (устарело,
-    '    заменено на BuildPromptForStep).
-    result = BuildPromptForStep(root, nextNN, nextName, hasTypes)
-    If result = "" Then
-        Mod_Util.WriteError "P002", "MakeNextStepPrompt: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
-            " (проверен путь: " & promptsPath & "\Шаблоны\" & TEMPLATE_STEP_V1_NAME & ")"
-        MsgBox "Ошибка P002: не найден шаблон " & TEMPLATE_STEP_V1_NAME & _
-               " в папке 04_Промты\Шаблоны.", _
-               vbCritical, "Промт следующего шага"
-        Exit Sub
+    ' Вывод накопленного предупреждения P006
+    If warnP006 <> "" Then
+        MsgBox "Предупреждение P006: " & warnP006 & vbCrLf & "Продолжаем без дополнительных данных.", _
+               vbExclamation, "Следующий шаг"
     End If
 
-    ' 6. Папка шага создаётся только по факту формирования промта (раздел 3)
-    stepFolder = stepsPath & "\" & nextName
-    ' Создаём папку шага как маркер для ReadCurrentStep.
+    ' --- 6. Действие ---
+    Dim stepFolder As String
+    stepFolder = pathSteps & "\Шаг_" & nextStep
     EnsureFolder stepFolder
 
-    ' 7. Сохранение готового промта в 04_Промты\Промт_шаг_NN.md (требование
-    '    задания) + копия в 04_Промты_готовые (обратная совместимость:
-    '    централизованное хранение готовых промтов, источник для
-    '    ApplyCorrectionsBlock при повторной генерации).
-    EnsureFolder promptsPath
-    promptFile = promptsPath & "\Промт_шаг_" & nextNN & ".md"
-    SaveTextFileUtf8 promptFile, result
-    EnsureFolder readyPath
-    SaveTextFileUtf8 readyPath & "\Промт_шаг_" & nextNN & ".md", result
+    ' Обновляем ТОЛЬКО «Номер последнего сгенерированного шага»
+    UpdateSetting "Номер последнего сгенерированного шага", nextStep
 
-    Mod_Util.WriteLog "MakeNextStepPrompt: сформирован промт шага " & nextNN & _
-        IIf(hasTypes, "", " (ВНИМАНИЕ: блок 6 пуст - подставлен маркер-страховка)")
-    MsgBox "Сформирован промт шага " & nextNN & " (" & nextName & "):" & vbCrLf & _
-           promptFile & vbCrLf & vbCrLf & _
-           "Создана папка шага: " & stepFolder, vbInformation, "Промт следующего шага"
+    Mod_Util.WriteLog "MakeNextStepPrompt_FromSheet: шаг " & nextStep & " определён, папка создана."
+    
+    Dim successMsg As String
+    successMsg = "Определён следующий шаг: " & nextStep & vbCrLf & _
+                 "Создана папка: " & stepFolder & vbCrLf & _
+                 "Обновлён счётчик: «Номер последнего сгенерированного шага» = " & nextStep
+    
+    ' Добавляем предупреждение P006 если было
+    If warnP006 <> "" Then
+        successMsg = successMsg & vbCrLf & vbCrLf & "Предупреждение: " & warnP006
+    End If
+    
+    MsgBox successMsg, vbInformation, "Следующий шаг"
+
     Exit Sub
 
 ErrHandler:
-    Mod_Util.WriteError "P002", "MakeNextStepPrompt: ошибка формирования промта шага. Ошибка: " & Err.Description
-    MsgBox "Ошибка P002: не удалось сформировать промт следующего шага." & vbCrLf & _
-           Err.Description, vbCritical, "Промт следующего шага"
+    If Err.Number = vbObjectError + 2 Then
+        MsgBox Err.Description, vbCritical, "Следующий шаг"
+    Else
+        Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: " & Err.Description
+        MsgBox "Ошибка P002: " & Err.Description, vbCritical, "Следующий шаг"
+    End If
     Err.Clear
 End Sub
 
@@ -2538,14 +2613,14 @@ End Sub
 
 
 ' ---------------------------------------------------------------------------
-' W7.1-A: GetPromptProfile — маршрутизация профиля промта №0.3 по номеру
+' W7.1-A: GetPromptProfile - маршрутизация профиля промта №0.3 по номеру
 ' последнего шага (lastStep). Чистая функция: без MsgBox, без записи в
 ' журнал, без обращения к книге/файлам. Возвращает строго один из
-' «профилей»: "Папки" / "Паттерны" / "Документы" либо "" (пустое или
+' "профилей": "Папки" / "Паттерны" / "Документы" либо "" (пустое или
 ' невалидное значение lastStep).
 '   Маршрутизация (Spec_Optimization.md, W7.2-NOTE-2; форма допустимых
-'   значений — prompt_step_00_3_template.md, раздел «Валидация
-'   {LAST_STEP_NUMBER}»):
+'   значений - prompt_step_00_3_template.md, раздел "Валидация
+'   {LAST_STEP_NUMBER}"):
 '     ""                    -> ""        (пусто - невалидно)
 '     "нет"                 -> "Папки"   (Шаг 0)
 '     "00.i"                -> "Папки"   (продолжение Шага 0, i >= 1)
@@ -2579,7 +2654,7 @@ Public Function GetPromptProfile(ByVal lastStep As String) As String
 
     parts = Split(s, ".")
     nParts = UBound(parts) + 1
-    If nParts < 1 Or nParts > 3 Then Exit Function     ' 4+ сегмента — невалидно
+    If nParts < 1 Or nParts > 3 Then Exit Function     ' 4+ сегмента - невалидно
 
     head = parts(0)
     Select Case head
@@ -2608,8 +2683,8 @@ Public Function GetPromptProfile(ByVal lastStep As String) As String
     End Select
 End Function
 
-' Вспомогательная для GetPromptProfile (W7.1-A): строка — положительное
-' целое без знака/пробелов/ведущих нулей ("0" невалиден, "1", "15" —
+' Вспомогательная для GetPromptProfile (W7.1-A): строка - положительное
+' целое без знака/пробелов/ведущих нулей ("0" невалиден, "1", "15" -
 ' корректные сегменты подшага i / куска k).
 Private Function IsPositiveIntPart(ByVal seg As String) As Boolean
     Dim i As Long
@@ -2625,9 +2700,9 @@ Private Function IsPositiveIntPart(ByVal seg As String) As Boolean
     IsPositiveIntPart = True
 End Function
 
-' Вспомогательная для GetPromptProfile (W7.1-A): номер шага NN >= 2 —
+' Вспомогательная для GetPromptProfile (W7.1-A): номер шага NN >= 2 -
 ' только цифры, не менее двух разрядов в канонической форме "NN"
-' (ведущий ноль допустим: "02", "03" — см. Шаги.txt/папки Шаг_NN;
+' (ведущий ноль допустим: "02", "03" - см. Шаги.txt/папки Шаг_NN;
 ' односимвольные "2"/"3" невалидны; "00"/"01" обрабатываются отдельно).
 Private Function IsPlainStepNumber(ByVal nn As String) As Boolean
     Dim i As Long
@@ -2638,7 +2713,7 @@ Private Function IsPlainStepNumber(ByVal nn As String) As Boolean
         ch = Mid$(nn, i, 1)
         If ch < "0" Or ch > "9" Then Exit Function
     Next i
-    ' числовое значение должно быть >= 2 ("00"/"01" сюда не попадают —
+    ' числовое значение должно быть >= 2 ("00"/"01" сюда не попадают -
     ' они обработаны в Select Case отдельно, но защита от прочих форм)
     If CLng(nn) < 2 Then Exit Function
     IsPlainStepNumber = True
@@ -2672,7 +2747,7 @@ Public Sub BuildPrompt02Patterns()
     End If
 
     result = template
-    ' Подстановка плейсхолдеров из листа «Паттерны»
+    ' Подстановка плейсхолдеров из листа "Паттерны"
     result = ReplaceIfPresent(result, "{{СПИСОК_ИЗВЕСТНЫХ_ПАТТЕРНОВ}}", Mod_Patterns.GetKnownPatterns())
     result = ReplaceIfPresent(result, "{{ИСКЛЮЧЕНИЯ_ПАТТЕРНОВ}}", Mod_Patterns.GetPatternExceptions())
     
@@ -3114,7 +3189,7 @@ NextLineStep:
                     statParts = Split(genStepsStr, ",")
                     For statIdx = LBound(statParts) To UBound(statParts)
                         sNN = Trim(statParts(statIdx))
-                        If sNN <> "" And sNN <> "—" Then statNNs(sNN) = 1
+                        If sNN <> "" And sNN <> "-" Then statNNs(sNN) = 1
                     Next statIdx
                     
                     mismatch = False
@@ -3462,7 +3537,7 @@ Private Function GetNewestSchemaArtifactName(ByVal prepPath As String) As String
     For i = LBound(fileArr) To UBound(fileArr)
         fName = CStr(fileArr(i))
         If Left$(fName, 2) <> "~$" Then                 ' временные файлы Office
-            ' ИСПРАВЛЕНИЕ: убран LCase$() — оператор Like регистрозависимый,
+            ' ИСПРАВЛЕНИЕ: убран LCase$() - оператор Like регистрозависимый,
             ' маска SCHEMA_ARTIFACT_MASK уже содержит правильный регистр.
             If fName Like SCHEMA_ARTIFACT_MASK Then
                 On Error Resume Next
@@ -3606,9 +3681,9 @@ Public Sub CommandGenerateTables()
         profile = GetPromptProfile(lastStep)
         If profile = "" Then
             Mod_Util.WriteError "P002", "CommandGenerateTables: невалидный номер последнего шага '" & lastStep & "'"
-            MsgBox "Ошибка P002: невалидное значение «Номер последнего шага»: '" & lastStep & "'." & vbCrLf & _
+            MsgBox "Ошибка P002: невалидное значение ""Номер последнего шага"": '" & lastStep & "'." & vbCrLf & _
                    "Допустимые формы: нет, 0, 00, 00.i, 01, 01.i, 01.i.k, NN (>= 02)." & vbCrLf & _
-                   "Обновите значение на листе «Настройки».", vbCritical, "Сформировать таблицы"
+                   "Обновите значение на листе ""Настройки"".", vbCritical, "Сформировать таблицы"
             Exit Sub
         End If
         If schemaFile = "" Then
@@ -3875,12 +3950,12 @@ Private Function IsStepGreater(ByVal step1 As String, ByVal step2 As String) As 
     Dim i As Long, maxParts As Long
     Dim val1 As Long, val2 As Long
 
-    ' Если step1 пуст — точно не больше
+    ' Если step1 пуст - точно не больше
     If Trim(step1) = "" Then
         IsStepGreater = False
         Exit Function
     End If
-    ' Если step2 пуст, а step1 нет — step1 считается больше (инициализация максимума)
+    ' Если step2 пуст, а step1 нет - step1 считается больше (инициализация максимума)
     If Trim(step2) = "" Then
         IsStepGreater = True
         Exit Function
@@ -3924,8 +3999,8 @@ Private Sub UpdateLastStepNumber(ByVal newStep As String)
     End If
 End Sub
 
-' Проверяет заполненность «№шага/подшага» для всех строк с «Отображаемое имя».
-' При полном покрытии устанавливает «Разбивка на шаги» = «Да» (автоматически не снимается).
+' Проверяет заполненность "№шага/подшага" для всех строк с "Отображаемое имя".
+' При полном покрытии устанавливает "Разбивка на шаги" = "Да" (автоматически не снимается).
 Private Sub UpdateStepsState(ByVal wb As Workbook, ByVal sheetName As String)
     Dim ws As Worksheet
     Dim lastRow As Long, r As Long
@@ -3959,11 +4034,11 @@ Private Sub UpdateStepsState(ByVal wb As Workbook, ByVal sheetName As String)
     
     If hasData And allFilled Then
         UpdateSetting "Разбивка на шаги", "Да"
-        Mod_Util.WriteLog "UpdateStepsState: установлено значение «Да»"
+        Mod_Util.WriteLog "UpdateStepsState: установлено значение ""Да"""
     End If
 End Sub
 
-' Обновляет значение настройки на листе «Настройки» (снимает/возвращает защиту).
+' Обновляет значение настройки на листе "Настройки" (снимает/возвращает защиту).
 Private Sub UpdateSetting(ByVal settingName As String, ByVal newValue As String)
     Dim ws As Worksheet
     Dim r As Long
@@ -3982,3 +4057,6 @@ Private Sub UpdateSetting(ByVal settingName As String, ByVal newValue As String)
     Next r
     ws.Protect Password:="pilot"
 End Sub
+
+
+
