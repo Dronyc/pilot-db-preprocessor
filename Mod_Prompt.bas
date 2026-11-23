@@ -2147,13 +2147,27 @@ ErrHandler:
     ReadNextStep = ""
 End Function
 
-Private Function BuildSchemaCsvFragment(ByVal ws As Worksheet, Optional ByVal filterStep As String = "", Optional ByVal maxTypes As Long = 0) As String
+' W-ANALYTIC-05-FIX-2: добавлены параметры excludeAssigned (исключить строки с
+' уже заполненным «№шага/подшага» - итеративная разбивка 00_3 подаёт ИИ только
+' нераспределённые типы) и outRowCount (число выгруженных строк данных - защита
+' от генерации промта с пустой таблицей). Все новые параметры Optional - старые
+' вызовы (MakeNextStepPrompt_FromSheet, 00_2) не затронуты.
+Private Function BuildSchemaCsvFragment(ByVal ws As Worksheet, _
+                                        Optional ByVal filterStep As String = "", _
+                                        Optional ByVal maxTypes As Long = 0, _
+                                        Optional ByVal excludeAssigned As Boolean = False, _
+                                        Optional ByRef outRowCount As Long) As String
     Dim lastRow As Long
     Dim r As Long
     Dim colStep As Long, colVis As Long, colCat As Long, colPat As Long, colIn As Long, colOut As Long, colAnom As Long
     Dim res As String
     Dim rowCount As Long
-    
+    Dim include As Boolean
+    Dim stepVal As String
+    Dim visVal As String, catVal As String, patVal As String, inVal As String, outVal As String, anomVal As String
+
+    outRowCount = 0
+
     ' Поиск канонических колонок плоской таблицы
     colStep = FindColumn(ws, "№шага/подшага")
     colVis = FindColumn(ws, "Отображаемое имя")
@@ -2162,33 +2176,38 @@ Private Function BuildSchemaCsvFragment(ByVal ws As Worksheet, Optional ByVal fi
     colIn = FindColumn(ws, "Входит в")
     colOut = FindColumn(ws, "Состоит из")
     colAnom = FindColumn(ws, "Аномалия")
-    
+
     If colStep = 0 Then
         BuildSchemaCsvFragment = ""
         Exit Function
     End If
-    
+
     lastRow = ws.Cells(ws.Rows.Count, colStep).End(xlUp).row
-    
+
     ' Формирование заголовка CSV (разделитель точка с запятой, все поля в кавычках для надёжности)
     res = """№шага/подшага"";""Отображаемое имя"";""Категория"";""Паттерн"";""Входит в"";""Состоит из"";""Аномалия""" & vbCrLf
-    
+
     rowCount = 0
     For r = 2 To lastRow
-        Dim stepVal As String
         stepVal = Trim$(CStr(ws.Cells(r, colStep).value))
-        
-        If filterStep <> "" And stepVal <> filterStep Then
-            ' Пропускаем строку, если задан фильтр и значение не совпадает
-        Else
-            Dim visVal As String, catVal As String, patVal As String, inVal As String, outVal As String, anomVal As String
+
+        include = True
+        If filterStep <> "" Then
+            ' Точечный выбор строк конкретного шага (промт шага v1)
+            If stepVal <> filterStep Then include = False
+        ElseIf excludeAssigned Then
+            ' Разбивка на шаги (00_3): исключаем типы, уже распределённые по шагам
+            If stepVal <> "" Then include = False
+        End If
+
+        If include Then
             visVal = Trim$(CStr(ws.Cells(r, colVis).value))
             catVal = Trim$(CStr(ws.Cells(r, colCat).value))
             patVal = Trim$(CStr(ws.Cells(r, colPat).value))
             inVal = Trim$(CStr(ws.Cells(r, colIn).value))
             outVal = Trim$(CStr(ws.Cells(r, colOut).value))
             anomVal = Trim$(CStr(ws.Cells(r, colAnom).value))
-            
+
             ' Экранирование внутренних кавычек (двойные кавычки) и оборачивание полей
             res = res & """" & Replace(stepVal, """", """""") & """;" & _
                   """" & Replace(visVal, """", """""") & """;" & _
@@ -2197,14 +2216,15 @@ Private Function BuildSchemaCsvFragment(ByVal ws As Worksheet, Optional ByVal fi
                   """" & Replace(inVal, """", """""") & """;" & _
                   """" & Replace(outVal, """", """""") & """;" & _
                   """" & Replace(anomVal, """", """""") & """" & vbCrLf
-            
+
             rowCount = rowCount + 1
             If maxTypes > 0 And rowCount >= maxTypes Then
                 Exit For
             End If
         End If
     Next r
-    
+
+    outRowCount = rowCount
     BuildSchemaCsvFragment = res
 End Function
 
@@ -3619,6 +3639,11 @@ Public Sub CommandGenerateTables()
     Dim profile As String
     Dim limitTypes As Long
     Dim archivePath As String
+    Dim schemaWb As Workbook
+    Dim wsSchema As Worksheet
+    Dim csvContent As String
+    Dim csvFileName As String
+    Dim csvRows As Long
 
     On Error GoTo ErrHandler
 
@@ -3663,6 +3688,23 @@ Public Sub CommandGenerateTables()
     schemaFile = GetNewestSchemaArtifactName(schemaFolder)
     If schemaFile = "" Then schemaFile = FirstMatchFile(schemaFolder, "*.xlsx")
 
+    ' --- Открытие книги схемы и проверка листа ---
+    If schemaFile <> "" Then
+        Set schemaWb = Workbooks.Open(schemaFolder & "\" & schemaFile, ReadOnly:=True, AddToMru:=False)
+        On Error Resume Next
+        Set wsSchema = schemaWb.Worksheets("Адаптированная_структура")
+        On Error GoTo ErrHandler
+        
+        If wsSchema Is Nothing Then
+            schemaWb.Close SaveChanges:=False
+            Set schemaWb = Nothing
+            Mod_Util.WriteError "P002", "CommandGenerateTables: не найден лист 'Адаптированная_структура' в " & schemaFile
+            MsgBox "Ошибка P002: не найден лист 'Адаптированная_структура' в файле:" & vbCrLf & schemaFile, _
+                   vbCritical, "Сформировать таблицы"
+            Exit Sub
+        End If
+    End If
+
     ' Поиск файла описания: универсальная маска (любой формат)
     descFile = FirstMatchFile(descFolder, "Выжимка_Описание.*")
     If descFile = "" Then descFile = "нет"
@@ -3679,12 +3721,19 @@ Public Sub CommandGenerateTables()
                    vbCritical, "Сформировать таблицы"
             Exit Sub
         End If
+        
+        ' Генерация CSV фрагмента для 00_2
+        csvContent = BuildSchemaCsvFragment(wsSchema, "", 0)
+        csvFileName = "Schema_00_2_iter" & CStr(nextIter) & ".csv"
+        SaveTextFileUtf8 fragmentsPath & "\" & csvFileName, csvContent
+        
         result = template
-        result = ReplaceIfPresent(result, "{SCHEMA_FILENAME}", schemaFile)
+        result = ReplaceIfPresent(result, "{SCHEMA_FILENAME}", csvFileName)
         result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descFile)
         result = ReplaceIfPresent(result, "{EXTRA_DATA_LIST}", extraList)
         result = ReplaceIfPresent(result, "{{СПИСОК_ИЗВЕСТНЫХ_ПАТТЕРНОВ}}", Mod_Patterns.GetKnownPatterns())
         result = ReplaceIfPresent(result, "{{ИСКЛЮЧЕНИЯ_ПАТТЕРНОВ}}", Mod_Patterns.GetPatternExceptions())
+        
     Else
         ' Промт 00_3: {LAST_STEP_NUMBER} из настройки LastStepNumber (W-ANALYTIC-09)
         lastStep = Mod_Util.GetSettingText("LastStepNumber", "нет")
@@ -3703,10 +3752,32 @@ Public Sub CommandGenerateTables()
                    vbCritical, "Сформировать таблицы"
             Exit Sub
         End If
+        
+        ' Генерация CSV фрагмента для 00_3 с лимитом
         limitTypes = Mod_Util.GetSettingLong("MaxTypesPerTable", 50)
+
+        ' Генерация CSV фрагмента для 00_3 с лимитом; уже распределённые
+        ' по шагам типы в вход не попадают (W-ANALYTIC-05-FIX-2)
+        csvContent = BuildSchemaCsvFragment(wsSchema, "", limitTypes, True, csvRows)
+        If csvRows = 0 Then
+            ' Все типы уже распределены - промт с пустой таблицей не создаём
+            If Not schemaWb Is Nothing Then
+                schemaWb.Close SaveChanges:=False
+                Set schemaWb = Nothing
+            End If
+            Mod_Util.WriteLog "CommandGenerateTables: все типы уже распределены по шагам - промт 00_3 не сформирован."
+            MsgBox "Все типы уже распределены по шагам (колонка «№шага/подшага» заполнена)." & vbCrLf & _
+                   "Новый промт 00_3 не требуется: дождитесь разбора ответа ИИ (кнопка 14) " & _
+                   "или переходите к промтам шагов («Сделать промт следующего шага»).", _
+                   vbInformation, "Сформировать таблицы"
+            Exit Sub
+        End If
+        csvFileName = "Schema_00_3_iter" & CStr(nextIter) & ".csv"
+        SaveTextFileUtf8 fragmentsPath & "\" & csvFileName, csvContent
+        
         result = template
         result = ReplaceIfPresent(result, "{LAST_STEP_NUMBER}", lastStep)
-        result = ReplaceIfPresent(result, "{INPUT_FILENAME}", schemaFile)
+        result = ReplaceIfPresent(result, "{INPUT_FILENAME}", csvFileName)
         result = ReplaceIfPresent(result, "{DESCRIPTION_FILENAME}", descFile)
         result = ReplaceIfPresent(result, "{EXTRA_DATA_LIST}", extraList)
         result = ReplaceIfPresent(result, "{ЛИМИТ_ТИПОВ_В_ТАБЛИЦЕ}", CStr(limitTypes))
@@ -3724,9 +3795,23 @@ Public Sub CommandGenerateTables()
     Mod_Util.WriteLog "CommandGenerateTables: " & msg
     MsgBox msg, vbInformation, "Сформировать таблицы"
 
+    ' Очистка памяти: штатное закрытие книги схемы
+    If Not schemaWb Is Nothing Then
+        schemaWb.Close SaveChanges:=False
+        Set schemaWb = Nothing
+    End If
+
     Exit Sub
 
 ErrHandler:
+    ' Очистка памяти при ошибке (гарантированное закрытие)
+    On Error Resume Next
+    If Not schemaWb Is Nothing Then
+        schemaWb.Close SaveChanges:=False
+        Set schemaWb = Nothing
+    End If
+    On Error GoTo 0
+    
     Mod_Util.WriteError "P002", "CommandGenerateTables: " & Err.Description
     MsgBox "Ошибка P002: не удалось сформировать промт." & vbCrLf & Err.Description, _
            vbCritical, "Сформировать таблицы"
