@@ -13,8 +13,8 @@ Option Explicit
 
 ' ------------------------------------------------------------
 ' Восстановление UI: кнопки, оформление, защита листов.
-' W-UI-REORG-01: 7 основных кнопок на "Препроцессор" (со строки 2)
-'                + 4 служебные на новом листе "Справка".
+' W-UI-REORG-01 (+FIX): 10 основных кнопок на "Препроцессор" (со строки 2)
+'                       + 4 служебные на новом листе "Справка".
 ' ------------------------------------------------------------
 Public Sub RestoreUI()
     Dim ws As Worksheet
@@ -41,7 +41,7 @@ Public Sub RestoreUI()
     ' Проверка наличия листа "Препроцессор"
     Set ws = Nothing
     For Each wsAny In ThisWorkbook.Worksheets
-        If StrComp(wsAny.name, "Препроцессор", vbTextCompare) = 0 Then
+        If StrComp(wsAny.Name, "Препроцессор", vbTextCompare) = 0 Then
             Set ws = wsAny
             Exit For
         End If
@@ -60,7 +60,7 @@ Public Sub RestoreUI()
     ' ============================================================
     Set wsHelp = Nothing
     For Each wsAny In ThisWorkbook.Worksheets
-        If StrComp(wsAny.name, "Справка", vbTextCompare) = 0 Then
+        If StrComp(wsAny.Name, "Справка", vbTextCompare) = 0 Then
             Set wsHelp = wsAny
             Exit For
         End If
@@ -69,7 +69,7 @@ Public Sub RestoreUI()
     If wsHelp Is Nothing Then
         Set wsHelp = ThisWorkbook.Worksheets.Add( _
             After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-        wsHelp.name = "Справка"
+        wsHelp.Name = "Справка"
     Else
         wsHelp.Cells.Clear
         Do While wsHelp.Shapes.Count > 0
@@ -109,23 +109,23 @@ Public Sub RestoreUI()
             wsHelp.Cells(rowSrv, 2).Top, _
             200, 22)
         shpSrvBtn.Placement = xlMove
-        shpSrvBtn.name = "btnSrv_" & CStr(i + 1)
+        shpSrvBtn.Name = "btnSrv_" & CStr(i + 1)
         shpSrvBtn.OnAction = CStr(srvActions(i))
         With shpSrvBtn.TextFrame
-            .Characters.text = CStr(srvCaptions(i))
+            .Characters.Text = CStr(srvCaptions(i))
             .HorizontalAlignment = xlCenter
             .VerticalAlignment = xlCenter
         End With
-        shpSrvBtn.line.ForeColor.RGB = RGB(0, 0, 0)
-        shpSrvBtn.line.Weight = 1
-        wsHelp.Cells(rowSrv, 3).value = CStr(srvTips(i))
+        shpSrvBtn.Line.ForeColor.RGB = RGB(0, 0, 0)
+        shpSrvBtn.Line.Weight = 1
+        wsHelp.Cells(rowSrv, 3).Value = CStr(srvTips(i))
         wsHelp.Cells(rowSrv, 3).WrapText = True
         wsHelp.Cells(rowSrv, 3).VerticalAlignment = xlTop
         rowSrv = rowSrv + 2
     Next i
 
     ' ============================================================
-    ' 2. Лист "Препроцессор" + 7 основных кнопок (строго со строки 2)
+    ' 2. Лист "Препроцессор" + 10 основных кнопок (строго со строки 2)
     ' ============================================================
     Do While ws.Shapes.Count > 0
         ws.Shapes(1).Delete
@@ -142,24 +142,33 @@ Public Sub RestoreUI()
         "Собрать плоскую таблицу", _
         "Сгенерировать аналитические промты (00_1, 00_4)", _
         "Сформировать таблицы (00_2 / 00_3)", _
+        "Разобрать ответ ИИ", _
         "Сделать промт следующего шага", _
-        "Разобрать ответ ИИ")
+        "Собрать типы и атрибуты (черновик)", _
+        "Собрать типы и атрибуты (строгая)", _
+        "Сделать промт исправления ошибок")
     mainActions = Array( _
         "CreateProjectFolders_Click", _
         "CheckSourceFiles_Click", _
         "BuildFlatStructure_Click", _
         "GenerateAnalyticalPrompts_Click", _
         "CommandGenerateTables", _
+        "CommandParseAiResponse", _
         "MakeNextStepPrompt_Click", _
-        "CommandParseAiResponse")
+        "AssembleDraft_Click", _
+        "AssembleStrict_Click", _
+        "MakeFixPrompt_Click")
     mainTips = Array( _
         "Создаёт корневую структуру папок проекта", _
         "Проверяет наличие и формат файлов в папках исходных данных", _
         "Собирает плоскую таблицу из исходной схемы и подготавливает её для анализа", _
         "Генерирует промты 00_1 и 00_4. Пропускает существующие.", _
         "Генерирует промт 00_2 или 00_3. Схема выгружается в компактный CSV-фрагмент для экономии токенов ИИ. Файлы сохраняются в '05_Фрагменты шагов'.", _
+        "Разбирает ответ ИИ и обновляет лист «Паттерны»", _
         "Формирует промт следующего шага и создаёт папку этого шага", _
-        "Разбирает ответ ИИ и обновляет лист «Паттерны»")
+        "Собирает сводную таблицу и реестры в черновом режиме", _
+        "Собирает сводную таблицу и реестры в строгом режиме", _
+        "Формирует промт исправления ошибок для текущего шага")
 
     rowBtn = 2
     For i = LBound(mainCaptions) To UBound(mainCaptions)
@@ -170,16 +179,16 @@ Public Sub RestoreUI()
             ws.Cells(rowBtn, 2).Top, _
             200, 22)
         shpBtn.Placement = xlMove
-        shpBtn.name = "btnMain_" & CStr(i + 1)
+        shpBtn.Name = "btnMain_" & CStr(i + 1)
         shpBtn.OnAction = CStr(mainActions(i))
         With shpBtn.TextFrame
-            .Characters.text = CStr(mainCaptions(i))
+            .Characters.Text = CStr(mainCaptions(i))
             .HorizontalAlignment = xlCenter
             .VerticalAlignment = xlCenter
         End With
-        shpBtn.line.ForeColor.RGB = RGB(0, 0, 0)
-        shpBtn.line.Weight = 1
-        ws.Cells(rowBtn, 3).value = CStr(mainTips(i))
+        shpBtn.Line.ForeColor.RGB = RGB(0, 0, 0)
+        shpBtn.Line.Weight = 1
+        ws.Cells(rowBtn, 3).Value = CStr(mainTips(i))
         ws.Cells(rowBtn, 3).WrapText = True
         ws.Cells(rowBtn, 3).VerticalAlignment = xlTop
         rowBtn = rowBtn + 2
@@ -191,8 +200,8 @@ Public Sub RestoreUI()
     ' настраивается только Mod_Patterns.EnsurePatternsSheet.
     ' ============================================================
     For Each wsAny In ThisWorkbook.Worksheets
-        If StrComp(wsAny.name, "Препроцессор", vbTextCompare) <> 0 And _
-           StrComp(wsAny.name, "Паттерны", vbTextCompare) <> 0 Then
+        If StrComp(wsAny.Name, "Препроцессор", vbTextCompare) <> 0 And _
+           StrComp(wsAny.Name, "Паттерны", vbTextCompare) <> 0 Then
             On Error Resume Next
             wsAny.Unprotect Password:="pilot"
             On Error GoTo ErrHandler
@@ -215,7 +224,7 @@ Public Sub RestoreUI()
     For n = LBound(srv) To UBound(srv)
         Set wsSrv = Nothing
         For Each wsAny In ThisWorkbook.Worksheets
-            If StrComp(wsAny.name, CStr(srv(n)), vbTextCompare) = 0 Then
+            If StrComp(wsAny.Name, CStr(srv(n)), vbTextCompare) = 0 Then
                 Set wsSrv = wsAny
                 Exit For
             End If
@@ -236,7 +245,7 @@ Public Sub RestoreUI()
     ' (лист "Справка" остаётся в конце книги — соответствует ТЗ)
     Call ReorderSheets(ThisWorkbook)
 
-    Mod_Util.WriteLog "UI восстановлен: 7 основных кнопок + 4 служебные на листе 'Справка'"
+    Mod_Util.WriteLog "UI восстановлен: 10 основных кнопок + 4 служебные на листе 'Справка'"
     Exit Sub
 
 ErrHandler:
