@@ -13,34 +13,39 @@ Option Explicit
 
 ' ------------------------------------------------------------
 ' Восстановление UI: кнопки, оформление, защита листов.
+' W-UI-REORG-01: 7 основных кнопок на "Препроцессор" (со строки 2)
+'                + 4 служебные на новом листе "Справка".
 ' ------------------------------------------------------------
 Public Sub RestoreUI()
     Dim ws As Worksheet
-    Dim shp As Shape
+    Dim wsAny As Worksheet
+    Dim wsHelp As Worksheet
+    Dim shpBtn As Shape
+    Dim shpSrvBtn As Shape
     Dim i As Long
     Dim rowBtn As Long
-    Dim captions As Variant
-    Dim actions As Variant
-    Dim tips As Variant
-    Dim wsAny As Worksheet
-    Dim rng As Range
-    Dim lastCol As Long
-    Dim srv As Variant
+    Dim rowSrv As Long
+    Dim mainCaptions As Variant
+    Dim mainActions As Variant
+    Dim mainTips As Variant
+    Dim srvCaptions As Variant
+    Dim srvActions As Variant
+    Dim srvTips As Variant
     Dim wsSrv As Worksheet
     Dim pass As String
     Dim n As Long
+    Dim srv As Variant
 
     On Error GoTo ErrHandler
 
     ' Проверка наличия листа "Препроцессор"
     Set ws = Nothing
     For Each wsAny In ThisWorkbook.Worksheets
-        If StrComp(wsAny.Name, "Препроцессор", vbTextCompare) = 0 Then
+        If StrComp(wsAny.name, "Препроцессор", vbTextCompare) = 0 Then
             Set ws = wsAny
             Exit For
         End If
     Next wsAny
-
     If ws Is Nothing Then
         MsgBox "Лист Препроцессор не найден", vbExclamation
         Exit Sub
@@ -50,137 +55,151 @@ Public Sub RestoreUI()
     Call EnsureSheet_Readme(ThisWorkbook)
     Call Mod_Util.EnsureSettingsSheet
 
-    ' Удаление существующих Form Controls
-    Do While ws.Buttons.Count > 0
-        ws.Buttons(1).Delete
-    Loop
+    ' ============================================================
+    ' 1. Лист "Справка" + служебные кнопки (открытие папок/логов и пр.)
+    ' ============================================================
+    Set wsHelp = Nothing
+    For Each wsAny In ThisWorkbook.Worksheets
+        If StrComp(wsAny.name, "Справка", vbTextCompare) = 0 Then
+            Set wsHelp = wsAny
+            Exit For
+        End If
+    Next wsAny
 
-    ' Удаление существующих кнопок
+    If wsHelp Is Nothing Then
+        Set wsHelp = ThisWorkbook.Worksheets.Add( _
+            After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        wsHelp.name = "Справка"
+    Else
+        wsHelp.Cells.Clear
+        Do While wsHelp.Shapes.Count > 0
+            wsHelp.Shapes(1).Delete
+        Loop
+    End If
+
+    wsHelp.Columns("B").ColumnWidth = 40
+    wsHelp.Columns("C").ColumnWidth = 80
+    wsHelp.Columns("C").Font.Italic = True
+    wsHelp.Columns("C").Font.Color = RGB(89, 89, 89)
+
+    ' Служебные кнопки (4 шт.): открытие папки логов, восстановление UI,
+    ' отчёт об обнаружении, обновление Readme.
+    srvCaptions = Array( _
+        "Открыть папку Логи", _
+        "Восстановить кнопки и оформление", _
+        "Показать, что нашёл Препроцессор", _
+        "Обновить Readme")
+    srvActions = Array( _
+        "OpenLogsFolder_Click", _
+        "RestoreUI_Click", _
+        "ShowDiscoveryReport_Click", _
+        "UpdateReadme_Click")
+    srvTips = Array( _
+        "Открывает папку 05_Логи в проводнике Windows", _
+        "Восстанавливает кнопки, элементы управления и оформление листов", _
+        "Показывает карту найденных шагов и файлов", _
+        "Формирует актуальный файл Readme.md")
+
+    rowSrv = 2
+    For i = LBound(srvCaptions) To UBound(srvCaptions)
+        wsHelp.Rows(rowSrv).RowHeight = 24
+        Set shpSrvBtn = wsHelp.Shapes.AddFormControl( _
+            xlButtonControl, _
+            wsHelp.Cells(rowSrv, 2).Left, _
+            wsHelp.Cells(rowSrv, 2).Top, _
+            200, 22)
+        shpSrvBtn.Placement = xlMove
+        shpSrvBtn.name = "btnSrv_" & CStr(i + 1)
+        shpSrvBtn.OnAction = CStr(srvActions(i))
+        With shpSrvBtn.TextFrame
+            .Characters.text = CStr(srvCaptions(i))
+            .HorizontalAlignment = xlCenter
+            .VerticalAlignment = xlCenter
+        End With
+        shpSrvBtn.line.ForeColor.RGB = RGB(0, 0, 0)
+        shpSrvBtn.line.Weight = 1
+        wsHelp.Cells(rowSrv, 3).value = CStr(srvTips(i))
+        wsHelp.Cells(rowSrv, 3).WrapText = True
+        wsHelp.Cells(rowSrv, 3).VerticalAlignment = xlTop
+        rowSrv = rowSrv + 2
+    Next i
+
+    ' ============================================================
+    ' 2. Лист "Препроцессор" + 7 основных кнопок (строго со строки 2)
+    ' ============================================================
     Do While ws.Shapes.Count > 0
         ws.Shapes(1).Delete
     Loop
-    
-    ' Установка ширины столбцов До создания кнопок
+
     ws.Columns("B").ColumnWidth = 40
     ws.Columns("C").ColumnWidth = 80
     ws.Columns("C").Font.Italic = True
     ws.Columns("C").Font.Color = RGB(89, 89, 89)
 
-    ' Подготовка списков кнопок (14 кнопок: Служебные 1-4, Проектные 5-14)
-    captions = Array( _
+    mainCaptions = Array( _
         "Создать папки проекта", _
         "Проверить исходные данные", _
-        "Открыть папку Логи", _
-        "Восстановить кнопки и оформление", _
-        "Собрать плоскую таблицу из «Схемы»", _
-        "Собрать типы и атрибуты (черновик)", _
-        "Собрать типы и атрибуты (строгая)", _
-        "Сгенерировать аналитические промты", _
+        "Собрать плоскую таблицу", _
+        "Сгенерировать аналитические промты (00_1, 00_4)", _
+        "Сформировать таблицы (00_2 / 00_3)", _
         "Сделать промт следующего шага", _
-        "Сделать промт исправления ошибок", _
-        "Показать, что нашёл Препроцессор", _
-        "Обновить Readme", _
-        "Сформировать таблицы", _
         "Разобрать ответ ИИ")
-
-    actions = Array( _
+    mainActions = Array( _
         "CreateProjectFolders_Click", _
         "CheckSourceFiles_Click", _
-        "OpenLogsFolder_Click", _
-        "RestoreUI_Click", _
         "BuildFlatStructure_Click", _
-        "AssembleDraft_Click", _
-        "AssembleStrict_Click", _
         "GenerateAnalyticalPrompts_Click", _
-        "MakeNextStepPrompt_Click", _
-        "MakeFixPrompt_Click", _
-        "ShowDiscoveryReport_Click", _
-        "UpdateReadme_Click", _
         "CommandGenerateTables", _
+        "MakeNextStepPrompt_Click", _
         "CommandParseAiResponse")
-
-    tips = Array( _
+    mainTips = Array( _
         "Создаёт корневую структуру папок проекта", _
         "Проверяет наличие и формат файлов в папках исходных данных", _
-        "Открывает папку 05_Логи в проводнике Windows", _
-        "Восстанавливает кнопки, элементы управления и оформление листов", _
         "Собирает плоскую таблицу из исходной схемы и подготавливает её для анализа", _
-        "Собирает сводную таблицу и реестры в черновом режиме", _
-        "Собирает сводную таблицу и реестры в строгом режиме", _
         "Генерирует промты 00_1 и 00_4. Пропускает существующие.", _
+        "Генерирует промт 00_2 или 00_3. Схема выгружается в компактный CSV-фрагмент для экономии токенов ИИ. Файлы сохраняются в '05_Фрагменты шагов'.", _
         "Формирует промт следующего шага и создаёт папку этого шага", _
-        "Формирует промт исправления ошибок для текущего шага", _
-        "Показывает карту найденных шагов и файлов", _
-        "Формирует актуальный файл Readme.md", _
-        "Формирует таблицы для Промта №0.2 (Паттерны)", _
         "Разбирает ответ ИИ и обновляет лист «Паттерны»")
 
-    ' Создание 14 кнопок в столбце B с визуальным разделением групп
     rowBtn = 2
-    
-    ' Сначала устанавливаем высоту всех строк для кнопок
-    For i = LBound(captions) To UBound(captions)
-        If i = 4 Then
-            rowBtn = rowBtn + 2
-        End If
+    For i = LBound(mainCaptions) To UBound(mainCaptions)
         ws.Rows(rowBtn).RowHeight = 24
-        rowBtn = rowBtn + 2
-    Next i
-    
-    ' Теперь создаём кнопки (высота строк уже установлена)
-    rowBtn = 2
-    For i = LBound(captions) To UBound(captions)
-        If i = 4 Then
-            rowBtn = rowBtn + 2
-        End If
-
-        Dim shpBtn As Shape
         Set shpBtn = ws.Shapes.AddFormControl( _
             xlButtonControl, _
             ws.Cells(rowBtn, 2).Left, _
             ws.Cells(rowBtn, 2).Top, _
             200, 22)
         shpBtn.Placement = xlMove
-        shpBtn.Name = "btnPilot_" & CStr(i + 1)
-        shpBtn.OnAction = CStr(actions(i))
+        shpBtn.name = "btnMain_" & CStr(i + 1)
+        shpBtn.OnAction = CStr(mainActions(i))
         With shpBtn.TextFrame
-            .Characters.text = CStr(captions(i))
+            .Characters.text = CStr(mainCaptions(i))
             .HorizontalAlignment = xlCenter
             .VerticalAlignment = xlCenter
         End With
-        
-        shpBtn.Line.ForeColor.RGB = RGB(0, 0, 0)
-        shpBtn.Line.Weight = 1
-        
-        ' Пояснение в столбце C
-        ws.Cells(rowBtn, 3).value = CStr(tips(i))
+        shpBtn.line.ForeColor.RGB = RGB(0, 0, 0)
+        shpBtn.line.Weight = 1
+        ws.Cells(rowBtn, 3).value = CStr(mainTips(i))
         ws.Cells(rowBtn, 3).WrapText = True
         ws.Cells(rowBtn, 3).VerticalAlignment = xlTop
-        
         rowBtn = rowBtn + 2
     Next i
-    
-    ' Форматирование всех листов книги
-    ' PRE-04c-fix: лист «Паттерны» пропускается — его раскладка (названия
-    ' секций в строке 1, заголовки в строке 2) настраивается только
-    ' Mod_Patterns.EnsurePatternsSheet; общее форматирование (жирная строка
-    ' 1, закреплённая первая строка) применимо к нему некорректно.
+
+    ' ============================================================
+    ' 3. Форматирование всех листов книги
+    ' PRE-04c-fix: лист «Паттерны» пропускается — его раскладка
+    ' настраивается только Mod_Patterns.EnsurePatternsSheet.
+    ' ============================================================
     For Each wsAny In ThisWorkbook.Worksheets
-        If StrComp(wsAny.Name, "Препроцессор", vbTextCompare) <> 0 And _
-           StrComp(wsAny.Name, "Паттерны", vbTextCompare) <> 0 Then
+        If StrComp(wsAny.name, "Препроцессор", vbTextCompare) <> 0 And _
+           StrComp(wsAny.name, "Паттерны", vbTextCompare) <> 0 Then
             On Error Resume Next
             wsAny.Unprotect Password:="pilot"
             On Error GoTo ErrHandler
-    
-            ' Первая строка - жирным
             wsAny.Rows(1).Font.Bold = True
-    
-            ' Автоширина столбцов
             On Error Resume Next
             wsAny.Cells.EntireColumn.AutoFit
             On Error GoTo ErrHandler
-    
-            ' Закрепление первой строки
             On Error Resume Next
             wsAny.Activate
             wsAny.Range("A2").Select
@@ -196,7 +215,7 @@ Public Sub RestoreUI()
     For n = LBound(srv) To UBound(srv)
         Set wsSrv = Nothing
         For Each wsAny In ThisWorkbook.Worksheets
-            If StrComp(wsAny.Name, CStr(srv(n)), vbTextCompare) = 0 Then
+            If StrComp(wsAny.name, CStr(srv(n)), vbTextCompare) = 0 Then
                 Set wsSrv = wsAny
                 Exit For
             End If
@@ -212,11 +231,12 @@ Public Sub RestoreUI()
     On Error Resume Next
     ws.Activate
     On Error GoTo ErrHandler
-    
+
     ' Упорядочить листы: Препроцессор, Настройки, Readme, остальные
+    ' (лист "Справка" остаётся в конце книги — соответствует ТЗ)
     Call ReorderSheets(ThisWorkbook)
 
-    Mod_Util.WriteLog "UI восстановлен: 14 кнопок, оформление, защита"
+    Mod_Util.WriteLog "UI восстановлен: 7 основных кнопок + 4 служебные на листе 'Справка'"
     Exit Sub
 
 ErrHandler:
@@ -438,7 +458,7 @@ End Function
 Private Function LastUsedRowOfSheet(ByVal ws As Worksheet) As Long
     Dim lr As Long
     On Error Resume Next
-    lr = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lr = ws.Cells(ws.Rows.Count, 1).End(xlUp).row
     On Error GoTo 0
     If Err.Number <> 0 Then
         Err.Clear
@@ -447,7 +467,7 @@ Private Function LastUsedRowOfSheet(ByVal ws As Worksheet) As Long
         LastUsedRowOfSheet = 0
     Else
         ' Пустой лист: xlUp указывает на строку 1, но ячейка A1 пуста.
-        If Len(Trim(CStr(ws.Cells(lr, 1).Value))) = 0 Then
+        If Len(Trim(CStr(ws.Cells(lr, 1).value))) = 0 Then
             LastUsedRowOfSheet = 0
         Else
             LastUsedRowOfSheet = lr
@@ -541,7 +561,7 @@ Public Sub ShowDiscoveryReport_Click()
     ' --- Формирование текста отчёта -----------------------------------
     report = "Отчет об обнаружении (" & reportFile & "):" & vbCrLf & vbCrLf
     For r = 1 To lastRow
-        lineText = Trim(CStr(wsRep.Cells(r, 1).Value))
+        lineText = Trim(CStr(wsRep.Cells(r, 1).value))
         If Len(lineText) > 0 Then
             report = report & lineText & vbCrLf
         End If
@@ -625,7 +645,7 @@ Private Sub EnsureSheet_Readme(ByVal wb As Workbook)
     ' Проверка: есть ли лист "Readme"
     Set ws = Nothing
     For Each wsAny In wb.Worksheets
-        If StrComp(wsAny.Name, "Readme", vbTextCompare) = 0 Then
+        If StrComp(wsAny.name, "Readme", vbTextCompare) = 0 Then
             Set ws = wsAny
             Exit For
         End If
@@ -633,7 +653,7 @@ Private Sub EnsureSheet_Readme(ByVal wb As Workbook)
 
     If ws Is Nothing Then
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
-        ws.Name = "Readme"
+        ws.name = "Readme"
         ws.Range("A1").value = "Препроцессор структуры БД Pilot - инструкция"
         ws.Range("A2").value = "Инструкция формируется процедурой Mod_Docs.UpdateReadme."
         ws.Range("A3").value = "Нажмите кнопку ""Обновить Readme"" для пересборки."
