@@ -1974,11 +1974,10 @@ Public Function ReadStepList() As Collection
     root = NormPath(Mod_Util.GetProjectRoot)
     filePath = root & "\04_Промты\Шаги.txt"
 
-    ' файла нет ? P001, MsgBox, пустая коллекция
+    ' файла нет ? P002, MsgBox, пустая коллекция
     If Len(Dir(filePath, vbNormal)) = 0 Then
-        Mod_Util.WriteError "P001", "ReadStepList: не найден Шаги.txt"
-        MsgBox "Ошибка P001: не найден файл Шаги.txt (" & vbCrLf & filePath & ")", _
-               vbCritical, "Промты"
+        Mod_Util.WriteWarning "P002", "ReadStepList: файл Шаги.txt упразднён (W-CLEANUP-STEP0). " & _
+            "Шаги определяются автоматически по листу Адаптированная_структура."
         Set ReadStepList = col
         Exit Function
     End If
@@ -2033,9 +2032,9 @@ Public Function ReadStepList() As Collection
 
 ErrHandler:
     ' Любая ошибка чтения - [WARN] в лог, пустая коллекция без прерывания.
-    Mod_Util.WriteWarning "P006", "ReadStepList: ошибка чтения Шаги.txt. Ошибка: " & Err.Description
-    MsgBox "Предупреждение P006: не удалось прочитать файл Шаги.txt." & vbCrLf & Err.Description, _
-           vbExclamation, "Промты"
+    Mod_Util.WriteWarning "P002", "ReadStepList: ошибка чтения устаревшего файла Шаги.txt. Ошибка: " & Err.Description
+    MsgBox "Предупреждение P002: не удалось прочитать устаревший файл Шаги.txt." & vbCrLf & Err.Description, _
+        vbExclamation, "Промты"
     Err.Clear
     Set ReadStepList = col
 End Function
@@ -2469,8 +2468,8 @@ ErrHandler:
     Err.Clear
 End Sub
 
-' Формирует Промт №0 (декомпозиция) при отсутствии Шаги.txt
-' ВНИМАНИЕ (W7.1): Старое тело процедуры удалено и заменено на заглушку.
+' УСТАРЕЛО (W-CLEANUP-STEP0): Шаги.txt упразднён, Промт №0 формируется через MakeNextStepPrompt.
+' ВНИМАНИЕ (W7.1): Процедура заменена на заглушку.
 ' Актуальная логика формирования промта шага 0 теперь должна проходить
 ' через MakeNextStepPrompt (при пустом списке шагов) или использовать
 ' архивный шаблон из prompts/archive/prompt_step_00_template.md
