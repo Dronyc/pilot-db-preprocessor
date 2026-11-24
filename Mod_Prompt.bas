@@ -3088,6 +3088,75 @@ Public Sub CommandParseAiResponse()
         Dim lastRow As Long, decisionContent As String
         lastRow = ws.Cells(ws.Rows.Count, colName).End(xlUp).row
         decisionContent = ""
+
+                ' === W7.3-PATTERNS-UPDATE: запись паттернов и исключений в ListObject ===
+        ' Все переменные с суффиксом W (Write) — гарантия отсутствия конфликтов
+        ' с уже объявленными iPat, jPat, rPat, linesPat, partsPat и т.д.
+        Dim wsPatternsW As Worksheet
+        Dim tblListW As ListObject
+        Dim tblExcW As ListObject
+        Dim vCsvLinesW As Variant
+        Dim vLinePartsW As Variant
+        Dim iPatW As Long
+        Dim iExcW As Long
+        Dim newRowW As ListRow
+        Dim patternsAddedW As Long
+        Dim excAddedW As Long
+
+        On Error Resume Next
+        Set wsPatternsW = ThisWorkbook.Worksheets("Паттерны")
+        If Not wsPatternsW Is Nothing Then
+            Set tblListW = wsPatternsW.ListObjects(Mod_Patterns.TBL_PATTERNS_LIST)
+            Set tblExcW = wsPatternsW.ListObjects(Mod_Patterns.TBL_PATTERNS_EXC)
+        End If
+        On Error GoTo FileError
+
+        If patternsCsv <> "" Then
+            ' Разбиваем CSV на строки (разделитель vbCrLf)
+            vCsvLinesW = Split(patternsCsv, vbCrLf)
+
+            ' Список паттернов: строки из 3-4 полей (Паттерн|Типы|Количество[|Итерация])
+            If Not tblListW Is Nothing Then
+                For iPatW = LBound(vCsvLinesW) To UBound(vCsvLinesW)
+                    If Trim(CStr(vCsvLinesW(iPatW))) <> "" Then
+                        vLinePartsW = Split(CStr(vCsvLinesW(iPatW)), "|")
+                        If IsArray(vLinePartsW) And UBound(vLinePartsW) >= 2 And UBound(vLinePartsW) <= 3 Then
+                            Set newRowW = tblListW.ListRows.Add
+                            newRowW.Range.Cells(1, 1).Value = CStr(vLinePartsW(0))  ' Паттерн
+                            newRowW.Range.Cells(1, 2).Value = CStr(vLinePartsW(1))  ' Типы
+                            newRowW.Range.Cells(1, 3).Value = CStr(vLinePartsW(2))  ' Количество
+                            If UBound(vLinePartsW) = 3 Then newRowW.Range.Cells(1, 4).Value = CStr(vLinePartsW(3))  ' Итерация
+                            patternsAddedW = patternsAddedW + 1
+                        End If
+                    End If
+                Next iPatW
+            End If
+
+            ' Исключения: строки из 8+ полей (Область|Поле|Тип матчинга|Значение|Действие|Примеры|Причина|Статус)
+            If Not tblExcW Is Nothing Then
+                For iExcW = LBound(vCsvLinesW) To UBound(vCsvLinesW)
+                    If Trim(CStr(vCsvLinesW(iExcW))) <> "" Then
+                        vLinePartsW = Split(CStr(vCsvLinesW(iExcW)), "|")
+                        If IsArray(vLinePartsW) And UBound(vLinePartsW) >= 7 Then
+                            Set newRowW = tblExcW.ListRows.Add
+                            newRowW.Range.Cells(1, 1).Value = CStr(vLinePartsW(0))  ' Область
+                            newRowW.Range.Cells(1, 2).Value = CStr(vLinePartsW(1))  ' Поле
+                            newRowW.Range.Cells(1, 3).Value = CStr(vLinePartsW(2))  ' Тип матчинга
+                            newRowW.Range.Cells(1, 4).Value = CStr(vLinePartsW(3))  ' Значение
+                            newRowW.Range.Cells(1, 5).Value = CStr(vLinePartsW(4))  ' Действие
+                            newRowW.Range.Cells(1, 6).Value = CStr(vLinePartsW(5))  ' Примеры
+                            newRowW.Range.Cells(1, 7).Value = CStr(vLinePartsW(6))  ' Причина
+                            newRowW.Range.Cells(1, 8).Value = CStr(vLinePartsW(7))  ' Статус
+                            excAddedW = excAddedW + 1
+                        End If
+                    End If
+                Next iExcW
+            End If
+
+            Mod_Util.WriteLog "W7.3-PATTERNS-UPDATE: паттернов добавлено: " & CStr(patternsAddedW) & _
+                ", исключений добавлено: " & CStr(excAddedW)
+        End If
+        ' === END W7.3-PATTERNS-UPDATE ===
         
         ' =========================================================================
         ' ЛОГИКА 00_2 (PATTERNS_CSV)

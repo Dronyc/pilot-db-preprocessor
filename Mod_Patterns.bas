@@ -54,10 +54,6 @@ Private Const PATTERNS_LAST_INPUT_ROW As Long = 1000 ' нижняя границ
 Public Const TBL_PATTERNS_LIST As String = "tblPatternsList"  ' Список паттернов (A2:D...)
 Public Const TBL_PATTERNS_EXC As String = "tblPatternsExc"    ' Исключения паттернов (H2:O...)
 
-' Совместимость: до разделения таблиц другие модули могли ссылаться на
-' единое имя. Алиас указывает на таблицу списка паттернов.
-Public Const PATTERNS_TABLE_NAME As String = TBL_PATTERNS_LIST
-
 ' Названия секций (строка 1)
 Private Const TITLE_LIST As String = "СПИСОК ПАТТЕРНОВ"
 Private Const TITLE_EXC As String = "ИСКЛЮЧЕНИЯ ПАТТЕРНОВ"
@@ -700,16 +696,7 @@ End Function
 
 ' ---------------------------------------------------------------------------
 ' Создание/обновление ДВУХ независимых умных таблиц (ListObject) на листе
-' "Паттерны" с МИНИМАЛЬНЫМИ начальными диапазонами:
-'   - tblPatternsList: A2:D3 (заголовки + 1 строка для данных)
-'   - tblPatternsExc: H2:O10 (заголовки + 8 строк предзаполнения)
-' Таблицы автоматически расширяются при добавлении строк (ListRows.Add)
-' или при ручном вводе данных под таблицей.
-' Идемпотентно: если таблицы существуют, проверяет и при необходимости
-' изменяет их начальные диапазоны. Если таблицы слились или перекрываются,
-' принудительно разъединяет их с сохранением данных пользователя.
-' Fallback: если создание двух ListObject вызывает ошибки, переходит к
-' простым таблицам (форматирование без ListObject).
+' «Паттерны» с автоматическим расширением на все данные.
 ' ---------------------------------------------------------------------------
 Private Sub EnsurePatternsListObject(ByVal ws As Worksheet)
     Dim loList As ListObject
@@ -722,35 +709,45 @@ Private Sub EnsurePatternsListObject(ByVal ws As Worksheet)
     Dim excData As Variant
     Dim lastRowList As Long
     Dim lastRowExc As Long
+    Dim lastCell As Range
     
     On Error GoTo ErrHandler
     
-    ' Минимальные начальные диапазоны (ListObject расширится автоматически)
-    Set rangeList = ws.Range("A2:D3")  ' Заголовки + 1 строка
-    Set rangeExc = ws.Range("H2:O10")  ' Заголовки + 8 строк предзаполнения
+    ' 1. Определяем фактическую последнюю строку с данными в каждой секции
+    '    через End(xlUp) — надёжнее, чем Find
     
-    ' 1. Проверка на слияние таблиц: удаляем все ListObject, диапазоны
-    '    которых пересекаются с A2:D... или H2:O..., сохраняя данные.
+    ' Секция A-D (список паттернов): ищем последнюю заполненную ячейку в колонках A-D
+    lastRowList = 3  ' минимум: заголовки + 1 строка
+    Dim col As Long
+    For col = 1 To 4  ' колонки A, B, C, D
+        Dim r As Long
+        r = ws.Cells(ws.Rows.Count, col).End(xlUp).Row
+        If r > lastRowList Then lastRowList = r
+    Next col
+    
+    ' Секция H-O (исключения): ищем последнюю заполненную ячейку в колонках H-O
+    lastRowExc = 10  ' минимум: заголовки + 8 строк предзаполнения
+    For col = 8 To 15  ' колонки H, I, J, K, L, M, N, O
+        r = ws.Cells(ws.Rows.Count, col).End(xlUp).row
+        If r > lastRowExc Then lastRowExc = r
+    Next col
+    
+    Set rangeList = ws.Range("A2:D" & lastRowList)
+    Set rangeExc = ws.Range("H2:O" & lastRowExc)
+    
+    ' 2. Проверка на слияние таблиц: удаляем все ListObject, диапазоны
+    '    которых пересекаются с целевыми, сохраняя данные.
     If ws.ListObjects.Count > 0 Then
         dataSaved = False
-        
-        ' Находим последнюю строку с данными в каждой секции
-        lastRowList = ws.Cells(ws.Rows.Count, 1).End(xlUp).row
-        If lastRowList < 3 Then lastRowList = 3
-        lastRowExc = ws.Cells(ws.Rows.Count, 8).End(xlUp).row
-        If lastRowExc < 3 Then lastRowExc = 3
-        
         For Each loAny In ws.ListObjects
-            ' Проверяем перекрытие с целевыми диапазонами
-            If Not Application.Intersect(loAny.Range, ws.Range("A2:D" & CStr(lastRowList))) Is Nothing Or _
-               Not Application.Intersect(loAny.Range, ws.Range("H2:O" & CStr(lastRowExc))) Is Nothing Then
-                ' Сохраняем данные перед удалением (только при первом пересечении)
+            If Not Application.Intersect(loAny.Range, rangeList) Is Nothing Or _
+               Not Application.Intersect(loAny.Range, rangeExc) Is Nothing Then
                 If Not dataSaved Then
                     If lastRowList >= 3 Then
-                        listData = ws.Range("A3:D" & CStr(lastRowList)).value
+                        listData = ws.Range("A3:D" & lastRowList).value
                     End If
                     If lastRowExc >= 3 Then
-                        excData = ws.Range("H3:O" & CStr(lastRowExc)).value
+                        excData = ws.Range("H3:O" & lastRowExc).value
                     End If
                     dataSaved = True
                 End If
@@ -758,65 +755,66 @@ Private Sub EnsurePatternsListObject(ByVal ws As Worksheet)
             End If
         Next loAny
         
-        ' Восстанавливаем данные после удаления конфликтующих ListObject
         If dataSaved Then
             If Not IsEmpty(listData) Then
-                ws.Range("A3:D" & CStr(lastRowList)).value = listData
+                ws.Range("A3:D" & lastRowList).value = listData
             End If
             If Not IsEmpty(excData) Then
-                ws.Range("H3:O" & CStr(lastRowExc)).value = excData
+                ws.Range("H3:O" & lastRowExc).value = excData
             End If
             Mod_Util.WriteWarning "PT003", "EnsurePatternsListObject: удалены " & _
                 "перекрывающиеся ListObject, данные восстановлены"
         End If
     End If
     
-    ' 2. Создание/обновление ListObject для списка паттернов (A2:D3 минимум)
+    ' 3. Создание или расширение ListObject для списка паттернов (A2:D...)
     Set loList = Nothing
     On Error Resume Next
-    Set loList = ws.ListObjects(TBL_PATTERNS_LIST)
+    Set loList = ws.ListObjects(Mod_Patterns.TBL_PATTERNS_LIST)
     On Error GoTo ErrHandler
     
     If loList Is Nothing Then
+        ' Таблица не существует — создаём
         Set loList = ws.ListObjects.Add(xlSrcRange, rangeList, , xlYes)
-        loList.name = TBL_PATTERNS_LIST
+        loList.name = Mod_Patterns.TBL_PATTERNS_LIST
         loList.TableStyle = "TableStyleMedium6"
         Mod_Util.WriteLog "EnsurePatternsListObject: создана таблица '" & _
-            TBL_PATTERNS_LIST & "' (минимальный диапазон A2:D3, расширяемая)"
+            Mod_Patterns.TBL_PATTERNS_LIST & "' (диапазон A2:D" & lastRowList & ")"
     Else
-        ' Если таблица существует, но диапазон отличается, обновляем до минимального
-        ' (данные за пределами минимального диапазона сохраняются, ListObject расширится автоматически)
+        ' Таблица существует — расширяем диапазон, если нужно
         If loList.Range.Rows.Count < rangeList.Rows.Count Then
             loList.Resize rangeList
+            Mod_Util.WriteLog "EnsurePatternsListObject: расширена таблица '" & _
+                Mod_Patterns.TBL_PATTERNS_LIST & "' до A2:D" & lastRowList
         End If
     End If
     
-    ' 3. Создание/обновление ListObject для исключений (H2:O10 минимум)
+    ' 4. Создание или расширение ListObject для исключений (H2:O...)
     Set loExc = Nothing
     On Error Resume Next
-    Set loExc = ws.ListObjects(TBL_PATTERNS_EXC)
+    Set loExc = ws.ListObjects(Mod_Patterns.TBL_PATTERNS_EXC)
     On Error GoTo ErrHandler
     
     If loExc Is Nothing Then
         Set loExc = ws.ListObjects.Add(xlSrcRange, rangeExc, , xlYes)
-        loExc.name = TBL_PATTERNS_EXC
+        loExc.name = Mod_Patterns.TBL_PATTERNS_EXC
         loExc.TableStyle = "TableStyleMedium6"
         Mod_Util.WriteLog "EnsurePatternsListObject: создана таблица '" & _
-            TBL_PATTERNS_EXC & "' (минимальный диапазон H2:O10, расширяемая)"
+            Mod_Patterns.TBL_PATTERNS_EXC & "' (диапазон H2:O" & lastRowExc & ")"
     Else
         If loExc.Range.Rows.Count < rangeExc.Rows.Count Then
             loExc.Resize rangeExc
+            Mod_Util.WriteLog "EnsurePatternsListObject: расширена таблица '" & _
+                Mod_Patterns.TBL_PATTERNS_EXC & "' до H2:O" & lastRowExc
         End If
     End If
     
     Exit Sub
     
 ErrHandler:
-    ' Fallback: если создание ListObject не удалось, продолжаем без них
     Mod_Util.WriteWarning "PT002", "EnsurePatternsListObject: не удалось создать " & _
         "ListObject, переход к простым таблицам. Ошибка: " & Err.Description
     Err.Clear
-    ' Удаляем частично созданные ListObject, если они есть
     On Error Resume Next
     If Not loList Is Nothing Then loList.Delete
     If Not loExc Is Nothing Then loExc.Delete

@@ -42,7 +42,7 @@ Public Const FLAT_SHEET_NAME_OLD As String = "Плоская_таблица"
 Private Const PREP_ARCHIVE_SUBFOLDER As String = "Архив"
 
 ' W7.1a: имя умной таблицы (ListObject) на листе «Паттерны» (Public Const)
-Public Const PATTERNS_TABLE_NAME As String = "tblPatterns"
+Public Const TBL_PATTERNS_LIST As String = "tblPatterns"
 
 Private Const SHEET_NAME As String = "Паттерны"
 Private Const PATTERNS_PASSWORD As String = "pilot"
