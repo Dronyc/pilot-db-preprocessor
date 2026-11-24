@@ -3035,7 +3035,29 @@ Public Sub CommandParseAiResponse()
         
         Dim patternsCsv As String, stepsCsv As String
         Dim referenceBooks As String, userAction As String, statistics As String
-        ExtractBlock aiResponseText, "<!-- PATTERNS_CSV_START -->", "<!-- PATTERNS_CSV_END -->", patternsCsv
+        'ExtractBlock aiResponseText, "<!-- PATTERNS_CSV_START -->", "<!-- PATTERNS_CSV_END -->", patternsCsv
+        
+        ' ========================================================================
+        ' ПОДЗАДАЧА 3: Сбор ВСЕХ блоков STEPS_CSV (ИИ может сгенерировать несколько)
+        ' ========================================================================
+        stepsCsv = ""
+        Dim splitStepsStart As Variant
+        splitStepsStart = Split(aiResponseText, "<!-- STEPS_CSV_START -->")
+        Dim stepBlockIdx As Long
+        For stepBlockIdx = 1 To UBound(splitStepsStart)
+            Dim splitStepsEnd As Variant
+            splitStepsEnd = Split(splitStepsStart(stepBlockIdx), "<!-- STEPS_CSV_END -->")
+            If UBound(splitStepsEnd) >= 0 Then
+                Dim currentStepsCsv As String
+                currentStepsCsv = Trim(splitStepsEnd(0))
+                If currentStepsCsv <> "" Then
+                    If stepsCsv <> "" Then stepsCsv = stepsCsv & vbCrLf
+                    stepsCsv = stepsCsv & currentStepsCsv
+                End If
+            End If
+        Next stepBlockIdx
+        ' ========================================================================
+
         ExtractBlock aiResponseText, "<!-- STEPS_CSV_START -->", "<!-- STEPS_CSV_END -->", stepsCsv
         ExtractBlock aiResponseText, "<!-- REFERENCEBOOKS_START -->", "<!-- REFERENCEBOOKS_END -->", referenceBooks
         ExtractBlock aiResponseText, "<!-- USER_ACTION_START -->", "<!-- USER_ACTION_END -->", userAction
@@ -3849,9 +3871,9 @@ Public Sub CommandGenerateTables()
         ' Генерация CSV фрагмента для 00_3 с лимитом
         limitTypes = Mod_Util.GetSettingLong("MaxTypesPerTable", 50)
 
-        ' Генерация CSV фрагмента для 00_3 с лимитом; уже распределённые
-        ' по шагам типы в вход не попадают (W-ANALYTIC-05-FIX-2)
-        csvContent = BuildSchemaCsvFragment(wsSchema, "", limitTypes, True, csvRows)
+        ' 2. Генерируем CSV. МЕНЯЕМ ТОЛЬКО ТРЕТИЙ ПАРАМЕТР с limitTypes на 0.
+        ' Ноль означает "без ограничений на сбор данных". Функция вернет ВСЕ нераспределённые типы.
+        csvContent = BuildSchemaCsvFragment(wsSchema, "", 0, True, csvRows)
         If csvRows = 0 Then
             ' Все типы уже распределены - промт с пустой таблицей не создаём
             If Not schemaWb Is Nothing Then
@@ -4012,7 +4034,7 @@ Public Sub GenerateAnalyticalPrompts_Click()
             ' Пропуск: временные файлы Office (~$), уже созданные промты
             ' (Prompt_* - защита от рекурсии), файлы без расширения
             If Left$(fName, 2) <> "~$" And LCase$(Left$(fName, 7)) <> "prompt_" And InStr(fName, ".") > 0 Then
-                promptName = "Prompt_" & fName & ".md"
+                promptName = "Prompt_" & fName & ".txt"
                 promptPath = configPath & "\" & promptName
                 ' FileExistsSafe (GetAttr) - НЕ сбрасывает итератор Dir()
                 If Not FileExistsSafe(promptPath) Then
@@ -4035,7 +4057,7 @@ Public Sub GenerateAnalyticalPrompts_Click()
             For i = LBound(fileArr) To UBound(fileArr)
                 fName = CStr(fileArr(i))
                 If Left$(fName, 2) <> "~$" And LCase$(Left$(fName, 7)) <> "prompt_" And InStr(fName, ".") > 0 Then
-                    promptName = "Prompt_" & fName & ".md"
+                    promptName = "Prompt_" & fName & ".txt"
                     promptPath = CStr(p) & "\" & promptName
                     If Not FileExistsSafe(promptPath) Then
                         If tpl004 <> "" Then
