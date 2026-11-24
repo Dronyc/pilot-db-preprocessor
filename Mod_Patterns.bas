@@ -3,43 +3,43 @@ Option Explicit
 
 ' ============================================================================
 ' Модуль: Mod_Patterns
-' Назначение: лист «Паттерны» (PRE-04c) — каркас листа для Промта №0.2
-'             («Паттерны и справочники»):
-'   Строка 1 — названия секций: A1 «СПИСОК ПАТТЕРНОВ» (объединено A1:D1),
-'               H1 «ИСКЛЮЧЕНИЯ ПАТТЕРНОВ» (объединено H1:O1); жирным.
-'   Секция A-D  («Список паттернов», append-only): заголовки в строке 2
-'               «Паттерн», «Типы», «Количество», «Итерация»; строки 3+
-'               пустые — заполняются кодом позже (разбор ответа ИИ, W7).
-'   Секция H-O  («ИСКЛЮЧЕНИЯ ПАТТЕРНОВ»): заголовки в строке 2 «Область»,
-'               «Поле», «Тип матчинга», «Значение», «Действие», «Примеры»,
-'               «Причина», «Статус»; предзаполнены стартовые правила
-'               (папки ЦИМ/Год — ВКЛЮЧАТЬ; базовые системные типы —
-'               ИСКЛЮЧАТЬ) — только при создании нового листа, со строки 3.
+' Назначение: лист "Паттерны" (PRE-04c) - каркас листа для Промта №0.2
+'             ("Паттерны и справочники"):
+'   Строка 1 - названия секций: A1 "СПИСОК ПАТТЕРНОВ" (объединено A1:D1),
+'               H1 "ИСКЛЮЧЕНИЯ ПАТТЕРНОВ" (объединено H1:O1); жирным.
+'   Секция A-D  ("Список паттернов", append-only): заголовки в строке 2
+'               "Паттерн", "Типы", "Количество", "Итерация"; строки 3+
+'               пустые - заполняются кодом позже (разбор ответа ИИ, W7).
+'   Секция H-O  ("ИСКЛЮЧЕНИЯ ПАТТЕРНОВ"): заголовки в строке 2 "Область",
+'               "Поле", "Тип матчинга", "Значение", "Действие", "Примеры",
+'               "Причина", "Статус"; предзаполнены стартовые правила
+'               (папки ЦИМ/Год - ВКЛЮЧАТЬ; базовые системные типы -
+'               ИСКЛЮЧАТЬ) - только при создании нового листа, со строки 3.
 ' Выпадающие списки (Validation) навешаны на колонки H, I, J, L, O
-' (строки 3..PATTERNS_LAST_INPUT_ROW — PRE-04c-fix2: заголовки строки 2
+' (строки 3..PATTERNS_LAST_INPUT_ROW - PRE-04c-fix2: заголовки строки 2
 ' списками не перекрываются); защита листа паролем "pilot",
 ' редактируемыми остаются только диапазоны ввода данных A2:D1000 и H3:O1000.
-' PRE-04c-fix: защита от потери данных — Cells.Clear убран; если лист
-' «Паттерны» уже существует, данные в A2:D1000 и H2:O1000 НЕ ТРОГАЮТСЯ —
+' PRE-04c-fix: защита от потери данных - Cells.Clear убран; если лист
+' "Паттерны" уже существует, данные в A2:D1000 и H2:O1000 НЕ ТРОГАЮТСЯ -
 ' процедура лишь дописывает недостающие заголовки, пересоздаёт Validation
 ' и переустанавливает защиту. Полная очистка не выполняется ни в одном
 ' из сценариев (новый лист создаётся пустым по определению).
-' PRE-04c-fix2: удалена дублирующая старая строка правила «Год»
-' (Категория/Отображаемое/Точное/Год) из предзаполнения — осталось одно
-' правило «Год» (Тип/Отображаемое/Маска/Год*); Validation применён со
-' строки 3; область ввода секции H-O — H3:O1000.
+' PRE-04c-fix2: удалена дублирующая старая строка правила "Год"
+' (Категория/Отображаемое/Точное/Год) из предзаполнения - осталось одно
+' правило "Год" (Тип/Отображаемое/Маска/Год*); Validation применён со
+' строки 3; область ввода секции H-O - H3:O1000.
 ' Зависимости: Mod_Util (WriteLog / WriteError / WriteWarning).
 ' Реестр кодов ошибок/предупреждений модуля (единый реестр проекта):
-'   PT001 - ошибка подготовки листа «Паттерны» (EnsurePatternsSheet);
+'   PT001 - ошибка подготовки листа "Паттерны" (EnsurePatternsSheet);
 '   PT002 - предупреждение: не удалось применить Validation к ячейкам
 '          секции H-O (лист подготовлен, списки нужно настроить вручную);
-'   PT003 - предупреждение: лист «Паттерны» отсутствует или секция пуста
-'          (чтение W7.1-A: GetPatternExceptions / GetKnownPatterns —
+'   PT003 - предупреждение: лист "Паттерны" отсутствует или секция пуста
+'          (чтение W7.1-A: GetPatternExceptions / GetKnownPatterns -
 '          функция возвращает "").
 ' Примечание: процедура EnsurePatternsSheet вызывается из
 ' Mod_Util.EnsureSettingsSheet (главная точка подготовки служебных листов
 ' книги), поэтому вызов защищён On Error Resume Next: сбой подготовки
-' листа «Паттерны» не должен блокировать работу с листом «Настройки».
+' листа "Паттерны" не должен блокировать работу с листом "Настройки".
 ' ============================================================================
 
 ' ---------------------------------------------------------------------------
@@ -49,7 +49,14 @@ Option Explicit
 Private Const SHEET_NAME As String = "Паттерны"
 Private Const PATTERNS_PASSWORD As String = "pilot" ' пароль единый для книги
 Private Const PATTERNS_LAST_INPUT_ROW As Long = 1000 ' нижняя граница диапазонов ввода
-Public Const PATTERNS_TABLE_NAME As String = "tblPatterns"
+' Имена умных таблиц (ListObject). ВАЖНО: свойство .Name у ListObject
+' не поддерживает пробелы — имена задаются без пробелов.
+Public Const TBL_PATTERNS_LIST As String = "tblPatternsList"  ' Список паттернов (A2:D...)
+Public Const TBL_PATTERNS_EXC As String = "tblPatternsExc"    ' Исключения паттернов (H2:O...)
+
+' Совместимость: до разделения таблиц другие модули могли ссылаться на
+' единое имя. Алиас указывает на таблицу списка паттернов.
+Public Const PATTERNS_TABLE_NAME As String = TBL_PATTERNS_LIST
 
 ' Названия секций (строка 1)
 Private Const TITLE_LIST As String = "СПИСОК ПАТТЕРНОВ"
@@ -72,7 +79,7 @@ Private Const HDR_N As String = "Причина"
 Private Const HDR_O As String = "Статус"
 
 ' ---------------------------------------------------------------------------
-' Подготовка листа «Паттерны»: создание каркаса, предзаполнение исключений,
+' Подготовка листа "Паттерны": создание каркаса, предзаполнение исключений,
 ' выпадающие списки, форматирование и защита.
 ' Идемпотентна и безопасна для данных (PRE-04c-fix): безусловный Cells.Clear
 ' убран.
@@ -80,7 +87,7 @@ Private Const HDR_O As String = "Статус"
 '     заголовки (строка 2), навешивается Validation, предзаполняются
 '     исключения (со строки 3), лист защищается.
 '   * Лист уже существует -> данные НЕ ОЧИЩАЮТСЯ: проверяются заголовки
-'     (если отсутствуют или смещены в строку 1 старого каркаса PRE-04c —
+'     (если отсутствуют или смещены в строку 1 старого каркаса PRE-04c -
 '     дописываются/переносятся в строку 2), пересоздаётся Validation,
 '     переустанавливается защита. Значения в диапазонах A2:D1000 и H2:O1000
 '     (кроме ячеек заголовков строки 2 и названий секций строки 1) не
@@ -99,9 +106,9 @@ Public Sub EnsurePatternsSheet()
 
     Set wb = ThisWorkbook
 
-    ' 1. Поиск листа «Паттерны»; если нет - создать в конце книги
+    ' 1. Поиск листа "Паттерны"; если нет - создать в конце книги
     For Each wsAny In wb.Worksheets
-        If StrComp(wsAny.Name, SHEET_NAME, vbTextCompare) = 0 Then
+        If StrComp(wsAny.name, SHEET_NAME, vbTextCompare) = 0 Then
             Set ws = wsAny
             Exit For
         End If
@@ -111,11 +118,11 @@ Public Sub EnsurePatternsSheet()
 
     If created Then
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
-        ws.Name = SHEET_NAME
+        ws.name = SHEET_NAME
     Else
-        ws.Unprotect Password:=PATTERNS_PASSWORD   ' снять защиту перед правкой
+        'ws.Unprotect Password:=PATTERNS_PASSWORD    снять защиту перед правкой
         ' КРИТИЧНО (PRE-04c-fix): полная очистка листа (Cells.Clear) НЕ
-        ' выполняется — пользовательские данные A2:D1000 и H2:O1000
+        ' выполняется - пользовательские данные A2:D1000 и H2:O1000
         ' сохраняются.
     End If
 
@@ -139,8 +146,8 @@ Public Sub EnsurePatternsSheet()
     EnsureSectionTitle ws, "A1", TITLE_LIST, "A1:D1"
     EnsureSectionTitle ws, "H1", TITLE_EXC, "H1:O1"
 
-    ' 4. Секция A-D: список паттернов (заголовки «Паттерн», «Типы»,
-    '    «Количество», «Итерация» в строке 2; ниже — пустые строки ввода,
+    ' 4. Секция A-D: список паттернов (заголовки "Паттерн", "Типы",
+    '    "Количество", "Итерация" в строке 2; ниже - пустые строки ввода,
     '    заполняются кодом позже, напр. разбором ответа ИИ - W7).
     '    Если заголовков нет - они дописываются в строку 2; существующие
     '    значения ячеек не трогаются.
@@ -149,9 +156,9 @@ Public Sub EnsurePatternsSheet()
     EnsureHeaderCell ws, 2, 3, HDR_C
     EnsureHeaderCell ws, 2, 4, HDR_D
 
-    ' 5. Секция H-O: ИСКЛЮЧЕНИЯ паттернов (заголовки «Область», «Поле»,
-    '    «Тип матчинга», «Значение», «Действие», «Примеры», «Причина»,
-    '    «Статус» в строке 2; дописываются, если отсутствуют)
+    ' 5. Секция H-O: ИСКЛЮЧЕНИЯ паттернов (заголовки "Область", "Поле",
+    '    "Тип матчинга", "Значение", "Действие", "Примеры", "Причина",
+    '    "Статус" в строке 2; дописываются, если отсутствуют)
     EnsureHeaderCell ws, 2, 8, HDR_H
     EnsureHeaderCell ws, 2, 9, HDR_I
     EnsureHeaderCell ws, 2, 10, HDR_J
@@ -162,16 +169,16 @@ Public Sub EnsurePatternsSheet()
     EnsureHeaderCell ws, 2, 15, HDR_O
 
     ' 6. Предзаполнение стартовых правил исключений (матрица 8 строк x
-    '    8 колонок H..O; PRE-04c-fix2: старая строка правила «Год»
+    '    8 колонок H..O; PRE-04c-fix2: старая строка правила "Год"
     '    удалена) - ТОЛЬКО при создании нового листа, со строки 3
-    '    (строка 2 — заголовки). Для существующего листа правила НЕ
+    '    (строка 2 - заголовки). Для существующего листа правила НЕ
     '    перезаписываются: пользовательские данные сохраняются; при этом
     '    выполняется точечная сверка значений предзаполнения с эталоном
     '    фикса (см. шаг 6.1).
     If created Then
-        ' PRE-04c-fix2: старая строка правила «Год» (Категория, Отображаемое,
-        ' Точное, Год) удалена — осталась только одна строка для правила
-        ' «Год»: Тип / Отображаемое / Маска / Год* / ВКЛЮЧАТЬ.
+        ' PRE-04c-fix2: старая строка правила "Год" (Категория, Отображаемое,
+        ' Точное, Год) удалена - осталась только одна строка для правила
+        ' "Год": Тип / Отображаемое / Маска / Год* / ВКЛЮЧАТЬ.
         excData = Array( _
             Array("Категория", "Отображаемое", "Точное", "Папки ЦИМ", "ВКЛЮЧАТЬ", _
                   "КЦИМ; ППЦИМ", "позиционный паттерн", "активно"), _
@@ -192,13 +199,13 @@ Public Sub EnsurePatternsSheet()
 
         For r = LBound(excData) To UBound(excData)
             For c = LBound(excData(r)) To UBound(excData(r))
-                ws.Cells(r + 3, c + 8).Value = CStr(excData(r)(c))
+                ws.Cells(r + 3, c + 8).value = CStr(excData(r)(c))
             Next c
         Next r
     Else
         ' 6.1. Точечная сверка предзаполнения на существующем листе
-        '      (PRE-04c-fix2): старая строка правила «Год» (Категория,
-        '      Отображаемое, Точное, Год) удаляется — все правила, лежащие
+        '      (PRE-04c-fix2): старая строка правила "Год" (Категория,
+        '      Отображаемое, Точное, Год) удаляется - все правила, лежащие
         '      ниже неё, поднимаются на одну строку вверх; если нижняя
         '      строка содержит копию старого эталона предзаполнения
         '      (не редактировалась пользователем), она очищается. После
@@ -208,9 +215,9 @@ Public Sub EnsurePatternsSheet()
         '      (до фикса); ячейки, изменённые пользователем или добавленные
         '      позже, не затрагиваются. Колонки H..O = 8..15.
         ShiftLegacyYearRule ws
-        SyncPrefillCell ws, 3, 8, "Категория", "Папки ЦИМ"     ' правило «Папки ЦИМ»
+        SyncPrefillCell ws, 3, 8, "Категория", "Папки ЦИМ"     ' правило "Папки ЦИМ"
         SyncPrefillCell ws, 4, 10, "маска", "Маска"            ' правило bim_*
-        ' Правило «Год» (вторая строка предзаполнения, PRE-04c-fix2):
+        ' Правило "Год" (вторая строка предзаполнения, PRE-04c-fix2):
         ' Область Тип, Поле Отображаемое, Тип матчинга Маска, Значение Год*,
         ' Действие ВКЛЮЧАТЬ, Примеры "Год 2024; Год 2025", Причина
         ' "позиционный паттерн", Статус активно.
@@ -227,7 +234,7 @@ Public Sub EnsurePatternsSheet()
     ' 7. Выпадающие списки (Validation) для колонок H, I, J, L, O
     '    (навешиваются всегда: если списки сбились - восстанавливаются;
     '     сами значения ячеек не изменяются).
-    '    PRE-04c-fix2: списки применяются начиная со строки 3 (строка 2 —
+    '    PRE-04c-fix2: списки применяются начиная со строки 3 (строка 2 -
     '    заголовки секции H-O, выпадающие списки на них не навешиваются).
     ApplyListValidation ws.Range("H3:H" & CStr(PATTERNS_LAST_INPUT_ROW)), "Тип,Категория"
     ApplyListValidation ws.Range("I3:I" & CStr(PATTERNS_LAST_INPUT_ROW)), "Отображаемое,Системное"
@@ -256,24 +263,24 @@ Public Sub EnsurePatternsSheet()
     '    (W7.1a: идемпотентно, без дубликатов, стиль TableStyleMedium6)
     Call EnsurePatternsListObject(ws)
 
-    ' 10. Защита листа: разблокированы только области ввода данных
-    '    (ячейки вне A2:D1000 и H2:O1000 блокируются заново — после
-    '     Unprotect свойство Locked могло быть сброшено пользователем)
-    ws.Cells.Locked = True
-    ws.Range("A2:D" & CStr(PATTERNS_LAST_INPUT_ROW)).Locked = False
-    ' PRE-04c-fix2: заголовки строки 2 секции H-O защищены (область ввода
-    ' данных — строки 3..1000, как и диапазоны Validation)
-    ws.Range("H3:O" & CStr(PATTERNS_LAST_INPUT_ROW)).Locked = False
-    ws.Protect Password:=PATTERNS_PASSWORD
+    ' 10. Защита листа ОТКЛЮЧЕНА (W-ANALYTIC-08-PARSE-DIAG-B):
+    ' ListObject не могут автоматически расширяться на защищённом листе
+    ' при ручном вводе данных под таблицей. Защита снята для обеспечения
+    ' корректной работы "Умных таблиц" с автоматическим расширением.
+    On Error Resume Next
+    ws.Unprotect Password:=PATTERNS_PASSWORD
+    On Error GoTo 0
 
     If created Then
-        WriteLog "EnsurePatternsSheet: лист '" & SHEET_NAME & "' создан " & _
+        Mod_Util.WriteLog "EnsurePatternsSheet: лист '" & SHEET_NAME & "' создан " & _
                  "(названия секций A1/H1, заголовки строки 2, предзаполнение " & _
-                 "исключений со строки 3, Validation, защита)"
+                 "исключений со строки 3, Validation, ListObject: " & _
+                 TBL_PATTERNS_LIST & " (A2:D3), " & TBL_PATTERNS_EXC & " (H2:O10), " & _
+                 "защита отключена для авто-расширения)"
     Else
-        WriteLog "EnsurePatternsSheet: лист '" & SHEET_NAME & "' обновлён без " & _
+        Mod_Util.WriteLog "EnsurePatternsSheet: лист '" & SHEET_NAME & "' обновлён без " & _
                  "очистки (проверены заголовки, восстановлены Validation и " & _
-                 "защита; данные A2:D1000 и H2:O1000 сохранены)"
+                 "ListObject; данные сохранены; защита отключена)"
     End If
     Exit Sub
 
@@ -318,9 +325,9 @@ Private Sub EnsureSectionTitle(ByVal ws As Worksheet, ByVal targetCell As String
                                ByVal titleText As String, ByVal mergeRange As String)
     Dim cur As String
     On Error GoTo FailHandler
-    cur = Trim(CStr(ws.Range(targetCell).Value))
+    cur = Trim(CStr(ws.Range(targetCell).value))
     If cur = "" Then
-        ws.Range(targetCell).Value = titleText
+        ws.Range(targetCell).value = titleText
     ElseIf StrComp(cur, titleText, vbTextCompare) <> 0 Then
         ' в ячейке названия секции уже есть значение (старый каркас или
         ' правка пользователя) - не трогаем данные
@@ -341,13 +348,13 @@ End Sub
 
 ' ---------------------------------------------------------------------------
 ' Проверяет, стоят ли заголовки каркаса в указанной строке: достаточно
-' совпадения A<row> = «Паттерн» или H<row> = «Область».
+' совпадения A<row> = "Паттерн" или H<row> = "Область".
 ' ---------------------------------------------------------------------------
 Private Function HasHeaderAt(ByVal ws As Worksheet, ByVal rowNum As Long) As Boolean
     On Error Resume Next
-    If Trim(CStr(ws.Cells(rowNum, 1).Value)) = HDR_A Then
+    If Trim(CStr(ws.Cells(rowNum, 1).value)) = HDR_A Then
         HasHeaderAt = True
-    ElseIf Trim(CStr(ws.Cells(rowNum, 8).Value)) = HDR_H Then
+    ElseIf Trim(CStr(ws.Cells(rowNum, 8).value)) = HDR_H Then
         HasHeaderAt = True
     End If
     On Error GoTo 0
@@ -362,9 +369,9 @@ Private Sub EnsureHeaderCell(ByVal ws As Worksheet, ByVal rowNum As Long, _
                              ByVal colNum As Long, ByVal hdrText As String)
     Dim cur As String
     On Error GoTo FailHandler
-    cur = Trim(CStr(ws.Cells(rowNum, colNum).Value))
+    cur = Trim(CStr(ws.Cells(rowNum, colNum).value))
     If cur = "" Then
-        ws.Cells(rowNum, colNum).Value = hdrText
+        ws.Cells(rowNum, colNum).value = hdrText
     End If
     Exit Sub
 FailHandler:
@@ -378,7 +385,7 @@ End Sub
 ' Перенос каркаса со старой раскладки PRE-04c (заголовки в строке 1,
 ' предзаполнение с строки 2) на новую (названия секций в строке 1,
 ' заголовки в строке 2, данные с строки 3). Строки 2..lastRow смещаются
-' вниз на одну строку вместе со значениями — данные сохраняются, ничего
+' вниз на одну строку вместе со значениями - данные сохраняются, ничего
 ' не удаляется. Объединения строк 1 снимаются вызывающей процедурой до
 ' переноса; названия секций дописываются в строку 1 после переноса.
 ' ---------------------------------------------------------------------------
@@ -387,8 +394,8 @@ Private Sub MigrateLegacyLayout(ByVal ws As Worksheet)
     Dim aLast As Long
     Dim hoLast As Long
     On Error GoTo FailHandler
-    aLast = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
-    hoLast = ws.Cells(ws.Rows.Count, 8).End(xlUp).Row
+    aLast = ws.Cells(ws.Rows.Count, 1).End(xlUp).row
+    hoLast = ws.Cells(ws.Rows.Count, 8).End(xlUp).row
     lastRow = aLast
     If hoLast > lastRow Then lastRow = hoLast
     If lastRow < 2 Then lastRow = 2   ' заголовки всё равно переносятся в строку 2
@@ -407,12 +414,12 @@ FailHandler:
 End Sub
 
 ' ---------------------------------------------------------------------------
-' Удаление старой строки правила «Год» (Категория / Отображаемое / Точное /
+' Удаление старой строки правила "Год" (Категория / Отображаемое / Точное /
 ' Год) на существующем листе (PRE-04c-fix2). Процедура срабатывает только
-' если в строке 4 секции H-O лежит именно старое эталонное правило «Год»
+' если в строке 4 секции H-O лежит именно старое эталонное правило "Год"
 ' (т.е. пользователь его не редактировал): все заполненные строки ниже
 ' (5..lastRow) поднимаются на одну строку вверх, последняя заполненная
-' строка очищается. Если правило изменено пользователем или отсутствует —
+' строка очищается. Если правило изменено пользователем или отсутствует -
 ' лист не затрагивается. Данные пользователя при этом сохраняются:
 ' удаляется только копия устаревшего эталона предзаполнения.
 ' ---------------------------------------------------------------------------
@@ -422,22 +429,22 @@ Private Sub ShiftLegacyYearRule(ByVal ws As Worksheet)
     Dim aLast As Long
     Dim srcRow As Long
     On Error GoTo FailHandler
-    ' проверка старого эталона правила «Год» в строке 4 (колонки H..O = 8..15)
-    If Trim(CStr(ws.Cells(4, 8).Value)) <> "Категория" Then Exit Sub
-    If Trim(CStr(ws.Cells(4, 9).Value)) <> "Отображаемое" Then Exit Sub
-    If StrComp(Trim(CStr(ws.Cells(4, 10).Value)), "Точное", vbBinaryCompare) <> 0 Then Exit Sub
-    If Trim(CStr(ws.Cells(4, 11).Value)) <> "Год" Then Exit Sub
-    If StrComp(Trim(CStr(ws.Cells(4, 12).Value)), "ВКЛЮЧАТЬ", vbBinaryCompare) <> 0 Then Exit Sub
+    ' проверка старого эталона правила "Год" в строке 4 (колонки H..O = 8..15)
+    If Trim(CStr(ws.Cells(4, 8).value)) <> "Категория" Then Exit Sub
+    If Trim(CStr(ws.Cells(4, 9).value)) <> "Отображаемое" Then Exit Sub
+    If StrComp(Trim(CStr(ws.Cells(4, 10).value)), "Точное", vbBinaryCompare) <> 0 Then Exit Sub
+    If Trim(CStr(ws.Cells(4, 11).value)) <> "Год" Then Exit Sub
+    If StrComp(Trim(CStr(ws.Cells(4, 12).value)), "ВКЛЮЧАТЬ", vbBinaryCompare) <> 0 Then Exit Sub
     ' границы диапазона секции H-O (строки 3..PATTERNS_LAST_INPUT_ROW)
-    hoLast = ws.Cells(ws.Rows.Count, 8).End(xlUp).Row
-    aLast = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    hoLast = ws.Cells(ws.Rows.Count, 8).End(xlUp).row
+    aLast = ws.Cells(ws.Rows.Count, 1).End(xlUp).row
     lastRow = hoLast
     If aLast > lastRow Then lastRow = aLast
     If lastRow > PATTERNS_LAST_INPUT_ROW Then lastRow = PATTERNS_LAST_INPUT_ROW
     ' поднять строки 5..lastRow на одну строку вверх (значения сохраняются)
     For srcRow = 5 To lastRow
-        ws.Range(ws.Cells(srcRow - 1, 8), ws.Cells(srcRow - 1, 15)).Value = _
-            ws.Range(ws.Cells(srcRow, 8), ws.Cells(srcRow, 15)).Value
+        ws.Range(ws.Cells(srcRow - 1, 8), ws.Cells(srcRow - 1, 15)).value = _
+            ws.Range(ws.Cells(srcRow, 8), ws.Cells(srcRow, 15)).value
     Next srcRow
     ' очистить нижнюю строку (копия предыдущей последней строки)
     ws.Range(ws.Cells(lastRow, 8), ws.Cells(lastRow, 15)).ClearContents
@@ -464,10 +471,10 @@ Private Sub SyncPrefillCell(ByVal ws As Worksheet, ByVal rowNum As Long, _
     Dim cur As String
     On Error GoTo FailHandler
     If rowNum < 3 Or rowNum > PATTERNS_LAST_INPUT_ROW Then Exit Sub
-    cur = Trim(CStr(ws.Cells(rowNum, colNum).Value))
+    cur = Trim(CStr(ws.Cells(rowNum, colNum).value))
     If cur <> "" And StrComp(cur, oldValue, vbBinaryCompare) = 0 Then
         If StrComp(cur, newValue, vbBinaryCompare) <> 0 Then
-            ws.Cells(rowNum, colNum).Value = newValue
+            ws.Cells(rowNum, colNum).value = newValue
         End If
     End If
     Exit Sub
@@ -479,14 +486,14 @@ FailHandler:
 End Sub
 
 ' ---------------------------------------------------------------------------
-' Возвращает Worksheet листа «Паттерны», если лист существует в книге;
+' Возвращает Worksheet листа "Паттерны", если лист существует в книге;
 ' если листа нет - Nothing. Только поиск, без создания и без изменения
 ' чего-либо (W7.1-A).
 ' ---------------------------------------------------------------------------
 Private Function GetPatternsSheetOrNull() As Worksheet
     Dim wsAny As Worksheet
     For Each wsAny In ThisWorkbook.Worksheets
-        If StrComp(wsAny.Name, SHEET_NAME, vbTextCompare) = 0 Then
+        If StrComp(wsAny.name, SHEET_NAME, vbTextCompare) = 0 Then
             Set GetPatternsSheetOrNull = wsAny
             Exit Function
         End If
@@ -495,7 +502,7 @@ Private Function GetPatternsSheetOrNull() As Worksheet
 End Function
 
 ' ---------------------------------------------------------------------------
-' Чтение одной ячейки секции H-O листа «Паттерны» (строка rowNum,
+' Чтение одной ячейки секции H-O листа "Паттерны" (строка rowNum,
 ' колонка colNum) с проверкой границ диапазона ввода
 ' (строки 3..PATTERNS_LAST_INPUT_ROW).
 ' Значение ячейки приводится к тексту через CStr + Trim (только чтение).
@@ -505,21 +512,21 @@ Private Function ExcCell(ByVal ws As Worksheet, ByVal rowNum As Long, _
     If rowNum < 3 Or rowNum > PATTERNS_LAST_INPUT_ROW Then
         ExcCell = ""
     Else
-        ExcCell = Trim(CStr(ws.Cells(rowNum, colNum).Value))
+        ExcCell = Trim(CStr(ws.Cells(rowNum, colNum).value))
     End If
 End Function
 
 ' ---------------------------------------------------------------------------
-' W7.1-A: GetPatternExceptions — чтение секции H-O («ИСКЛЮЧЕНИЯ
-' ПАТТЕРНОВ») листа «Паттерны» (только чтение: лист не изменяется,
+' W7.1-A: GetPatternExceptions - чтение секции H-O ("ИСКЛЮЧЕНИЯ
+' ПАТТЕРНОВ") листа "Паттерны" (только чтение: лист не изменяется,
 ' защита не снимается).
 '   Источник: заголовки в строке 2, данные со строки 3; колонки
 '   H=Область, I=Поле, J=Тип матчинга (Точное/Маска), K=Значение,
 '   L=Действие (ВКЛЮЧАТЬ/ИСКЛЮЧАТЬ), M=Примеры, N=Причина,
 '   O=Статус (активно/отменено).
 '   Фильтр: пропускаются пустые строки и строки, где O <> "активно".
-'   Формат строк вывода (J = "Маска" — с суффиксом " (маска)" и
-'   оператором "~"; иначе — "Точное" и оператор "="):
+'   Формат строк вывода (J = "Маска" - с суффиксом " (маска)" и
+'   оператором "~"; иначе - "Точное" и оператор "="):
 '     "- <H>: <I> = '<K>' -> <L>"          (I непусто, Точное)
 '     "- <H>: <I> ~ '<K>' -> <L> (маска)"  (I непусто, Маска)
 '     "- <H> = '<K>' -> <L>"               (I пусто, Точное)
@@ -527,7 +534,7 @@ End Function
 '   Первая строка результата (при наличии хотя бы одной строки):
 '   "Правила обработки паттернов:".
 '   Лист отсутствует или секция H-O пуста (нет ни одной активной строки)
-'   — вернуть "" и WriteWarning PT003.
+'   - вернуть "" и WriteWarning PT003.
 ' ---------------------------------------------------------------------------
 Public Function GetPatternExceptions() As String
     Dim ws As Worksheet
@@ -549,7 +556,7 @@ Public Function GetPatternExceptions() As String
 
     On Error GoTo ErrHandler
 
-    ' 1. Лист «Паттерны» (только чтение, без создания/подготовки)
+    ' 1. Лист "Паттерны" (только чтение, без создания/подготовки)
     Set ws = GetPatternsSheetOrNull()
     If ws Is Nothing Then
         WriteWarning "PT003", "GetPatternExceptions: лист '" & SHEET_NAME & _
@@ -558,7 +565,7 @@ Public Function GetPatternExceptions() As String
     End If
 
     ' 2. Нижняя граница данных секции H-O (колонка H = 8)
-    lastRow = ws.Cells(ws.Rows.Count, 8).End(xlUp).Row
+    lastRow = ws.Cells(ws.Rows.Count, 8).End(xlUp).row
     If lastRow > PATTERNS_LAST_INPUT_ROW Then lastRow = PATTERNS_LAST_INPUT_ROW
 
     ' 3. Обход данных (со строки 3): фильтр пустых строк и O <> "активно"
@@ -579,7 +586,7 @@ Public Function GetPatternExceptions() As String
                     sOp = "~"
                     sSuffix = " (маска)"
                 Else
-                    ' "Точное" и любые прочие значения J — формат «Точное»
+                    ' "Точное" и любые прочие значения J - формат "Точное"
                     sOp = "="
                     sSuffix = ""
                 End If
@@ -625,15 +632,15 @@ ErrHandler:
 End Function
 
 ' ---------------------------------------------------------------------------
-' W7.1-A: GetKnownPatterns — чтение секции A-D («СПИСОК ПАТТЕРНОВ») листа
-' «Паттерны» (только чтение: лист не изменяется, защита не снимается).
+' W7.1-A: GetKnownPatterns - чтение секции A-D ("СПИСОК ПАТТЕРНОВ") листа
+' "Паттерны" (только чтение: лист не изменяется, защита не снимается).
 '   Источник: заголовки в строке 2, данные со строки 3; используется
-'   только колонка A («Паттерн»).
+'   только колонка A ("Паттерн").
 '   Формат: заголовок "Известные паттерны:" (первой строкой, только если
 '   есть хотя бы одна строка данных), далее каждая непустая строка
 '   колонки A с префиксом "- ".
-'   Пустая секция A-D — вернуть "" (без заголовка, без предупреждения);
-'   лист отсутствует — вернуть "" и WriteWarning PT003.
+'   Пустая секция A-D - вернуть "" (без заголовка, без предупреждения);
+'   лист отсутствует - вернуть "" и WriteWarning PT003.
 ' ---------------------------------------------------------------------------
 Public Function GetKnownPatterns() As String
     Dim ws As Worksheet
@@ -647,7 +654,7 @@ Public Function GetKnownPatterns() As String
 
     On Error GoTo ErrHandler
 
-    ' 1. Лист «Паттерны» (только чтение, без создания/подготовки)
+    ' 1. Лист "Паттерны" (только чтение, без создания/подготовки)
     Set ws = GetPatternsSheetOrNull()
     If ws Is Nothing Then
         WriteWarning "PT003", "GetKnownPatterns: лист '" & SHEET_NAME & _
@@ -656,7 +663,7 @@ Public Function GetKnownPatterns() As String
     End If
 
     ' 2. Нижняя граница данных секции A-D (колонка A = 1)
-    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).row
     If lastRow > PATTERNS_LAST_INPUT_ROW Then lastRow = PATTERNS_LAST_INPUT_ROW
 
     ' 3. Обход данных (со строки 3): непустые значения колонки A
@@ -664,7 +671,7 @@ Public Function GetKnownPatterns() As String
     sOut = ""
     For r = 3 To lastRow
         If r >= 3 And r <= PATTERNS_LAST_INPUT_ROW Then
-            pat = Trim(CStr(ws.Cells(r, 1).Value))
+            pat = Trim(CStr(ws.Cells(r, 1).value))
             If pat <> "" Then
                 If Not hasData Then
                     sOut = "Известные паттерны:"
@@ -692,43 +699,126 @@ ErrHandler:
 End Function
 
 ' ---------------------------------------------------------------------------
-' W7.1a: Обеспечивает наличие умной таблицы (ListObject) на листе «Паттерны».
-' Идемпотентна: если таблица с именем PATTERNS_TABLE_NAME существует,
-' проверяет и при необходимости расширяет её диапазон до PATTERNS_LAST_INPUT_ROW.
-' Если таблицы нет — создаёт её на диапазоне A2:O<PATTERNS_LAST_INPUT_ROW>.
-' Стиль таблицы: TableStyleMedium6 (как в tblAnomalies).
+' Создание/обновление ДВУХ независимых умных таблиц (ListObject) на листе
+' "Паттерны" с МИНИМАЛЬНЫМИ начальными диапазонами:
+'   - tblPatternsList: A2:D3 (заголовки + 1 строка для данных)
+'   - tblPatternsExc: H2:O10 (заголовки + 8 строк предзаполнения)
+' Таблицы автоматически расширяются при добавлении строк (ListRows.Add)
+' или при ручном вводе данных под таблицей.
+' Идемпотентно: если таблицы существуют, проверяет и при необходимости
+' изменяет их начальные диапазоны. Если таблицы слились или перекрываются,
+' принудительно разъединяет их с сохранением данных пользователя.
+' Fallback: если создание двух ListObject вызывает ошибки, переходит к
+' простым таблицам (форматирование без ListObject).
 ' ---------------------------------------------------------------------------
 Private Sub EnsurePatternsListObject(ByVal ws As Worksheet)
-    Dim lo As ListObject
-    Dim targetRange As Range
-    Dim tblName As String
+    Dim loList As ListObject
+    Dim loExc As ListObject
+    Dim rangeList As Range
+    Dim rangeExc As Range
+    Dim loAny As ListObject
+    Dim dataSaved As Boolean
+    Dim listData As Variant
+    Dim excData As Variant
+    Dim lastRowList As Long
+    Dim lastRowExc As Long
     
-    tblName = PATTERNS_TABLE_NAME
-    Set targetRange = ws.Range("A2:O" & CStr(PATTERNS_LAST_INPUT_ROW))
+    On Error GoTo ErrHandler
     
+    ' Минимальные начальные диапазоны (ListObject расширится автоматически)
+    Set rangeList = ws.Range("A2:D3")  ' Заголовки + 1 строка
+    Set rangeExc = ws.Range("H2:O10")  ' Заголовки + 8 строк предзаполнения
+    
+    ' 1. Проверка на слияние таблиц: удаляем все ListObject, диапазоны
+    '    которых пересекаются с A2:D... или H2:O..., сохраняя данные.
+    If ws.ListObjects.Count > 0 Then
+        dataSaved = False
+        
+        ' Находим последнюю строку с данными в каждой секции
+        lastRowList = ws.Cells(ws.Rows.Count, 1).End(xlUp).row
+        If lastRowList < 3 Then lastRowList = 3
+        lastRowExc = ws.Cells(ws.Rows.Count, 8).End(xlUp).row
+        If lastRowExc < 3 Then lastRowExc = 3
+        
+        For Each loAny In ws.ListObjects
+            ' Проверяем перекрытие с целевыми диапазонами
+            If Not Application.Intersect(loAny.Range, ws.Range("A2:D" & CStr(lastRowList))) Is Nothing Or _
+               Not Application.Intersect(loAny.Range, ws.Range("H2:O" & CStr(lastRowExc))) Is Nothing Then
+                ' Сохраняем данные перед удалением (только при первом пересечении)
+                If Not dataSaved Then
+                    If lastRowList >= 3 Then
+                        listData = ws.Range("A3:D" & CStr(lastRowList)).value
+                    End If
+                    If lastRowExc >= 3 Then
+                        excData = ws.Range("H3:O" & CStr(lastRowExc)).value
+                    End If
+                    dataSaved = True
+                End If
+                loAny.Delete
+            End If
+        Next loAny
+        
+        ' Восстанавливаем данные после удаления конфликтующих ListObject
+        If dataSaved Then
+            If Not IsEmpty(listData) Then
+                ws.Range("A3:D" & CStr(lastRowList)).value = listData
+            End If
+            If Not IsEmpty(excData) Then
+                ws.Range("H3:O" & CStr(lastRowExc)).value = excData
+            End If
+            Mod_Util.WriteWarning "PT003", "EnsurePatternsListObject: удалены " & _
+                "перекрывающиеся ListObject, данные восстановлены"
+        End If
+    End If
+    
+    ' 2. Создание/обновление ListObject для списка паттернов (A2:D3 минимум)
+    Set loList = Nothing
     On Error Resume Next
-    Set lo = ws.ListObjects(tblName)
-    On Error GoTo 0
+    Set loList = ws.ListObjects(TBL_PATTERNS_LIST)
+    On Error GoTo ErrHandler
     
-    If lo Is Nothing Then
-        ' Таблица не найдена — создаём новую
-        On Error GoTo ErrHandler
-        Set lo = ws.ListObjects.Add(xlSrcRange, targetRange, , xlYes)
-        lo.Name = tblName
-        lo.TableStyle = "TableStyleMedium6"
-        On Error GoTo 0
+    If loList Is Nothing Then
+        Set loList = ws.ListObjects.Add(xlSrcRange, rangeList, , xlYes)
+        loList.name = TBL_PATTERNS_LIST
+        loList.TableStyle = "TableStyleMedium6"
+        Mod_Util.WriteLog "EnsurePatternsListObject: создана таблица '" & _
+            TBL_PATTERNS_LIST & "' (минимальный диапазон A2:D3, расширяемая)"
     Else
-        ' Таблица существует — проверяем и при необходимости расширяем диапазон
-        If lo.Range.Address <> targetRange.Address Then
-            On Error GoTo ErrHandler
-            lo.Resize targetRange
-            On Error GoTo 0
+        ' Если таблица существует, но диапазон отличается, обновляем до минимального
+        ' (данные за пределами минимального диапазона сохраняются, ListObject расширится автоматически)
+        If loList.Range.Rows.Count < rangeList.Rows.Count Then
+            loList.Resize rangeList
+        End If
+    End If
+    
+    ' 3. Создание/обновление ListObject для исключений (H2:O10 минимум)
+    Set loExc = Nothing
+    On Error Resume Next
+    Set loExc = ws.ListObjects(TBL_PATTERNS_EXC)
+    On Error GoTo ErrHandler
+    
+    If loExc Is Nothing Then
+        Set loExc = ws.ListObjects.Add(xlSrcRange, rangeExc, , xlYes)
+        loExc.name = TBL_PATTERNS_EXC
+        loExc.TableStyle = "TableStyleMedium6"
+        Mod_Util.WriteLog "EnsurePatternsListObject: создана таблица '" & _
+            TBL_PATTERNS_EXC & "' (минимальный диапазон H2:O10, расширяемая)"
+    Else
+        If loExc.Range.Rows.Count < rangeExc.Rows.Count Then
+            loExc.Resize rangeExc
         End If
     End If
     
     Exit Sub
+    
 ErrHandler:
-    WriteWarning "PT002", "EnsurePatternsListObject: не удалось создать или изменить " & _
-               "умную таблицу '" & tblName & "'. Ошибка: " & Err.Description
+    ' Fallback: если создание ListObject не удалось, продолжаем без них
+    Mod_Util.WriteWarning "PT002", "EnsurePatternsListObject: не удалось создать " & _
+        "ListObject, переход к простым таблицам. Ошибка: " & Err.Description
     Err.Clear
+    ' Удаляем частично созданные ListObject, если они есть
+    On Error Resume Next
+    If Not loList Is Nothing Then loList.Delete
+    If Not loExc Is Nothing Then loExc.Delete
+    On Error GoTo 0
 End Sub
