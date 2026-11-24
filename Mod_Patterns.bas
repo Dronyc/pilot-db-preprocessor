@@ -106,7 +106,7 @@ Public Sub EnsurePatternsSheet()
 
     Set wb = ThisWorkbook
 
-    ' 1. Поиск листа "Паттерны"; если нет - создать в конце книги
+    ' 1. Поиск листа «Паттерны»; если нет - создать в конце книги
     For Each wsAny In wb.Worksheets
         If StrComp(wsAny.name, SHEET_NAME, vbTextCompare) = 0 Then
             Set ws = wsAny
