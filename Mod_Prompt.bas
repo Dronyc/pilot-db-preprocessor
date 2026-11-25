@@ -2451,7 +2451,7 @@ Private Sub MakeNextStepPrompt_FromSheet()
     successMsg = "Определён следующий шаг: " & nextStep & vbCrLf
     successMsg = successMsg & "Создана папка: " & stepFolder & vbCrLf
     successMsg = successMsg & "Сгенерирован промт: Промт_шага.md" & vbCrLf
-    successMsg = successMsg & "Обновлён счётчик: «Номер последнего сгенерированного шага» = " & nextStep
+    successMsg = successMsg & "Обновлён счётчик: ""Номер последнего сгенерированного шага"" = " & nextStep
     
     If warnP006 <> "" Then
         successMsg = successMsg & vbCrLf & vbCrLf & "Предупреждение: " & warnP006
@@ -3894,9 +3894,9 @@ Public Sub CommandGenerateTables()
                 Set schemaWb = Nothing
             End If
             Mod_Util.WriteLog "CommandGenerateTables: все типы уже распределены по шагам - промт 00_3 не сформирован."
-            MsgBox "Все типы уже распределены по шагам (колонка «№шага/подшага» заполнена)." & vbCrLf & _
+            MsgBox "Все типы уже распределены по шагам (колонка ""№шага/подшага"" заполнена)." & vbCrLf & _
                    "Новый промт 00_3 не требуется: дождитесь разбора ответа ИИ (кнопка 14) " & _
-                   "или переходите к промтам шагов («Сделать промт следующего шага»).", _
+                   "или переходите к промтам шагов (""Сделать промт следующего шага"").", _
                    vbInformation, "Сформировать таблицы"
             Exit Sub
         End If
