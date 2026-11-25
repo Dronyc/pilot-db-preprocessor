@@ -1,6 +1,9 @@
 Attribute VB_Name = "Mod_Prompt"
 Option Explicit
 
+' FIX-05: Унифицированное расширение для генерируемых файлов промтов
+Private Const PROMPT_EXT As String = ".txt"
+
 ' ============================================================================
 ' Модуль промптов: формирование промптов для следующего шага и исправлений,
 ' чтение списка и текущей позиции шагов.
@@ -2436,7 +2439,19 @@ Private Sub MakeNextStepPrompt_FromSheet()
     result = ReplaceIfPresent(result, "{{КОНФИГУРАЦИЯ_ФАЙЛ}}", configFile)
     result = ReplaceIfPresent(result, "{{ФАЙЛЫ_ДОП_ДАННЫХ}}", addFilesList)
     
-    SaveTextFileUtf8 stepFolder & "\Промт_шага.md", result
+    ' FIX-06: Защита от молчаливой перезаписи
+    Dim stepPromptPath As String
+    stepPromptPath = stepFolder & "\Промт_шага" & PROMPT_EXT
+    If FileExistsSafe(stepPromptPath) Then
+        Mod_Util.WriteError "P005", "MakeNextStepPrompt_FromSheet: промт шага уже существует: " & stepPromptPath
+        MsgBox "Ошибка P005: промт шага уже существует." & vbCrLf & stepPromptPath & vbCrLf & _
+               "Переименуйте или удалите существующий файл.", _
+               vbCritical, "Следующий шаг"
+        If Not wasOpen Then schemaWb.Close SaveChanges:=False
+        Exit Sub
+    End If
+    
+    SaveTextFileUtf8 stepPromptPath, result
     ' ==============================================
 
     ' 3. Закрыть книгу схемы, если она была открыта этой процедурой
@@ -2450,7 +2465,7 @@ Private Sub MakeNextStepPrompt_FromSheet()
     Dim successMsg As String
     successMsg = "Определён следующий шаг: " & nextStep & vbCrLf
     successMsg = successMsg & "Создана папка: " & stepFolder & vbCrLf
-    successMsg = successMsg & "Сгенерирован промт: Промт_шага.md" & vbCrLf
+    successMsg = successMsg & "Сгенерирован промт: Промт_шага" & PROMPT_EXT & vbCrLf
     successMsg = successMsg & "Обновлён счётчик: ""Номер последнего сгенерированного шага"" = " & nextStep
     
     If warnP006 <> "" Then
@@ -2610,11 +2625,22 @@ Public Sub MakeFixPrompt()
 
     ' 9. Сохранение готового промта
     EnsureFolder readyPath
-    SaveTextFileUtf8 readyPath & "\Промт_исправление_шаг_" & current & ".md", result
-
+    
+    ' FIX-06: Защита от молчаливой перезаписи
+    Dim fixPromptPath As String
+    fixPromptPath = readyPath & "\Промт_исправление_шаг_" & current & PROMPT_EXT
+    If FileExistsSafe(fixPromptPath) Then
+        Mod_Util.WriteError "P005", "MakeFixPrompt: промт исправления уже существует: " & fixPromptPath
+        MsgBox "Ошибка P005: промт исправления уже существует." & vbCrLf & fixPromptPath & vbCrLf & _
+               "Переименуйте или удалите существующий файл.", _
+               vbCritical, "Промт исправления"
+        Exit Sub
+    End If
+    
+    SaveTextFileUtf8 fixPromptPath, result
     Mod_Util.WriteLog "MakeFixPrompt: сформирован промт исправления шага " & current
     MsgBox "Сформирован промт исправления шага " & current & ":" & vbCrLf & _
-           readyPath & "\Промт_исправление_шаг_" & current & ".md", _
+           readyPath & "\Промт_исправление_шаг_" & current & PROMPT_EXT, _
            vbInformation, "Промт исправления"
     Exit Sub
 
@@ -2779,10 +2805,21 @@ Public Sub BuildPrompt02Patterns()
     result = ReplaceIfPresent(result, "{{ТАБЛИЦА_ИЗВЕСТНЫХ_GUID}}", regCoverage)
 
     EnsureFolder promptsPath
-    SaveTextFileUtf8 promptsPath & "\Промт_шаг_00_2_Паттерны.md", result
-
-    Mod_Util.WriteLog "BuildPrompt02Patterns: сформирован Промт_шаг_00_2_Паттерны.md"
-    MsgBox "Сформирован промт:" & vbCrLf & promptsPath & "\Промт_шаг_00_2_Паттерны.md", vbInformation, "Промт №0.2"
+    
+    ' FIX-06: Защита от молчаливой перезаписи
+    Dim pat02Path As String
+    pat02Path = promptsPath & "\Промт_шаг_00_2_Паттерны" & PROMPT_EXT
+    If FileExistsSafe(pat02Path) Then
+        Mod_Util.WriteError "P005", "BuildPrompt02Patterns: промт уже существует: " & pat02Path
+        MsgBox "Ошибка P005: промт уже существует." & vbCrLf & pat02Path & vbCrLf & _
+               "Переименуйте или удалите существующий файл.", _
+               vbCritical, "Промт №0.2"
+        Exit Sub
+    End If
+    
+    SaveTextFileUtf8 pat02Path, result
+    Mod_Util.WriteLog "BuildPrompt02Patterns: сформирован Промт_шаг_00_2_Паттерны" & PROMPT_EXT
+    MsgBox "Сформирован промт:" & vbCrLf & promptsPath & "\Промт_шаг_00_2_Паттерны" & PROMPT_EXT, vbInformation, "Промт №0.2"
     Exit Sub
 
 ErrHandler:
@@ -2885,10 +2922,21 @@ Public Sub BuildPrompt03Profile()
 
     ' Сохранение (W7.2-NOTE-5: строго в 04_Промты, НЕ в папку шага)
     EnsureFolder promptsPath
-    SaveTextFileUtf8 promptsPath & "\Промт_шаг_00_3_" & profile & ".md", result
-
-    Mod_Util.WriteLog "BuildPrompt03Profile: сформирован Промт_шаг_00_3_" & profile & ".md"
-    MsgBox "Сформирован промт:" & vbCrLf & promptsPath & "\Промт_шаг_00_3_" & profile & ".md", vbInformation, "Промт №0.3"
+    
+    ' FIX-06: Защита от молчаливой перезаписи
+    Dim prof03Path As String
+    prof03Path = promptsPath & "\Промт_шаг_00_3_" & profile & PROMPT_EXT
+    If FileExistsSafe(prof03Path) Then
+        Mod_Util.WriteError "P005", "BuildPrompt03Profile: промт уже существует: " & prof03Path
+        MsgBox "Ошибка P005: промт уже существует." & vbCrLf & prof03Path & vbCrLf & _
+               "Переименуйте или удалите существующий файл.", _
+               vbCritical, "Промт №0.3"
+        Exit Sub
+    End If
+    
+    SaveTextFileUtf8 prof03Path, result
+    Mod_Util.WriteLog "BuildPrompt03Profile: сформирован Промт_шаг_00_3_" & profile & PROMPT_EXT
+    MsgBox "Сформирован промт:" & vbCrLf & promptsPath & "\Промт_шаг_00_3_" & profile & PROMPT_EXT, vbInformation, "Промт №0.3"
     Exit Sub
 
 ErrHandler:
@@ -3784,6 +3832,10 @@ Public Sub CommandGenerateTables()
     promptsPath = root & "\04_Промты\Шаблоны"
     fragmentsPath = root & "\02_Подготовка данных\05_Фрагменты шагов"
     archivePath = root & "\02_Подготовка данных\Архив"
+    
+    ' FIX-10: Гарантированное создание папок до первой попытки записи
+    EnsureFolder fragmentsPath
+    EnsureFolder archivePath
 
     ' 1. Выбор шаблона по настройке "Разбивка на паттерны"
     patternsState = Mod_Util.GetSettingText("PatternsState", "Нет")
@@ -3912,10 +3964,26 @@ Public Sub CommandGenerateTables()
     End If
 
     ' 6. Сохранение (папка создаётся при необходимости)
-    EnsureFolder fragmentsPath
-    fileName = "Prompt_00_" & promptType & "_iter" & CStr(nextIter) & ".md"
+    fileName = "Prompt_00_" & promptType & "_iter" & CStr(nextIter) & PROMPT_EXT
     filePath = fragmentsPath & "\" & fileName
+    
+    ' FIX-06: Защита от молчаливой перезаписи существующего файла
+    If FileExistsSafe(filePath) Then
+        Mod_Util.WriteError "P005", "CommandGenerateTables: файл уже существует (возможно, создан вручную): " & filePath
+        MsgBox "Ошибка P005: файл уже существует." & vbCrLf & filePath & vbCrLf & _
+               "Переименуйте или удалите существующий файл перед повторной генерацией.", _
+               vbCritical, "Сформировать таблицы"
+        Exit Sub
+    End If
+    
     SaveTextFileUtf8 filePath, result
+    
+    ' FIX-04: Проверка фактического создания файла для исключения ложного успеха
+    If Not FileExistsSafe(filePath) Then
+        Mod_Util.WriteError "P005", "CommandGenerateTables: файл не создан (возможно, открыт или нет прав): " & filePath
+        MsgBox "Ошибка P005: промт не сохранён." & vbCrLf & filePath, vbCritical, "Сформировать таблицы"
+        Exit Sub
+    End If
 
     ' 7. Уведомление и лог
     Dim msg As String
@@ -3971,9 +4039,15 @@ Private Function GetNextIterationNumber(ByVal folderFragments As String, ByVal f
         fileArr = GetFileListArray(folderFragments)
         For i = LBound(fileArr) To UBound(fileArr)
             fName = CStr(fileArr(i))
-            If Left$(fName, Len(prefix)) = prefix And Right$(fName, 3) = ".md" Then
-                numStr = Mid$(fName, Len(prefix) + 1, Len(fName) - Len(prefix) - 3)
-                If IsNumeric(numStr) Then
+            If StrComp(Left$(fName, Len(prefix)), prefix, vbTextCompare) = 0 Then
+                Dim dotPos As Long
+                numStr = Mid$(fName, Len(prefix) + 1)
+                dotPos = InStrRev(numStr, ".")
+                If dotPos > 1 Then
+                    numStr = Left$(numStr, dotPos - 1)
+                End If
+                ' Простая проверка, что строка состоит только из цифр (защита от 1.5, 1e3)
+                If IsNumeric(numStr) And InStr(numStr, ".") = 0 And InStr(LCase$(numStr), "e") = 0 Then
                     If CLng(numStr) > maxN Then maxN = CLng(numStr)
                 End If
             End If
@@ -3985,9 +4059,14 @@ Private Function GetNextIterationNumber(ByVal folderFragments As String, ByVal f
         fileArr = GetFileListArray(folderArchive)
         For i = LBound(fileArr) To UBound(fileArr)
             fName = CStr(fileArr(i))
-            If Left$(fName, Len(prefix)) = prefix And Right$(fName, 3) = ".md" Then
-                numStr = Mid$(fName, Len(prefix) + 1, Len(fName) - Len(prefix) - 3)
-                If IsNumeric(numStr) Then
+            If StrComp(Left$(fName, Len(prefix)), prefix, vbTextCompare) = 0 Then
+                numStr = Mid$(fName, Len(prefix) + 1)
+                dotPos = InStrRev(numStr, ".")
+                If dotPos > 1 Then
+                    numStr = Left$(numStr, dotPos - 1)
+                End If
+                ' Простая проверка, что строка состоит только из цифр (защита от 1.5, 1e3)
+                If IsNumeric(numStr) And InStr(numStr, ".") = 0 And InStr(LCase$(numStr), "e") = 0 Then
                     If CLng(numStr) > maxN Then maxN = CLng(numStr)
                 End If
             End If
