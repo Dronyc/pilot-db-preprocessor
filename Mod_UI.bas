@@ -610,8 +610,15 @@ Public Sub OpenLogsFolder_Click()
     Dim p As String
     On Error GoTo ErrHandler
     p = Mod_Util.GetLogsFolder()
-    Mod_Util.OpenFolderInExplorer p
-    Mod_Util.WriteLog "Открыта папка логов: " & p
+    
+    ' FIX-16: Проверка честного статуса открытия папки
+    If Mod_Util.OpenFolderInExplorer(p) Then
+        Mod_Util.WriteLog "Открыта папка логов: " & p
+    Else
+        Mod_Util.WriteLog "Не удалось открыть папку логов (путь пуст или недоступен): " & p
+        MsgBox "Не удалось открыть папку: " & p, vbExclamation, "Открытие папки"
+    End If
+    
     Exit Sub
 ErrHandler:
     Mod_Util.WriteLog "Ошибка в OpenLogsFolder_Click: " & Err.Description

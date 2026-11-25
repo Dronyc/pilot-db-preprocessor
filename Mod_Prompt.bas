@@ -1602,11 +1602,14 @@ Private Sub ApplyCorrectionsBlock(ByRef resultText As String, ByVal nn As String
 
     On Error GoTo ErrHandler
 
-    ' --- 1. Предыдущая версия промта шага NN --------------------------------
-    candidates(1) = root & "\04_Промты\Промт_шаг_" & nn & ".md"
-    candidates(2) = root & "\04_Промты\Промт_шаг_" & Right$("0" & nn, 2) & ".md"
-    candidates(3) = root & "\03_Результаты генерации\04_Промты_готовые\Промт_шаг_" & nn & ".md"
-    candidates(4) = root & "\03_Результаты генерации\04_Промты_готовые\Промт_шаг_" & Right$("0" & nn, 2) & ".md"
+    ' --- 1. Предыдущая версия промта шага NN (FIX-21: синхронизация с реальным путём генерации) ---
+    ' Ищем Промт_шага.txt в папке конкретного шага
+    Dim stepsPath As String
+    stepsPath = root & "\03_Результаты генерации\01_По шагам\Шаг_" & nn
+    candidates(1) = stepsPath & "\Промт_шага" & PROMPT_EXT
+    candidates(2) = "" ' Оставляем пустыми, так как путь теперь единый и однозначный
+    candidates(3) = ""
+    candidates(4) = ""
     prevText = ""
     foundPath = ""
     For ci = 1 To 4
@@ -3198,12 +3201,24 @@ Public Sub CommandParseAiResponse()
                     If Trim(CStr(vCsvLinesW(iPatW))) <> "" Then
                         vLinePartsW = Split(CStr(vCsvLinesW(iPatW)), "|")
                         If IsArray(vLinePartsW) And UBound(vLinePartsW) >= 2 And UBound(vLinePartsW) <= 3 Then
-                            Set newRowW = tblListW.ListRows.Add
-                            newRowW.Range.Cells(1, 1).Value = CStr(vLinePartsW(0))  ' Паттерн
-                            newRowW.Range.Cells(1, 2).Value = CStr(vLinePartsW(1))  ' Типы
-                            newRowW.Range.Cells(1, 3).Value = CStr(vLinePartsW(2))  ' Количество
-                            If UBound(vLinePartsW) = 3 Then newRowW.Range.Cells(1, 4).Value = CStr(vLinePartsW(3))  ' Итерация
-                            patternsAddedW = patternsAddedW + 1
+                            ' FIX-15: Проверка на дубликат по колонке 1 ("Паттерн")
+                            Dim patExists As Boolean: patExists = False
+                            Dim rPatW As Long
+                            For rPatW = 1 To tblListW.ListRows.Count
+                                If StrComp(Trim(CStr(tblListW.ListRows(rPatW).Range.Cells(1, 1).Value)), Trim(CStr(vLinePartsW(0))), vbTextCompare) = 0 Then
+                                    patExists = True
+                                    Exit For
+                                End If
+                            Next rPatW
+                            
+                            If Not patExists Then
+                                Set newRowW = tblListW.ListRows.Add
+                                newRowW.Range.Cells(1, 1).Value = CStr(vLinePartsW(0))  ' Паттерн
+                                newRowW.Range.Cells(1, 2).Value = CStr(vLinePartsW(1))  ' Типы
+                                newRowW.Range.Cells(1, 3).Value = CStr(vLinePartsW(2))  ' Количество
+                                If UBound(vLinePartsW) = 3 Then newRowW.Range.Cells(1, 4).Value = CStr(vLinePartsW(3))  ' Итерация
+                                patternsAddedW = patternsAddedW + 1
+                            End If
                         End If
                     End If
                 Next iPatW
@@ -3215,16 +3230,35 @@ Public Sub CommandParseAiResponse()
                     If Trim(CStr(vCsvLinesW(iExcW))) <> "" Then
                         vLinePartsW = Split(CStr(vCsvLinesW(iExcW)), "|")
                         If IsArray(vLinePartsW) And UBound(vLinePartsW) >= 7 Then
-                            Set newRowW = tblExcW.ListRows.Add
-                            newRowW.Range.Cells(1, 1).Value = CStr(vLinePartsW(0))  ' Область
-                            newRowW.Range.Cells(1, 2).Value = CStr(vLinePartsW(1))  ' Поле
-                            newRowW.Range.Cells(1, 3).Value = CStr(vLinePartsW(2))  ' Тип матчинга
-                            newRowW.Range.Cells(1, 4).Value = CStr(vLinePartsW(3))  ' Значение
-                            newRowW.Range.Cells(1, 5).Value = CStr(vLinePartsW(4))  ' Действие
-                            newRowW.Range.Cells(1, 6).Value = CStr(vLinePartsW(5))  ' Примеры
-                            newRowW.Range.Cells(1, 7).Value = CStr(vLinePartsW(6))  ' Причина
-                            newRowW.Range.Cells(1, 8).Value = CStr(vLinePartsW(7))  ' Статус
-                            excAddedW = excAddedW + 1
+                            ' FIX-15: Проверка на дубликат по комбинации колонок 1, 2 и 4 ("Область", "Поле", "Значение")
+                            Dim excExists As Boolean: excExists = False
+                            Dim rExcW As Long
+                            For rExcW = 1 To tblExcW.ListRows.Count
+                                Dim c1 As String, c2 As String, c4 As String
+                                c1 = Trim(CStr(tblExcW.ListRows(rExcW).Range.Cells(1, 1).Value))
+                                c2 = Trim(CStr(tblExcW.ListRows(rExcW).Range.Cells(1, 2).Value))
+                                c4 = Trim(CStr(tblExcW.ListRows(rExcW).Range.Cells(1, 4).Value))
+                                
+                                If StrComp(c1, Trim(CStr(vLinePartsW(0))), vbTextCompare) = 0 And _
+                                   StrComp(c2, Trim(CStr(vLinePartsW(1))), vbTextCompare) = 0 And _
+                                   StrComp(c4, Trim(CStr(vLinePartsW(3))), vbTextCompare) = 0 Then
+                                    excExists = True
+                                    Exit For
+                                End If
+                            Next rExcW
+                            
+                            If Not excExists Then
+                                Set newRowW = tblExcW.ListRows.Add
+                                newRowW.Range.Cells(1, 1).Value = CStr(vLinePartsW(0))  ' Область
+                                newRowW.Range.Cells(1, 2).Value = CStr(vLinePartsW(1))  ' Поле
+                                newRowW.Range.Cells(1, 3).Value = CStr(vLinePartsW(2))  ' Тип матчинга
+                                newRowW.Range.Cells(1, 4).Value = CStr(vLinePartsW(3))  ' Значение
+                                newRowW.Range.Cells(1, 5).Value = CStr(vLinePartsW(4))  ' Действие
+                                newRowW.Range.Cells(1, 6).Value = CStr(vLinePartsW(5))  ' Примеры
+                                newRowW.Range.Cells(1, 7).Value = CStr(vLinePartsW(6))  ' Причина
+                                newRowW.Range.Cells(1, 8).Value = CStr(vLinePartsW(7))  ' Статус
+                                excAddedW = excAddedW + 1
+                            End If
                         End If
                     End If
                 Next iExcW
@@ -3524,14 +3558,17 @@ NextStatLine:
         EnsureFolder archivePath
         ArchiveFile fragmentsPath & "\" & aiResponseFile, archivePath, aiResponseFile
         
-        ' F3: Архивация промтов ТОЛЬКО распознанного типа
-        Dim targetPromptPrefix As String, archArr As Variant, k As Long, pf As String
+        ' F3: Архивация промтов и CSV-фрагментов ТОЛЬКО распознанного типа (FIX-08)
+        Dim targetPromptPrefix As String, schemaPrefix As String, archArr As Variant, k As Long, pf As String
         If isFormat002 Then
             targetPromptPrefix = "Prompt_00_2_"
+            schemaPrefix = "Schema_00_2_"
         ElseIf isFormat003 Then
             targetPromptPrefix = "Prompt_00_3_"
+            schemaPrefix = "Schema_00_3_"
         Else
             targetPromptPrefix = ""
+            schemaPrefix = ""
         End If
         
         If targetPromptPrefix <> "" Then
@@ -3541,6 +3578,9 @@ NextStatLine:
                     pf = CStr(archArr(k))
                     ' Архивируем промты с нужным префиксом независимо от расширения
                     If Left$(pf, Len(targetPromptPrefix)) = targetPromptPrefix Then
+                        ArchiveFile fragmentsPath & "\" & pf, archivePath, pf
+                    ' FIX-08: Архивация соответствующих CSV-фрагментов схемы
+                    ElseIf schemaPrefix <> "" And Left$(pf, Len(schemaPrefix)) = schemaPrefix Then
                         ArchiveFile fragmentsPath & "\" & pf, archivePath, pf
                     End If
                 Next k
@@ -4130,7 +4170,7 @@ Public Sub GenerateAnalyticalPrompts_Click()
             ' Пропуск: временные файлы Office (~$), уже созданные промты
             ' (Prompt_* - защита от рекурсии), файлы без расширения
             If Left$(fName, 2) <> "~$" And LCase$(Left$(fName, 7)) <> "prompt_" And InStr(fName, ".") > 0 Then
-                promptName = "Prompt_" & fName & ".txt"
+                promptName = "Prompt_" & fName & PROMPT_EXT
                 promptPath = configPath & "\" & promptName
                 ' FileExistsSafe (GetAttr) - НЕ сбрасывает итератор Dir()
                 If Not FileExistsSafe(promptPath) Then
@@ -4153,7 +4193,7 @@ Public Sub GenerateAnalyticalPrompts_Click()
             For i = LBound(fileArr) To UBound(fileArr)
                 fName = CStr(fileArr(i))
                 If Left$(fName, 2) <> "~$" And LCase$(Left$(fName, 7)) <> "prompt_" And InStr(fName, ".") > 0 Then
-                    promptName = "Prompt_" & fName & ".txt"
+                    promptName = "Prompt_" & fName & PROMPT_EXT
                     promptPath = CStr(p) & "\" & promptName
                     If Not FileExistsSafe(promptPath) Then
                         If tpl004 <> "" Then

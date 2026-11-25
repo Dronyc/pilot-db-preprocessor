@@ -505,26 +505,46 @@ Public Function FindConfigFile(ByVal folderPath As String) As String
 End Function
 
 ' Открывает указанную папку в проводнике Windows.
-' Если путь пустой или папки нет - молча выходит.
-' W-AV-REFACTOR, п.2: использование Application.FollowHyperlink вместо Shell
-' для предотвращения ложных срабатываний AV (запуск процессов через Shell —
-' типичный эвристический признак "опасного" макроса). FollowHyperlink —
-' нативное средство Excel: UI не ломается, фокус корректно передаётся
-' окну Проводника.
-Public Sub OpenFolderInExplorer(ByVal path As String)
-    If path = "" Then Exit Sub
-    If Dir(path, vbDirectory) = "" Then Exit Sub
-    On Error Resume Next
-    Application.FollowHyperlink path
-    ' Если переход по гиперссылке невозможен (например, сетевой путь
-    ' недоступен) — молча выходим: ошибка не должна прерывать UI.
-    If Err.Number <> 0 Then
-        WriteError "U005", "OpenFolderInExplorer: не удалось открыть папку " & path & _
-                           ". Ошибка: " & Err.Description
-        Err.Clear
+' FIX-16: замена Application.FollowHyperlink на Shell.Application для
+' корректного возврата статуса (True/False) и избежания проблем с сетевыми путями.
+' Если путь пустой или папки нет - возвращает False.
+Public Function OpenFolderInExplorer(ByVal path As String) As Boolean
+    OpenFolderInExplorer = False
+    If path = "" Then Exit Function
+    If Dir(path, vbDirectory) = "" Then Exit Function
+    
+    On Error GoTo ErrHandler
+    Dim shell As Object
+    Set shell = CreateObject("Shell.Application")
+    shell.Explore path
+    OpenFolderInExplorer = True
+    Exit Function
+    
+ErrHandler:
+    Mod_Util.WriteError "U005", "OpenFolderInExplorer: не удалось открыть папку " & path & _
+              Public Function OpenFolderInExplorer(ByVal path As String) As Boolean
+    OpenFolderInExplorer = False
+    If path = "" Then Exit Function
+    If Dir(path, vbDirectory) = "" Then Exit Function
+    
+    On Error GoTo ErrHandler
+    ' Используем Shell с explorer.exe для гарантированного открытия папки
+    Dim taskId As Long
+    taskId = Shell("explorer.exe """ & path & """", vbNormalFocus)
+    If taskId > 0 Then
+        OpenFolderInExplorer = True
+    Else
+        OpenFolderInExplorer = False
     End If
-    On Error GoTo 0
-End Sub
+    Exit Function
+    
+ErrHandler:
+    Mod_Util.WriteError "U005", "OpenFolderInExplorer: не удалось открыть папку " & path & _
+                               ". Ошибка: " & Err.Description
+    Err.Clear
+End Function                 ". Ошибка: " & Err.Description
+    Err.Clear
+End Function
 
 ' ---------------------------------------------------------------------------
 ' W-AV-REFACTOR, п.4: безопасное удаление файла.
