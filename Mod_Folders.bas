@@ -399,9 +399,13 @@ Public Function CheckSourceFolders() As Boolean
     Exit Function
 
 ErrHandler:
-    Mod_Util.WriteError "F005", "CheckSourceFolders: ошибка проверки. Ошибка: " & Err.Description
+    Dim errNum As Long, errDesc As String
+    errNum = Err.Number
+    errDesc = Err.Description
+    
+    Mod_Util.WriteError "F005", "CheckSourceFolders: ошибка проверки. Ошибка " & errNum & ": " & errDesc
     MsgBox "Ошибка F005: не удалось выполнить проверку исходных папок." & vbCrLf & _
-           Err.Description, vbCritical, "Проверка исходных данных"
+           errDesc, vbCritical, "Проверка исходных данных"
     Err.Clear
     CheckSourceFolders = False
 End Function

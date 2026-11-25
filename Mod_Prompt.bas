@@ -445,6 +445,10 @@ Public Sub SaveTextFileUtf8(ByVal filePath As String, ByVal content As String)
     Exit Sub
 
 ErrHandler:
+    Dim errNum As Long, errDesc As String
+    errNum = Err.Number
+    errDesc = Err.Description
+    
     ' Освободить поток, если он остался открытым.
     If Not stream Is Nothing Then
         On Error Resume Next
@@ -453,7 +457,7 @@ ErrHandler:
         On Error GoTo 0
     End If
     Mod_Util.WriteError "P005", "SaveTextFileUtf8: ошибка сохранения файла " & _
-        filePath & ". Ошибка: " & Err.Description
+        filePath & ". Ошибка " & errNum & ": " & errDesc
 End Sub
 
 ' Удаляет из начала файла filePath заголовок UTF-8 BOM (байты EF BB BF),
@@ -2460,11 +2464,16 @@ Private Sub MakeNextStepPrompt_FromSheet()
     Exit Sub
 
 ErrHandler:
+    Dim errNum As Long, errDesc As String
+    errNum = Err.Number
+    errDesc = Err.Description
+    
     On Error Resume Next
     If Not schemaWb Is Nothing And Not wasOpen Then schemaWb.Close SaveChanges:=False
     On Error GoTo 0
-    Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: " & Err.Description
-    MsgBox "Ошибка P002: " & Err.Description, vbCritical, "Следующий шаг"
+    
+    Mod_Util.WriteError "P002", "MakeNextStepPrompt_FromSheet: Ошибка " & errNum & ": " & errDesc
+    MsgBox "Ошибка P002: " & errDesc, vbCritical, "Следующий шаг"
     Err.Clear
 End Sub
 
@@ -2939,7 +2948,7 @@ Public Sub CommandParseAiResponse()
                 If Left$(f, 2) <> "~$" And StrComp(f, "Требуют_решения.md", vbTextCompare) <> 0 Then
                     matchingFilesCount = matchingFilesCount + 1
                     fPath = fragmentsPath & "\" & f
-                    fText = ReadTextFile(fPath)
+                    fText = NormalizeLineEndings(ReadTextFile(fPath))
                     If InStr(fText, MK_STP_START) > 0 Then
                         coll003.Add f
                     Else
@@ -3012,7 +3021,7 @@ Public Sub CommandParseAiResponse()
         Dim aiResponseFile As String
         aiResponseFile = processFiles(i)
         Dim aiResponseText As String
-        aiResponseText = ReadTextFile(fragmentsPath & "\" & aiResponseFile)
+        aiResponseText = NormalizeLineEndings(ReadTextFile(fragmentsPath & "\" & aiResponseFile))
         
         If aiResponseText = "" Then
             Mod_Util.WriteWarning "P006", "CommandParseAiResponse: файл пуст или не прочитан: " & aiResponseFile
@@ -3035,7 +3044,7 @@ Public Sub CommandParseAiResponse()
         
         Dim patternsCsv As String, stepsCsv As String
         Dim referenceBooks As String, userAction As String, statistics As String
-        'ExtractBlock aiResponseText, "<!-- PATTERNS_CSV_START -->", "<!-- PATTERNS_CSV_END -->", patternsCsv
+        ExtractBlock aiResponseText, "<!-- PATTERNS_CSV_START -->", "<!-- PATTERNS_CSV_END -->", patternsCsv
         
         ' ========================================================================
         ' ПОДЗАДАЧА 3: Сбор ВСЕХ блоков STEPS_CSV (ИИ может сгенерировать несколько)
@@ -3058,7 +3067,6 @@ Public Sub CommandParseAiResponse()
         Next stepBlockIdx
         ' ========================================================================
 
-        ExtractBlock aiResponseText, "<!-- STEPS_CSV_START -->", "<!-- STEPS_CSV_END -->", stepsCsv
         ExtractBlock aiResponseText, "<!-- REFERENCEBOOKS_START -->", "<!-- REFERENCEBOOKS_END -->", referenceBooks
         ExtractBlock aiResponseText, "<!-- USER_ACTION_START -->", "<!-- USER_ACTION_END -->", userAction
         ExtractBlock aiResponseText, "<!-- STATISTICS_START -->", "<!-- STATISTICS_END -->", statistics
@@ -3528,12 +3536,17 @@ FileError:
     Resume NextFile
 
 ErrHandler:
+    Dim errNum As Long, errDesc As String
+    errNum = Err.Number
+    errDesc = Err.Description
+    
     Application.ScreenUpdating = prevScreenUpdating
     On Error Resume Next
     If Not wb Is Nothing Then wb.Close SaveChanges:=False
     On Error GoTo 0
-    Mod_Util.WriteError "P010", "CommandParseAiResponse: " & Err.Description
-    MsgBox "Ошибка P010: " & Err.Description, vbCritical, "Разбор ответа ИИ"
+    
+    Mod_Util.WriteError "P010", "CommandParseAiResponse: Ошибка " & errNum & ": " & errDesc
+    MsgBox "Ошибка P010: " & errDesc, vbCritical, "Разбор ответа ИИ"
     Err.Clear
 End Sub
 
@@ -3919,6 +3932,10 @@ Public Sub CommandGenerateTables()
     Exit Sub
 
 ErrHandler:
+    Dim errNum As Long, errDesc As String
+    errNum = Err.Number
+    errDesc = Err.Description
+    
     ' Очистка памяти при ошибке (гарантированное закрытие)
     On Error Resume Next
     If Not schemaWb Is Nothing Then
@@ -3927,8 +3944,8 @@ ErrHandler:
     End If
     On Error GoTo 0
     
-    Mod_Util.WriteError "P002", "CommandGenerateTables: " & Err.Description
-    MsgBox "Ошибка P002: не удалось сформировать промт." & vbCrLf & Err.Description, _
+    Mod_Util.WriteError "P002", "CommandGenerateTables: Ошибка " & errNum & ": " & errDesc
+    MsgBox "Ошибка P002: не удалось сформировать промт." & vbCrLf & errDesc, _
            vbCritical, "Сформировать таблицы"
     Err.Clear
 End Sub
