@@ -504,45 +504,38 @@ Public Function FindConfigFile(ByVal folderPath As String) As String
     FindConfigFile = ""
 End Function
 
+' ---------------------------------------------------------------------------
 ' Открывает указанную папку в проводнике Windows.
-' FIX-16: замена Application.FollowHyperlink на Shell.Application для
+' FIX-16: замена Application.FollowHyperlink на Shell с explorer.exe для
 ' корректного возврата статуса (True/False) и избежания проблем с сетевыми путями.
 ' Если путь пустой или папки нет - возвращает False.
+' ---------------------------------------------------------------------------
 Public Function OpenFolderInExplorer(ByVal path As String) As Boolean
     OpenFolderInExplorer = False
     If path = "" Then Exit Function
-    If Dir(path, vbDirectory) = "" Then Exit Function
+    
+    ' Проверка существования папки через GetAttr (без Dir() и внешних вызовов)
+    On Error Resume Next
+    Dim attr As Long
+    attr = GetAttr(path)
+    If Err.Number <> 0 Or (attr And vbDirectory) = 0 Then
+        Err.Clear
+        On Error GoTo 0
+        Exit Function
+    End If
+    On Error GoTo 0
     
     On Error GoTo ErrHandler
-    Dim shell As Object
-    Set shell = CreateObject("Shell.Application")
-    shell.Explore path
-    OpenFolderInExplorer = True
-    Exit Function
-    
-ErrHandler:
-    Mod_Util.WriteError "U005", "OpenFolderInExplorer: не удалось открыть папку " & path & _
-              Public Function OpenFolderInExplorer(ByVal path As String) As Boolean
-    OpenFolderInExplorer = False
-    If path = "" Then Exit Function
-    If Dir(path, vbDirectory) = "" Then Exit Function
-    
-    On Error GoTo ErrHandler
-    ' Используем Shell с explorer.exe для гарантированного открытия папки
-    Dim taskId As Long
-    taskId = Shell("explorer.exe """ & path & """", vbNormalFocus)
+    Dim taskId As Double
+    taskId = shell("explorer.exe """ & path & """", vbNormalFocus)
     If taskId > 0 Then
         OpenFolderInExplorer = True
-    Else
-        OpenFolderInExplorer = False
     End If
     Exit Function
-    
+
 ErrHandler:
     Mod_Util.WriteError "U005", "OpenFolderInExplorer: не удалось открыть папку " & path & _
                                ". Ошибка: " & Err.Description
-    Err.Clear
-End Function                 ". Ошибка: " & Err.Description
     Err.Clear
 End Function
 
