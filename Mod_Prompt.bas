@@ -1575,8 +1575,8 @@ Private Function Section16WithoutStub(ByVal sectionText As String) As String
 End Function
 
 ' Сборка блока 16 (ЧАСТЬ C п.5):
-'  1. предыдущая версия промта того же шага (файлы Промт_шаг_NN.md ищутся в
-'     04_Промты и 03_Результаты генерации\04_Промты_готовые);
+'  1. предыдущая версия промта того же шага (файл Промт_шага.txt ищется в
+'     03_Результаты генерации\01_По шагам\Шаг_<NN>\);
 '  2. из её секции 16 извлекаются пользовательские корректировки (с валидацией
 '     скоупа); дополнительно перечитывается свежий файл 04_Промты\corrections.md
 '     (пользователь мог дополнить корректировки после прошлой генерации);
@@ -1584,6 +1584,8 @@ End Function
 '     "Корректировок для шага {{NN}} нет." ({{NN}} затем превратится в NN);
 '  4. если есть - заготовка заменяется списком корректировок (без дублирования).
 ' Вызывается ДО FillAllPlaceholders - плейсхолдер {{NN}} в тексте ещё жив.
+' FIX-21: путь синхронизирован с реальным путём генерации промта шага
+'         (MakeNextStepPrompt_FromSheet: stepFolder & "\Промт_шага" & PROMPT_EXT).
 Private Sub ApplyCorrectionsBlock(ByRef resultText As String, ByVal nn As String, ByVal root As String)
     Dim prevText As String
     Dim prevSection As String
