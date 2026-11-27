@@ -2140,26 +2140,26 @@ ErrHandler:
     ReadNextStep = ""
 End Function
 
-' W-ANALYTIC-05-FIX-2: добавлены параметры excludeAssigned (исключить строки с
-' уже заполненным «№шага/подшага» - итеративная разбивка 00_3 подаёт ИИ только
-' нераспределённые типы) и outRowCount (число выгруженных строк данных - защита
-' от генерации промта с пустой таблицей). Все новые параметры Optional - старые
-' вызовы (MakeNextStepPrompt_FromSheet, 00_2) не затронуты.
-Private Function BuildSchemaCsvFragment(ByVal ws As Worksheet, _
-                                        Optional ByVal filterStep As String = "", _
-                                        Optional ByVal maxTypes As Long = 0, _
-                                        Optional ByVal excludeAssigned As Boolean = False, _
-                                        Optional ByRef outRowCount As Long) As String
+' W-ANALYTIC-05-FIX-2: добавлены параметры фильтрации по категориям (includeFolders, includePatterns, includeDocs).
+' Все параметры Optional для обратной совместимости со старыми вызовами (00_2, MakeNextStepPrompt_FromSheet).
+Public Function BuildSchemaCsvFragment(ByVal ws As Worksheet, _
+                                       Optional ByVal stepFilter As String = "", _
+                                       Optional ByVal maxTypes As Long = 0, _
+                                       Optional ByVal includeAll As Boolean = False, _
+                                       Optional ByRef outRows As Long = 0, _
+                                       Optional ByVal includeFolders As Boolean = True, _
+                                       Optional ByVal includePatterns As Boolean = True, _
+                                       Optional ByVal includeDocs As Boolean = True) As String
     Dim lastRow As Long
     Dim r As Long
     Dim colStep As Long, colVis As Long, colCat As Long, colPat As Long, colIn As Long, colOut As Long, colAnom As Long
     Dim res As String
     Dim rowCount As Long
     Dim include As Boolean
-    Dim stepVal As String
-    Dim visVal As String, catVal As String, patVal As String, inVal As String, outVal As String, anomVal As String
+    Dim stepNum As String, visVal As String, catVal As String, patVal As String, inVal As String, outVal As String, anomVal As String
+    Dim category As String, pattern As String
 
-    outRowCount = 0
+    outRows = 0
 
     ' Поиск канонических колонок плоской таблицы
     colStep = FindColumn(ws, "№шага/подшага")
@@ -2182,27 +2182,54 @@ Private Function BuildSchemaCsvFragment(ByVal ws As Worksheet, _
 
     rowCount = 0
     For r = 2 To lastRow
-        stepVal = Trim$(CStr(ws.Cells(r, colStep).value))
+        stepNum = Trim$(CStr(ws.Cells(r, colStep).value))
 
         include = True
-        If filterStep <> "" Then
+        If stepFilter <> "" Then
             ' Точечный выбор строк конкретного шага (промт шага v1)
-            If stepVal <> filterStep Then include = False
-        ElseIf excludeAssigned Then
-            ' Разбивка на шаги (00_3): исключаем типы, уже распределённые по шагам
-            If stepVal <> "" Then include = False
+            If stepNum <> stepFilter Then include = False
+        Else
+            ' По умолчанию исключаем типы, уже распределённые по шагам (для 00_3)
+            If stepNum <> "" Then include = False
         End If
 
         If include Then
+            category = Trim$(CStr(ws.Cells(r, colCat).value))
+            pattern = Trim$(CStr(ws.Cells(r, colPat).value))
+
+            ' Фильтрация по категориям: определяем тип строки (взаимоисключающие условия)
+            Dim isFolder As Boolean, isPattern As Boolean, isDoc As Boolean
+            
+            ' Приоритет: папка > паттерн > документ
+            If category = "Проект" Or category = "Папка" Or category = "Папка ЦИМ" Then
+                isFolder = True
+                isPattern = False
+                isDoc = False
+            ElseIf pattern <> "" Then
+                isFolder = False
+                isPattern = True
+                isDoc = False
+            Else
+                isFolder = False
+                isPattern = False
+                isDoc = True
+            End If
+            
+            ' Пропускаем строку, если её тип не включён в генерацию
+            If isFolder And Not includeFolders Then GoTo NextRow
+            If isPattern And Not includePatterns Then GoTo NextRow
+            If isDoc And Not includeDocs Then GoTo NextRow
+
+            ' Существующая логика обработки строки
             visVal = Trim$(CStr(ws.Cells(r, colVis).value))
-            catVal = Trim$(CStr(ws.Cells(r, colCat).value))
-            patVal = Trim$(CStr(ws.Cells(r, colPat).value))
+            catVal = category
+            patVal = pattern
             inVal = Trim$(CStr(ws.Cells(r, colIn).value))
             outVal = Trim$(CStr(ws.Cells(r, colOut).value))
             anomVal = Trim$(CStr(ws.Cells(r, colAnom).value))
 
             ' Экранирование внутренних кавычек (двойные кавычки) и оборачивание полей
-            res = res & """" & Replace(stepVal, """", """""") & """;" & _
+            res = res & """" & Replace(stepNum, """", """""") & """;" & _
                   """" & Replace(visVal, """", """""") & """;" & _
                   """" & Replace(catVal, """", """""") & """;" & _
                   """" & Replace(patVal, """", """""") & """;" & _
@@ -2215,9 +2242,10 @@ Private Function BuildSchemaCsvFragment(ByVal ws As Worksheet, _
                 Exit For
             End If
         End If
+NextRow:
     Next r
 
-    outRowCount = rowCount
+    outRows = rowCount
     BuildSchemaCsvFragment = res
 End Function
 
@@ -3207,7 +3235,7 @@ Public Sub CommandParseAiResponse()
                             Dim patExists As Boolean: patExists = False
                             Dim rPatW As Long
                             For rPatW = 1 To tblListW.ListRows.Count
-                                If StrComp(Trim(CStr(tblListW.ListRows(rPatW).Range.Cells(1, 1).Value)), Trim(CStr(vLinePartsW(0))), vbTextCompare) = 0 Then
+                                If StrComp(Trim(CStr(tblListW.ListRows(rPatW).Range.Cells(1, 1).value)), Trim(CStr(vLinePartsW(0))), vbTextCompare) = 0 Then
                                     patExists = True
                                     Exit For
                                 End If
@@ -3215,10 +3243,10 @@ Public Sub CommandParseAiResponse()
                             
                             If Not patExists Then
                                 Set newRowW = tblListW.ListRows.Add
-                                newRowW.Range.Cells(1, 1).Value = CStr(vLinePartsW(0))  ' Паттерн
-                                newRowW.Range.Cells(1, 2).Value = CStr(vLinePartsW(1))  ' Типы
-                                newRowW.Range.Cells(1, 3).Value = CStr(vLinePartsW(2))  ' Количество
-                                If UBound(vLinePartsW) = 3 Then newRowW.Range.Cells(1, 4).Value = CStr(vLinePartsW(3))  ' Итерация
+                                newRowW.Range.Cells(1, 1).value = CStr(vLinePartsW(0))  ' Паттерн
+                                newRowW.Range.Cells(1, 2).value = CStr(vLinePartsW(1))  ' Типы
+                                newRowW.Range.Cells(1, 3).value = CStr(vLinePartsW(2))  ' Количество
+                                If UBound(vLinePartsW) = 3 Then newRowW.Range.Cells(1, 4).value = CStr(vLinePartsW(3))  ' Итерация
                                 patternsAddedW = patternsAddedW + 1
                             End If
                         End If
@@ -3237,9 +3265,9 @@ Public Sub CommandParseAiResponse()
                             Dim rExcW As Long
                             For rExcW = 1 To tblExcW.ListRows.Count
                                 Dim c1 As String, c2 As String, c4 As String
-                                c1 = Trim(CStr(tblExcW.ListRows(rExcW).Range.Cells(1, 1).Value))
-                                c2 = Trim(CStr(tblExcW.ListRows(rExcW).Range.Cells(1, 2).Value))
-                                c4 = Trim(CStr(tblExcW.ListRows(rExcW).Range.Cells(1, 4).Value))
+                                c1 = Trim(CStr(tblExcW.ListRows(rExcW).Range.Cells(1, 1).value))
+                                c2 = Trim(CStr(tblExcW.ListRows(rExcW).Range.Cells(1, 2).value))
+                                c4 = Trim(CStr(tblExcW.ListRows(rExcW).Range.Cells(1, 4).value))
                                 
                                 If StrComp(c1, Trim(CStr(vLinePartsW(0))), vbTextCompare) = 0 And _
                                    StrComp(c2, Trim(CStr(vLinePartsW(1))), vbTextCompare) = 0 And _
@@ -3251,14 +3279,14 @@ Public Sub CommandParseAiResponse()
                             
                             If Not excExists Then
                                 Set newRowW = tblExcW.ListRows.Add
-                                newRowW.Range.Cells(1, 1).Value = CStr(vLinePartsW(0))  ' Область
-                                newRowW.Range.Cells(1, 2).Value = CStr(vLinePartsW(1))  ' Поле
-                                newRowW.Range.Cells(1, 3).Value = CStr(vLinePartsW(2))  ' Тип матчинга
-                                newRowW.Range.Cells(1, 4).Value = CStr(vLinePartsW(3))  ' Значение
-                                newRowW.Range.Cells(1, 5).Value = CStr(vLinePartsW(4))  ' Действие
-                                newRowW.Range.Cells(1, 6).Value = CStr(vLinePartsW(5))  ' Примеры
-                                newRowW.Range.Cells(1, 7).Value = CStr(vLinePartsW(6))  ' Причина
-                                newRowW.Range.Cells(1, 8).Value = CStr(vLinePartsW(7))  ' Статус
+                                newRowW.Range.Cells(1, 1).value = CStr(vLinePartsW(0))  ' Область
+                                newRowW.Range.Cells(1, 2).value = CStr(vLinePartsW(1))  ' Поле
+                                newRowW.Range.Cells(1, 3).value = CStr(vLinePartsW(2))  ' Тип матчинга
+                                newRowW.Range.Cells(1, 4).value = CStr(vLinePartsW(3))  ' Значение
+                                newRowW.Range.Cells(1, 5).value = CStr(vLinePartsW(4))  ' Действие
+                                newRowW.Range.Cells(1, 6).value = CStr(vLinePartsW(5))  ' Примеры
+                                newRowW.Range.Cells(1, 7).value = CStr(vLinePartsW(6))  ' Причина
+                                newRowW.Range.Cells(1, 8).value = CStr(vLinePartsW(7))  ' Статус
                                 excAddedW = excAddedW + 1
                             End If
                         End If
@@ -3975,12 +4003,32 @@ Public Sub CommandGenerateTables()
             Exit Sub
         End If
         
-        ' Генерация CSV фрагмента для 00_3 с лимитом
+        ' Генерация CSV фрагмента для 00_3 с фильтрацией по профилю
         limitTypes = Mod_Util.GetSettingLong("MaxTypesPerTable", 50)
 
-        ' 2. Генерируем CSV. МЕНЯЕМ ТОЛЬКО ТРЕТИЙ ПАРАМЕТР с limitTypes на 0.
-        ' Ноль означает "без ограничений на сбор данных". Функция вернет ВСЕ нераспределённые типы.
-        csvContent = BuildSchemaCsvFragment(wsSchema, "", 0, True, csvRows)
+        Dim includeFolders As Boolean, includePatterns As Boolean, includeDocs As Boolean
+
+        ' Определяем тип генерации по LastStepNumber
+        If lastStep = "нет" Or lastStep = "00" Or lastStep Like "00.*" Then
+            ' Шаг 0: только папки
+            includeFolders = True
+            includePatterns = False
+            includeDocs = False
+        ElseIf lastStep = "0" Or lastStep = "01" Or lastStep Like "01.*" Then
+            ' Шаг 1: только паттерны
+            includeFolders = False
+            includePatterns = True
+            includeDocs = False
+        Else
+            ' Шаги 2+: только документы
+            includeFolders = False
+            includePatterns = False
+            includeDocs = True
+        End If
+
+        ' Генерируем CSV с параметрами фильтрации
+        csvContent = BuildSchemaCsvFragment(wsSchema, "", 0, True, csvRows, _
+                                            includeFolders, includePatterns, includeDocs)
         If csvRows = 0 Then
             ' Все типы уже распределены - промт с пустой таблицей не создаём
             If Not schemaWb Is Nothing Then
@@ -4406,4 +4454,3 @@ Private Sub UpdateSetting(ByVal settingName As String, ByVal newValue As String)
     Next r
     ws.Protect Password:="pilot"
 End Sub
-
