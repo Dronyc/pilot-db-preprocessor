@@ -2184,63 +2184,52 @@ Public Function BuildSchemaCsvFragment(ByVal ws As Worksheet, _
     For r = 2 To lastRow
         stepNum = Trim$(CStr(ws.Cells(r, colStep).value))
 
-        include = True
-        If stepFilter <> "" Then
-            ' Точечный выбор строк конкретного шага (промт шага v1)
-            If stepNum <> stepFilter Then include = False
-        Else
-            ' По умолчанию исключаем типы, уже распределённые по шагам (для 00_3)
-            If stepNum <> "" Then include = False
-        End If
+        ' ========================================================================
+        ' FIX-L2: Оптимизация порядка проверок (исключение распределённых строк)
+        ' ========================================================================
+        
+        ' 1. Сначала исключаем уже распределённые строки (для любого профиля)
+        If stepNum <> "" Then GoTo NextRow
+        
+        ' 2. Точечный выбор строк конкретного шага (промт шага v1)
+        If stepFilter <> "" And stepNum <> stepFilter Then GoTo NextRow
 
-        If include Then
-            category = Trim$(CStr(ws.Cells(r, colCat).value))
-            pattern = Trim$(CStr(ws.Cells(r, colPat).value))
+        ' 3. Читаем атрибуты строки
+        category = Trim$(CStr(ws.Cells(r, colCat).value))
+        pattern = Trim$(CStr(ws.Cells(r, colPat).value))
 
-            ' Фильтрация по категориям: определяем тип строки (взаимоисключающие условия)
-            Dim isFolder As Boolean, isPattern As Boolean, isDoc As Boolean
-            
-            ' Приоритет: папка > паттерн > документ
-            If category = "Проект" Or category = "Папка" Or category = "Папка ЦИМ" Then
-                isFolder = True
-                isPattern = False
-                isDoc = False
-            ElseIf pattern <> "" Then
-                isFolder = False
-                isPattern = True
-                isDoc = False
-            Else
-                isFolder = False
-                isPattern = False
-                isDoc = True
-            End If
-            
-            ' Пропускаем строку, если её тип не включён в генерацию
-            If isFolder And Not includeFolders Then GoTo NextRow
-            If isPattern And Not includePatterns Then GoTo NextRow
-            If isDoc And Not includeDocs Then GoTo NextRow
+        ' 4. Определяем тип строки (независимые атрибуты)
+        Dim isFolder As Boolean, hasPattern As Boolean, isDoc As Boolean
 
-            ' Существующая логика обработки строки
-            visVal = Trim$(CStr(ws.Cells(r, colVis).value))
-            catVal = category
-            patVal = pattern
-            inVal = Trim$(CStr(ws.Cells(r, colIn).value))
-            outVal = Trim$(CStr(ws.Cells(r, colOut).value))
-            anomVal = Trim$(CStr(ws.Cells(r, colAnom).value))
+        isFolder = (category = "Проект" Or category = "Папка" Or category = "Папка ЦИМ")
+        hasPattern = (pattern <> "")
+        isDoc = (category = "ECM-документ" Or category = "Документ")
 
-            ' Экранирование внутренних кавычек (двойные кавычки) и оборачивание полей
-            res = res & """" & Replace(stepNum, """", """""") & """;" & _
-                  """" & Replace(visVal, """", """""") & """;" & _
-                  """" & Replace(catVal, """", """""") & """;" & _
-                  """" & Replace(patVal, """", """""") & """;" & _
-                  """" & Replace(inVal, """", """""") & """;" & _
-                  """" & Replace(outVal, """", """""") & """;" & _
-                  """" & Replace(anomVal, """", """""") & """" & vbCrLf
+        ' 5. Фильтруем по профилю (применяется только к нераспределённым строкам)
+        If includeFolders And Not isFolder Then GoTo NextRow
+        If includePatterns And Not hasPattern Then GoTo NextRow
+        If includeDocs And Not isDoc Then GoTo NextRow
 
-            rowCount = rowCount + 1
-            If maxTypes > 0 And rowCount >= maxTypes Then
-                Exit For
-            End If
+        ' 6. Существующая логика обработки строки
+        visVal = Trim$(CStr(ws.Cells(r, colVis).value))
+        catVal = category
+        patVal = pattern
+        inVal = Trim$(CStr(ws.Cells(r, colIn).value))
+        outVal = Trim$(CStr(ws.Cells(r, colOut).value))
+        anomVal = Trim$(CStr(ws.Cells(r, colAnom).value))
+
+        ' Экранирование внутренних кавычек (двойные кавычки) и оборачивание полей
+        res = res & """" & Replace(stepNum, """", """""") & """;" & _
+              """" & Replace(visVal, """", """""") & """;" & _
+              """" & Replace(catVal, """", """""") & """;" & _
+              """" & Replace(patVal, """", """""") & """;" & _
+              """" & Replace(inVal, """", """""") & """;" & _
+              """" & Replace(outVal, """", """""") & """;" & _
+              """" & Replace(anomVal, """", """""") & """" & vbCrLf
+
+        rowCount = rowCount + 1
+        If maxTypes > 0 And rowCount >= maxTypes Then
+            Exit For
         End If
 NextRow:
     Next r
@@ -4008,14 +3997,18 @@ Public Sub CommandGenerateTables()
 
         Dim includeFolders As Boolean, includePatterns As Boolean, includeDocs As Boolean
 
+        ' ========================================================================
+        ' FIX-L2: Корректировка интерпретации LastStepNumber ("00" -> Шаг 1)
+        ' ========================================================================
+        
         ' Определяем тип генерации по LastStepNumber
-        If lastStep = "нет" Or lastStep = "00" Or lastStep Like "00.*" Then
+        If lastStep = "нет" Or lastStep Like "00.*" Then
             ' Шаг 0: только папки
             includeFolders = True
             includePatterns = False
             includeDocs = False
-        ElseIf lastStep = "0" Or lastStep = "01" Or lastStep Like "01.*" Then
-            ' Шаг 1: только паттерны
+        ElseIf lastStep = "0" Or lastStep = "00" Or lastStep Like "01.*" Then
+            ' Шаг 1: только паттерны (включая папки-паттерны, если они не распределены)
             includeFolders = False
             includePatterns = True
             includeDocs = False
@@ -4025,6 +4018,8 @@ Public Sub CommandGenerateTables()
             includePatterns = False
             includeDocs = True
         End If
+        
+        ' ========================================================================
 
         ' Генерируем CSV с параметрами фильтрации
         csvContent = BuildSchemaCsvFragment(wsSchema, "", 0, True, csvRows, _
